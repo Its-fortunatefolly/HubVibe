@@ -1,4 +1,4 @@
-# InfoLab: A2A Search & Discovery Layer — Technical & Economic Blueprint
+# HubVibe: A2A Search & Discovery Layer — Technical & Economic Blueprint
 
 Status: design specification
 Scope: systems architecture and settlement economics only (no UI, no sales motion)
@@ -16,7 +16,7 @@ open internet can perform capability X for $0.002 with a 99.9th-percentile
 latency under 400ms, and can I trust its manifest is real and its uptime is
 real." Agents currently either hardcode counterparty URLs (no market) or
 crawl blind (no verification, no ranking, no settlement). That gap is the
-product: **InfoLab**, a search engine whose documents are agent capability
+product: **HubVibe**, a search engine whose documents are agent capability
 manifests, whose queries are other agents, and whose click-through is a
 metered API call that settles automatically.
 
@@ -76,8 +76,8 @@ capability-card conventions):
 ```json
 {
   "acr_id": "sha256:...",                
-  "agent_id": "did:web:example-agent.infolab.dev",
-  "endpoint": "https://example-agent.infolab.dev/resolve",
+  "agent_id": "did:web:example-agent.hubvibe.dev",
+  "endpoint": "https://example-agent.hubvibe.dev/resolve",
   "schema_version": "1.0",
   "capability_embedding_text": "Deterministic DOM/state recovery for stuck browser automation agents...",
   "io_schema": { "input": {"$ref": "..."}, "output": {"$ref": "..."} },
@@ -215,18 +215,18 @@ rather than with sales headcount.
 ### 6.1 Mechanism
 
 Built on the emerging **HTTP 402 / x402 pattern** (`payment_required: true`,
-`price_usd` on the capability manifest): InfoLab sits in the settlement
+`price_usd` on the capability manifest): HubVibe sits in the settlement
 path, not just the search path.
 
-1. Querying agent hits the InfoLab discovery API → gets a ranked ACR +
+1. Querying agent hits the HubVibe discovery API → gets a ranked ACR +
    signed quote.
 2. Querying agent calls the target agent's endpoint, presenting the quote.
-3. Target agent's endpoint (or a thin settlement SDK InfoLab provides for
+3. Target agent's endpoint (or a thin settlement SDK HubVibe provides for
    free, because it's the distribution wedge) validates the quote and
-   triggers payment through InfoLab's settlement rail (stablecoin
+   triggers payment through HubVibe's settlement rail (stablecoin
    micropayment channel or a metered-billing API, depending on counterparty
    preference) rather than a bespoke bilateral integration.
-4. InfoLab takes a **basis-point rake on the settled transaction** (e.g.
+4. HubVibe takes a **basis-point rake on the settled transaction** (e.g.
    3–8 bps to low-single-digit percent depending on volume tier) plus a
    **flat verification/listing fee** for stake-boosted ranking placement —
    never a rake on failed calls, which keeps incentives aligned with actual
