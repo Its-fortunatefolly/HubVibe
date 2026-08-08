@@ -5,10 +5,22 @@ from collections import defaultdict, deque
 from typing import Optional
 
 from axe_playwright_python.sync_playwright import Axe
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field
+
+try:
+    from . import billing
+except ImportError:
+    # Loaded directly by file path (e.g. by tooling/tests) rather than as
+    # part of the `app` package -- fall back to a path-relative import so
+    # the module still resolves without requiring package context.
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import billing  # type: ignore
 
 app = FastAPI(title="WCAG Audit Engine")
 
@@ -22,7 +34,9 @@ AXE_OPTIONS = {
     "runOnly": {"type": "tag", "values": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]},
 }
 
-API_KEY = os.environ.get("AUDIT_API_KEY")  # provisioned via Secret Manager at deploy time
+# An internal/testing key that bypasses Stripe billing entirely. Leave unset
+# in production once real customers are onboarded through /billing/checkout.
+API_KEY = os.environ.get("AUDIT_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # optional; enables remediation notes only
 
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "30"))
@@ -38,13 +52,30 @@ class AuditRequest(BaseModel):
     url: Optional[str] = Field(None, description="Live URL to audit instead of raw HTML")
 
 
-def _check_auth(x_api_key: Optional[str]) -> None:
-    if not API_KEY:
-        # Fail closed: never serve a paid, unauthenticated endpoint because
-        # the deployment forgot to set a key.
-        raise HTTPException(status_code=500, detail="Service misconfigured: no API key set")
-    if not x_api_key or not secrets.compare_digest(x_api_key, API_KEY):
+class CheckoutRequest(BaseModel):
+    email: str
+
+
+class AuthContext:
+    __slots__ = ("billable", "customer_id")
+
+    def __init__(self, billable: bool, customer_id: Optional[str] = None):
+        self.billable = billable
+        self.customer_id = customer_id
+
+
+def _authenticate(x_api_key: Optional[str]) -> AuthContext:
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="Missing X-API-Key")
+    if API_KEY and secrets.compare_digest(x_api_key, API_KEY):
+        # Internal/testing key: unlimited, unmetered, never billed.
+        return AuthContext(billable=False)
+    if not billing.is_configured():
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
+    record = billing.lookup_key(x_api_key)
+    if record is None:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
+    return AuthContext(billable=True, customer_id=record["customer_id"])
 
 
 def _check_rate_limit(key: str) -> None:
@@ -122,15 +153,57 @@ def agent_manifest():
                 "method": "POST",
                 "payment_required": True,
                 "price_usd": 0.01,
-                "auth": "X-API-Key header required",
+                "auth": "X-API-Key header required (see /billing/checkout)",
             }
         ],
     }
 
 
+@app.post("/billing/checkout")
+def start_checkout(payload: CheckoutRequest):
+    if not billing.is_configured():
+        raise HTTPException(status_code=501, detail="Billing is not configured on this deployment")
+    success_url = os.environ.get("CHECKOUT_SUCCESS_URL")
+    cancel_url = os.environ.get("CHECKOUT_CANCEL_URL")
+    if not success_url or not cancel_url:
+        raise HTTPException(
+            status_code=501,
+            detail="CHECKOUT_SUCCESS_URL / CHECKOUT_CANCEL_URL are not configured",
+        )
+    checkout_url = billing.create_checkout_session(payload.email, success_url, cancel_url)
+    return {"checkout_url": checkout_url}
+
+
+@app.get("/billing/api-key")
+def get_api_key(session_id: str):
+    if not billing.is_configured():
+        raise HTTPException(status_code=501, detail="Billing is not configured on this deployment")
+    api_key = billing.api_key_for_session(session_id)
+    if api_key is None:
+        # The webhook that mints the key may not have landed yet -- this is
+        # a normal, expected state right after checkout, not an error.
+        return JSONResponse(status_code=202, content={"status": "pending"})
+    return {"api_key": api_key}
+
+
+@app.post("/billing/webhook")
+async def stripe_webhook(request: Request):
+    if not billing.is_configured():
+        raise HTTPException(status_code=501, detail="Billing is not configured on this deployment")
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    try:
+        event = billing.verify_webhook(payload, sig_header)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid webhook signature: {exc}")
+    if event["type"] == "checkout.session.completed":
+        billing.activate_customer(event["data"]["object"])
+    return {"received": True}
+
+
 @app.post("/audit")
 def audit(payload: AuditRequest, x_api_key: Optional[str] = Header(None)):
-    _check_auth(x_api_key)
+    auth = _authenticate(x_api_key)
     _check_rate_limit(x_api_key)
 
     if not payload.html and not payload.url:
@@ -140,8 +213,8 @@ def audit(payload: AuditRequest, x_api_key: Optional[str] = Header(None)):
         raw = _run_axe(payload.html, payload.url)
     except Exception as exc:
         # Honest failure: an audit that didn't run is never reported as a
-        # compliance pass. Callers can distinguish "compliant" from
-        # "we don't know" and retry or alert accordingly.
+        # compliance pass, and it is never billed -- callers only pay for
+        # an audit that actually happened.
         return JSONResponse(
             status_code=502,
             content={
@@ -168,6 +241,16 @@ def audit(payload: AuditRequest, x_api_key: Optional[str] = Header(None)):
             for v in violations
         ],
     }
+
+    if auth.billable:
+        try:
+            billing.record_usage(auth.customer_id)
+        except Exception as exc:
+            # Revenue-affecting, but the customer already got a real,
+            # correct audit result -- never withhold or corrupt that
+            # because our own billing call failed.
+            result["billing_warning"] = f"usage recording failed: {exc}"
+
     remediation = _remediation_notes(violations)
     if remediation is not None:
         result["remediation"] = remediation

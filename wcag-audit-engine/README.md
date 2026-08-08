@@ -50,7 +50,43 @@ Body: `{"html": "<...>"}` or `{"url": "https://..."}`
 ```
 
 On audit failure (browser crash, invalid input, timeout): HTTP 502,
-`{"status": "error", "pass": null, "detail": "..."}`.
+`{"status": "error", "pass": null, "detail": "..."}`. Failed audits are
+never billed.
+
+## Getting paid
+
+Billing is Stripe usage-based (metered) billing: a customer subscribes once
+via Checkout, and every real `/audit` call reports one Meter Event. Stripe
+owns the balance and the invoicing — this service only stores a thin
+`api_key -> Stripe customer_id` mapping in Firestore, so there's no custom
+balance-tracking code that can drift from what Stripe actually charges.
+
+Customer-facing flow:
+
+1. `POST /billing/checkout {"email": "..."}` -> `{"checkout_url": "..."}`;
+   redirect the customer there.
+2. Stripe redirects back to your `CHECKOUT_SUCCESS_URL` with `?session_id=...`.
+   Your success page polls `GET /billing/api-key?session_id=...` (202 +
+   `{"status": "pending"}` until the webhook lands, then `{"api_key": "..."}`)
+   and shows the customer their key.
+3. The customer uses that key as `X-API-Key` on `/audit`. Every successful
+   audit reports usage to Stripe; Stripe bills them on its normal cycle.
+
+One-time setup in the Stripe Dashboard (not something this code can do for
+you — it needs your Stripe account):
+
+1. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`,
+   aggregation = count).
+2. **Product catalog**: create a recurring Price with `usage_type: metered`
+   attached to that meter (e.g. $0.01 per unit). Note the Price ID.
+3. **Developers > Webhooks**: add an endpoint at
+   `https://<your-service>/billing/webhook` subscribed to
+   `checkout.session.completed`. Note the signing secret.
+
+Then provision the secrets and deploy (see below). `AUDIT_API_KEY` remains
+available as an internal/testing key that bypasses Stripe entirely — leave
+it unset once real customers exist, or keep it only for your own smoke
+tests.
 
 ## Local development
 
@@ -68,8 +104,19 @@ install it once with `python -m playwright install --with-deps chromium`.
 Create the secrets once:
 
 ```bash
-echo -n "your-gemini-key"  | gcloud secrets create gemini-api-key  --data-file=-
-echo -n "your-audit-key"   | gcloud secrets create audit-api-key   --data-file=-
+echo -n "your-gemini-key"       | gcloud secrets create gemini-api-key        --data-file=-
+echo -n "your-audit-key"        | gcloud secrets create audit-api-key         --data-file=-
+echo -n "sk_live_..."           | gcloud secrets create stripe-secret-key     --data-file=-
+echo -n "whsec_..."             | gcloud secrets create stripe-webhook-secret --data-file=-
+```
+
+Grant the Cloud Run service account Firestore access (Meter Events and
+Checkout only need the Stripe secret key, not a separate GCP grant):
+
+```bash
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/datastore.user"
 ```
 
 Build and deploy:
@@ -79,8 +126,12 @@ gcloud run deploy wcag-audit-engine \
   --source=wcag-audit-engine \
   --region=us-central1 \
   --memory=1Gi \
-  --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest
+  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,CHECKOUT_SUCCESS_URL=https://yoursite.com/success,CHECKOUT_CANCEL_URL=https://yoursite.com/cancel \
+  --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
+
+(Price/event IDs and callback URLs aren't secrets, so `--set-env-vars` is
+fine for those; the actual credentials go through `--set-secrets`.)
 
 `--allow-unauthenticated` at the Cloud Run/IAM layer is fine here (or
 omit it and front the service with your own gateway) — request-level access
