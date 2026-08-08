@@ -109,6 +109,27 @@ def lookup_key(api_key: str) -> Optional[dict]:
     return doc.to_dict()
 
 
+def save_lead(url: str, email: Optional[str], violation_count: int) -> None:
+    """Record a free-scan lead for manual follow-up.
+
+    Best-effort: callers should catch failures rather than let a storage
+    hiccup break the free scan response for the visitor. This only stores
+    what the visitor themself submitted through the scan form -- it's not
+    used to look up or contact anyone who didn't submit their own site/email.
+    """
+    import time
+
+    db = _firestore()
+    db.collection("leads").add(
+        {
+            "url": url,
+            "email": email,
+            "violation_count": violation_count,
+            "created_at": time.time(),
+        }
+    )
+
+
 def record_usage(customer_id: str) -> None:
     """Bill exactly one audit call.
 

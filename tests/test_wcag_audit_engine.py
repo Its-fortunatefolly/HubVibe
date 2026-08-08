@@ -29,8 +29,19 @@ def test_health_check(monkeypatch):
 
     module = _load_main(monkeypatch)
     client = TestClient(module.app)
+    response = client.get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "wcag-audit-engine"}
+
+
+def test_landing_page_served_at_root(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
     response = client.get("/")
     assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
 
 
 def test_agent_manifest_advertises_payment(monkeypatch):
@@ -93,3 +104,12 @@ def test_rate_limit_rejects_after_threshold(monkeypatch):
     module._check_rate_limit("some-key")
     with pytest.raises(Exception):
         module._check_rate_limit("some-key")
+
+
+def test_free_scan_limit_rejects_after_threshold(monkeypatch):
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module, "FREE_SCAN_LIMIT_PER_DAY", 2)
+    module._check_free_scan_limit("1.2.3.4")
+    module._check_free_scan_limit("1.2.3.4")
+    with pytest.raises(Exception):
+        module._check_free_scan_limit("1.2.3.4")

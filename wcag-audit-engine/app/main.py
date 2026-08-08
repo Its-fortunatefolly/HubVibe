@@ -2,11 +2,12 @@ import os
 import secrets
 import time
 from collections import defaultdict, deque
+from pathlib import Path
 from typing import Optional
 
 from axe_playwright_python.sync_playwright import Axe
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field
 
@@ -17,12 +18,13 @@ except ImportError:
     # part of the `app` package -- fall back to a path-relative import so
     # the module still resolves without requiring package context.
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import billing  # type: ignore
 
 app = FastAPI(title="WCAG Audit Engine")
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 _axe = Axe()
 
@@ -46,6 +48,13 @@ RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "30"))
 # Gateway / Cloud Armor layer in front of the service.
 _request_log: dict[str, deque] = defaultdict(deque)
 
+FREE_SCAN_LIMIT_PER_DAY = int(os.environ.get("FREE_SCAN_LIMIT_PER_DAY", "3"))
+# Free scans run the same real axe-core audit as the paid endpoint and cost
+# real compute, so this is capped harder and keyed by IP rather than an API
+# key -- it's a lead magnet, not a way to get unlimited paid-tier usage for
+# free.
+_free_scan_log: dict[str, deque] = defaultdict(deque)
+
 
 class AuditRequest(BaseModel):
     html: Optional[str] = Field(None, description="Raw HTML source to audit")
@@ -54,6 +63,11 @@ class AuditRequest(BaseModel):
 
 class CheckoutRequest(BaseModel):
     email: str
+
+
+class FreeScanRequest(BaseModel):
+    url: str
+    email: Optional[str] = None
 
 
 class AuthContext:
@@ -85,6 +99,19 @@ def _check_rate_limit(key: str) -> None:
         window.popleft()
     if len(window) >= RATE_LIMIT_PER_MINUTE:
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    window.append(now)
+
+
+def _check_free_scan_limit(client_id: str) -> None:
+    now = time.time()
+    window = _free_scan_log[client_id]
+    while window and now - window[0] > 86400:
+        window.popleft()
+    if len(window) >= FREE_SCAN_LIMIT_PER_DAY:
+        raise HTTPException(
+            status_code=429,
+            detail="Free scan limit reached for today. Sign up for monitoring to scan more.",
+        )
     window.append(now)
 
 
@@ -131,9 +158,66 @@ def _remediation_notes(violations: list) -> Optional[dict]:
         return {"ai_generated": True, "notes": None, "error": str(exc)}
 
 
-@app.get("/")
+@app.get("/", response_class=FileResponse)
+def landing_page():
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/billing/success", response_class=FileResponse)
+def checkout_success_page():
+    return FileResponse(STATIC_DIR / "success.html")
+
+
+@app.get("/billing/cancel", response_class=FileResponse)
+def checkout_cancel_page():
+    return FileResponse(STATIC_DIR / "cancel.html")
+
+
+@app.get("/healthz")
 def health_check():
     return {"status": "ok", "service": "wcag-audit-engine"}
+
+
+@app.post("/scan/free")
+def free_scan(payload: FreeScanRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    _check_free_scan_limit(client_ip)
+
+    try:
+        raw = _run_axe(None, payload.url)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "detail": f"Scan could not complete: {exc}"},
+        )
+
+    violations = raw.get("violations", [])
+    impact_rank = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3}
+    top_issues = sorted(violations, key=lambda v: impact_rank.get(v.get("impact"), 4))[:3]
+
+    try:
+        billing.save_lead(payload.url, payload.email, len(violations))
+    except Exception:
+        # Lead capture is a bonus, not something that should break the free
+        # scan a visitor is waiting on -- e.g. Firestore isn't configured
+        # on this deployment yet.
+        pass
+
+    return {
+        "status": "ok",
+        "pass": len(violations) == 0,
+        "total_violations": len(violations),
+        "top_issues": [
+            {"id": v["id"], "impact": v.get("impact"), "help": v.get("help")} for v in top_issues
+        ],
+        "note": (
+            "One-time snapshot limited to your top issues, not the full "
+            "report. Automated scanning catches a meaningful share of WCAG "
+            "issues, not all of them -- this is not a compliance "
+            "certification. Sign up for full details and continuous "
+            "monitoring."
+        ),
+    }
 
 
 @app.get("/.well-known/agent.json")
@@ -154,22 +238,28 @@ def agent_manifest():
                 "payment_required": True,
                 "price_usd": 0.01,
                 "auth": "X-API-Key header required (see /billing/checkout)",
-            }
+            },
+            {
+                "path": "/scan/free",
+                "method": "POST",
+                "payment_required": False,
+                "rate_limit": "3/day per IP",
+                "note": "Top-3 issues only; use /audit for the full report",
+            },
         ],
     }
 
 
 @app.post("/billing/checkout")
-def start_checkout(payload: CheckoutRequest):
+def start_checkout(payload: CheckoutRequest, request: Request):
     if not billing.is_configured():
         raise HTTPException(status_code=501, detail="Billing is not configured on this deployment")
-    success_url = os.environ.get("CHECKOUT_SUCCESS_URL")
-    cancel_url = os.environ.get("CHECKOUT_CANCEL_URL")
-    if not success_url or not cancel_url:
-        raise HTTPException(
-            status_code=501,
-            detail="CHECKOUT_SUCCESS_URL / CHECKOUT_CANCEL_URL are not configured",
-        )
+    # Default to this same deployment's own success/cancel pages so the
+    # funnel works out of the box; override via env vars only if the
+    # public-facing URL differs (e.g. a custom domain in front of Cloud Run).
+    base = str(request.base_url).rstrip("/")
+    success_url = os.environ.get("CHECKOUT_SUCCESS_URL", f"{base}/billing/success")
+    cancel_url = os.environ.get("CHECKOUT_CANCEL_URL", f"{base}/billing/cancel")
     checkout_url = billing.create_checkout_session(payload.email, success_url, cancel_url)
     return {"checkout_url": checkout_url}
 

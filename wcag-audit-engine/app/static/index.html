@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WCAG Audit Engine — accessibility monitoring for small business sites</title>
+<meta name="description" content="Free automated WCAG 2.1 AA scan, plus continuous monitoring so you have a documented remediation record before an ADA demand letter shows up.">
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121822;
+    --panel-border: #232c3a;
+    --text: #e8edf4;
+    --muted: #9fb0c3;
+    --accent: #4f8cff;
+    --accent-strong: #6ea2ff;
+    --ok: #3ecf8e;
+    --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+  header.hero { padding: 72px 0 48px; text-align: center; }
+  header.hero h1 { font-size: 2.1rem; margin: 0 0 14px; letter-spacing: -0.01em; }
+  header.hero p.sub { color: var(--muted); font-size: 1.05rem; max-width: 620px; margin: 0 auto; }
+  .badge {
+    display: inline-block; font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--accent-strong); background: rgba(79,140,255,0.12); border: 1px solid rgba(79,140,255,0.35);
+    padding: 4px 10px; border-radius: 999px; margin-bottom: 18px;
+  }
+  section { padding: 40px 0; border-top: 1px solid var(--panel-border); }
+  h2 { font-size: 1.3rem; margin: 0 0 18px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 24px;
+  }
+  form.scan-form { display: flex; gap: 10px; flex-wrap: wrap; }
+  input[type=url], input[type=email] {
+    flex: 1 1 260px; background: #0e1420; border: 1px solid var(--panel-border); color: var(--text);
+    padding: 12px 14px; border-radius: 8px; font-size: 0.95rem;
+  }
+  button {
+    background: var(--accent); color: white; border: none; padding: 12px 20px; border-radius: 8px;
+    font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  }
+  button:hover { background: var(--accent-strong); }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  #scan-result { margin-top: 18px; }
+  .result-line { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--panel-border); }
+  .result-line:last-child { border-bottom: none; }
+  .pass { color: var(--ok); font-weight: 600; }
+  .fail { color: var(--bad); font-weight: 600; }
+  .issue { padding: 10px 0; border-bottom: 1px solid var(--panel-border); font-size: 0.9rem; }
+  .issue:last-child { border-bottom: none; }
+  .impact { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+  .muted-note { color: var(--muted); font-size: 0.85rem; margin-top: 14px; }
+  .pricing-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .price { font-size: 2rem; font-weight: 700; }
+  .price span { font-size: 0.95rem; color: var(--muted); font-weight: 400; }
+  ul.features { list-style: none; padding: 0; margin: 14px 0 20px; color: var(--muted); }
+  ul.features li { padding: 4px 0; }
+  ul.features li::before { content: "✓ "; color: var(--ok); }
+  .disclosure { color: var(--muted); font-size: 0.85rem; }
+  footer { padding: 40px 0 60px; color: var(--muted); font-size: 0.85rem; text-align: center; }
+  a { color: var(--accent-strong); }
+  code { background: #0e1420; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <span class="badge">axe-core powered · not a legal certification</span>
+    <h1>Know what's actually wrong with your site's accessibility — before someone else finds it first.</h1>
+    <p class="sub">
+      A free instant scan, then continuous monitoring so you have a real,
+      dated remediation record. Built on axe-core, the same rule engine
+      real accessibility tools use — not an AI guessing at compliance.
+    </p>
+  </header>
+
+  <section>
+    <h2>Free instant scan</h2>
+    <div class="panel">
+      <form class="scan-form" id="scan-form">
+        <input type="url" id="scan-url" placeholder="https://yoursite.com" required>
+        <input type="email" id="scan-email" placeholder="you@company.com (optional)">
+        <button type="submit" id="scan-button">Scan now</button>
+      </form>
+      <div id="scan-result"></div>
+      <p class="disclosure">
+        Limited to 3 free scans/day per visitor, and shows your top issues
+        only — not the full report. This is a one-time snapshot, not
+        certification of compliance: automated tools like this one catch a
+        meaningful share of WCAG issues, not all of them.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Continuous monitoring</h2>
+    <div class="panel pricing-grid">
+      <div class="price">Pay per scan <span>— billed monthly via Stripe, no flat fee</span></div>
+      <ul class="features">
+        <li>Full violation list with every axe-core finding, not just the top 3</li>
+        <li>AI-drafted, plain-language remediation notes per issue</li>
+        <li>Dated scan history — the paper trail that matters if you're ever challenged</li>
+        <li>Programmatic access via API (<code>X-API-Key</code>) for CI pipelines</li>
+      </ul>
+      <form id="checkout-form">
+        <input type="email" id="checkout-email" placeholder="you@company.com" required style="width:100%; margin-bottom: 12px;">
+        <button type="submit" id="checkout-button">Start monitoring</button>
+      </form>
+      <p class="disclosure" id="checkout-message"></p>
+    </div>
+  </section>
+
+  <footer>
+    Automated accessibility scanning is a risk-reduction tool, not a
+    guarantee of legal compliance. See the
+    <a href="/.well-known/agent.json">agent manifest</a> for programmatic
+    access, or the <a href="https://github.com/its-fortunatefolly/hubvibe" target="_blank" rel="noopener">source</a>.
+  </footer>
+</div>
+
+<script>
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+document.getElementById("scan-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const button = document.getElementById("scan-button");
+  const resultEl = document.getElementById("scan-result");
+  const url = document.getElementById("scan-url").value;
+  const email = document.getElementById("scan-email").value;
+
+  button.disabled = true;
+  button.textContent = "Scanning…";
+  resultEl.innerHTML = "";
+
+  const { ok, status, data } = await postJSON("/scan/free", { url, email: email || null });
+
+  button.disabled = false;
+  button.textContent = "Scan now";
+
+  if (!ok) {
+    resultEl.innerHTML = `<p class="fail">${data.detail || "Scan failed. Try again in a moment."}</p>`;
+    return;
+  }
+  if (data.status === "error") {
+    resultEl.innerHTML = `<p class="fail">Couldn't complete the scan: ${data.detail}</p>`;
+    return;
+  }
+
+  const verdictClass = data.pass ? "pass" : "fail";
+  const verdictText = data.pass ? "No violations found in this snapshot" : `${data.total_violations} violation(s) found`;
+  let html = `<div class="result-line"><span>Result</span><span class="${verdictClass}">${verdictText}</span></div>`;
+  (data.top_issues || []).forEach((issue) => {
+    html += `<div class="issue"><div class="impact">${issue.impact || "unknown"} impact</div><div>${issue.help}</div></div>`;
+  });
+  if (!data.pass) {
+    html += `<p class="muted-note">${data.note || ""}</p>`;
+  }
+  resultEl.innerHTML = html;
+});
+
+document.getElementById("checkout-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const button = document.getElementById("checkout-button");
+  const messageEl = document.getElementById("checkout-message");
+  const email = document.getElementById("checkout-email").value;
+
+  button.disabled = true;
+  button.textContent = "Redirecting…";
+
+  const { ok, data } = await postJSON("/billing/checkout", { email });
+
+  if (!ok || !data.checkout_url) {
+    button.disabled = false;
+    button.textContent = "Start monitoring";
+    messageEl.textContent = data.detail || "Checkout isn't available right now.";
+    return;
+  }
+  window.location.href = data.checkout_url;
+});
+</script>
+</body>
+</html>

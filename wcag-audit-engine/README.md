@@ -53,6 +53,22 @@ On audit failure (browser crash, invalid input, timeout): HTTP 502,
 `{"status": "error", "pass": null, "detail": "..."}`. Failed audits are
 never billed.
 
+## Growth surface
+
+`/` serves a landing page (`app/static/index.html`), not the health check
+(that moved to `/healthz`). The page offers:
+
+- **A free instant scan** (`POST /scan/free`, 3/day per IP): runs the real
+  axe-core audit but only returns the top 3 issues, clearly labeled as a
+  one-time snapshot, not a compliance certification. It's a lead magnet,
+  not a way to get the paid endpoint's full output for free.
+- **A "start monitoring" button** that kicks off Stripe Checkout via
+  `/billing/checkout`.
+
+Every free scan (with or without an email left) is logged to a `leads`
+Firestore collection for manual follow-up — it only stores what the visitor
+submitted about their own site through the form, nothing scraped or bought.
+
 ## Getting paid
 
 Billing is Stripe usage-based (metered) billing: a customer subscribes once
@@ -61,14 +77,15 @@ owns the balance and the invoicing — this service only stores a thin
 `api_key -> Stripe customer_id` mapping in Firestore, so there's no custom
 balance-tracking code that can drift from what Stripe actually charges.
 
-Customer-facing flow:
+Customer-facing flow (all handled by this service, no external pages
+required to make it work):
 
 1. `POST /billing/checkout {"email": "..."}` -> `{"checkout_url": "..."}`;
-   redirect the customer there.
-2. Stripe redirects back to your `CHECKOUT_SUCCESS_URL` with `?session_id=...`.
-   Your success page polls `GET /billing/api-key?session_id=...` (202 +
-   `{"status": "pending"}` until the webhook lands, then `{"api_key": "..."}`)
-   and shows the customer their key.
+   the landing page redirects the customer there.
+2. Stripe redirects back to `/billing/success?session_id=...` (or your own
+   `CHECKOUT_SUCCESS_URL`, if you set one to override the default). That
+   page polls `GET /billing/api-key` until the webhook lands and displays
+   the customer's key with a ready-to-run `curl` example.
 3. The customer uses that key as `X-API-Key` on `/audit`. Every successful
    audit reports usage to Stripe; Stripe bills them on its normal cycle.
 
@@ -126,12 +143,15 @@ gcloud run deploy wcag-audit-engine \
   --source=wcag-audit-engine \
   --region=us-central1 \
   --memory=1Gi \
-  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,CHECKOUT_SUCCESS_URL=https://yoursite.com/success,CHECKOUT_CANCEL_URL=https://yoursite.com/cancel \
+  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
 
-(Price/event IDs and callback URLs aren't secrets, so `--set-env-vars` is
-fine for those; the actual credentials go through `--set-secrets`.)
+(Price/event IDs aren't secrets, so `--set-env-vars` is fine for those; the
+actual credentials go through `--set-secrets`. `CHECKOUT_SUCCESS_URL` /
+`CHECKOUT_CANCEL_URL` default to this same service's own `/billing/success`
+and `/billing/cancel` pages — only set them if you're fronting this with a
+different public domain.)
 
 `--allow-unauthenticated` at the Cloud Run/IAM layer is fine here (or
 omit it and front the service with your own gateway) — request-level access
