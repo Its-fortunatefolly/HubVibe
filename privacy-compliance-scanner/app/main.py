@@ -23,6 +23,7 @@ app = FastAPI(title="Privacy/Cookie Compliance Scanner")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 API_KEY = os.environ.get("SCANNER_API_KEY")  # internal/testing key, bypasses billing
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # optional; enables remediation notes only
 
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "30"))
 _request_log: dict[str, deque] = defaultdict(deque)
@@ -83,6 +84,34 @@ def _check_free_scan_limit(client_id: str) -> None:
     window.append(now)
 
 
+def _remediation_notes(findings: list) -> Optional[dict]:
+    """Best-effort, clearly-labeled AI remediation suggestions.
+
+    Same rule as wcag-audit-engine: this never decides pass/fail -- the
+    rule-based findings in scanner.py are the sole source of truth. This
+    only turns those findings into plain-language "here's what to do"
+    guidance, and is skipped entirely if it fails or isn't configured.
+    """
+    if not GEMINI_API_KEY or not findings:
+        return None
+    try:
+        from google import genai
+
+        summary = "\n".join(f"- {f['id']} ({f['severity']}): {f['detail']}" for f in findings)
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=(
+                "Given these cookie/privacy-consent scan findings, write a short, "
+                f"actionable remediation note for each:\n{summary}"
+            ),
+            config={"temperature": 0.2},
+        )
+        return {"ai_generated": True, "notes": response.text}
+    except Exception as exc:
+        return {"ai_generated": True, "notes": None, "error": str(exc)}
+
+
 @app.get("/", response_class=FileResponse)
 def landing_page():
     return FileResponse(STATIC_DIR / "index.html")
@@ -111,8 +140,10 @@ def agent_manifest():
         "description": (
             "Rule-based scan for tracking cookies set before consent, "
             "missing consent-management platforms, and missing privacy/"
-            "cookie policy links. A risk-reduction signal, not a legal "
-            "compliance certification."
+            "cookie policy links, with optional AI-generated remediation "
+            "notes. Findings and pass/fail always come from the rule "
+            "engine, never the AI layer. A risk-reduction signal, not a "
+            "legal compliance certification."
         ),
         "endpoints": [
             {
@@ -221,5 +252,9 @@ def full_scan(payload: ScanRequest, x_api_key: Optional[str] = Header(None)):
             billing.record_usage(auth.customer_id)
         except Exception as exc:
             response["billing_warning"] = f"usage recording failed: {exc}"
+
+    remediation = _remediation_notes(result["findings"])
+    if remediation is not None:
+        response["remediation"] = remediation
 
     return response

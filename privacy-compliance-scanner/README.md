@@ -7,7 +7,10 @@ platform (CMP) is present, and whether privacy/cookie policy links exist.
 See `app/scanner.py` for the full rule set — it's a static, verifiable
 lookup against known tracker cookie names and known CMP script signatures
 (the same class of technique commercial tools like Cookiebot/Osano use),
-not an LLM guessing at compliance.
+not an LLM guessing at compliance. An optional AI layer (Gemini, same
+`GEMINI_API_KEY` as `wcag-audit-engine`) turns the rule-based findings into
+plain-language remediation notes -- it never decides what the findings
+are or whether the scan is "clean."
 
 **This is a risk-reduction signal, not a legal compliance certification.**
 It can't see server-side tracking, and its tracker/CMP database isn't
