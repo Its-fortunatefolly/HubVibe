@@ -1,0 +1,10 @@
+# Test/import-time dependencies for CI (.github/workflows/python-app.yml).
+# Each service under */app/ has its own requirements.txt for deployment;
+# this file only needs enough to import and unit-test them.
+fastapi==0.115.6
+pydantic==2.10.3
+httpx==0.28.1
+playwright==1.48.0
+axe-playwright-python==0.1.8
+stripe==15.4.0
+google-cloud-firestore==2.28.1
