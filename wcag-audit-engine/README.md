@@ -185,17 +185,37 @@ npx mppx@latest validate http://localhost:8000 \
   --body '{"url":"https://example.com"}'
 ```
 
-Until these are set, neither MPP method is offered (no `WWW-Authenticate`
-header on a 402) and both are inert:
+Until each method's vars are set, it isn't offered (no `WWW-Authenticate`
+header on a 402 for that method) and stays inert:
 
-- `MPP_STRIPE_NETWORK_PROFILE_ID` — your Stripe Business Network Profile ID.
-- `MPP_STRIPE_PRICE_CENTS` — default `3` ($0.03). `MPP_STRIPE_CURRENCY` —
-  default `usd`. `MPP_STRIPE_API_VERSION` — default `2026-05-27.preview`.
-- `MPP_TEMPO_RPC_URL` — a Tempo JSON-RPC endpoint.
-- `MPP_TEMPO_TOKEN_ADDRESS` — the TIP-20 USDC contract address.
-- `MPP_TEMPO_RECIPIENT_ADDRESS` — the wallet address that receives payment.
-- `MPP_TEMPO_CHAIN_ID` — default `4217`. `MPP_TEMPO_PRICE_BASE_UNITS` —
-  default `30000` ($0.03 at 6 decimals).
+- **stripe** method needs `MPP_STRIPE_NETWORK_PROFILE_ID` (your Stripe
+  Business Network Profile ID -- Dashboard → "Stripe profile" → Get
+  started, in **live** mode; no Product/Price needed, unlike the
+  subscription flow above). `MPP_STRIPE_PRICE_CENTS` (default `3`, i.e.
+  $0.03), `MPP_STRIPE_CURRENCY` (default `usd`), and
+  `MPP_STRIPE_API_VERSION` (default `2026-05-27.preview`) are optional.
+- **tempo** method needs only `MPP_TEMPO_RECIPIENT_ADDRESS` -- everything
+  else defaults to Tempo mainnet's real values (sourced from Tempo's own
+  SDK, not guessed): `MPP_TEMPO_RPC_URL` defaults to
+  `https://rpc.tempo.xyz`, `MPP_TEMPO_TOKEN_ADDRESS` defaults to the actual
+  mainnet USDC.e contract `0x20C000000000000000000000b9537d11c60E8b50`, and
+  `MPP_TEMPO_CHAIN_ID` defaults to `4217`. `MPP_TEMPO_PRICE_BASE_UNITS`
+  defaults to `30000` ($0.03 at USDC's 6 decimals).
+
+  The simplest way to get `MPP_TEMPO_RECIPIENT_ADDRESS`: let Stripe custody
+  and auto-convert the funds instead of running your own wallet, via
+  Stripe's crypto deposit-address API (needs your live `STRIPE_SECRET_KEY`,
+  pulled from Secret Manager rather than typed/pasted anywhere):
+
+  ```bash
+  STRIPE_SECRET_KEY=$(gcloud secrets versions access latest --secret=stripe-secret-key)
+  curl https://api.stripe.com/v1/crypto/deposit_addresses \
+    -u "$STRIPE_SECRET_KEY:" \
+    -H "Stripe-Version: 2026-05-27.preview" \
+    -d network=tempo
+  ```
+
+  The response's `address` field is the value to use.
 - `MPP_REALM` — optional; the challenge realm defaults to the request's own
   `Host` header (minus port), which is what the spec calls for and is what
   `mppx validate` checks for. Only set this to override that.

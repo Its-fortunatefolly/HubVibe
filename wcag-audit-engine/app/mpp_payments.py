@@ -47,11 +47,20 @@ Stripe SPT (fiat):
 - MPP_STRIPE_CURRENCY             default "usd"
 - MPP_STRIPE_API_VERSION          default "2026-05-27.preview"
 
-Tempo (crypto):
-- MPP_TEMPO_RPC_URL               Tempo JSON-RPC endpoint
-- MPP_TEMPO_TOKEN_ADDRESS         TIP-20 USDC contract address
-- MPP_TEMPO_RECIPIENT_ADDRESS     wallet address that receives payment
-- MPP_TEMPO_CHAIN_ID              default 4217
+Tempo (crypto) -- only MPP_TEMPO_RECIPIENT_ADDRESS is actually required;
+the rest default to Tempo mainnet's real values (sourced from Tempo's own
+SDK, not a guess):
+- MPP_TEMPO_RECIPIENT_ADDRESS     wallet/deposit address that receives
+                                   payment -- e.g. a Stripe-managed crypto
+                                   deposit address (POST
+                                   /v1/crypto/deposit_addresses with
+                                   network=tempo), which lets Stripe custody
+                                   and auto-convert the funds instead of you
+                                   running your own wallet
+- MPP_TEMPO_RPC_URL               default "https://rpc.tempo.xyz"
+- MPP_TEMPO_TOKEN_ADDRESS         default the real mainnet USDC.e contract,
+                                   "0x20C000000000000000000000b9537d11c60E8b50"
+- MPP_TEMPO_CHAIN_ID              default 4217 (mainnet)
 - MPP_TEMPO_PRICE_BASE_UNITS      default "30000" ($0.03 at 6 decimals)
 
 Shared:
@@ -82,9 +91,16 @@ _STRIPE_NETWORK_PROFILE_ID = os.environ.get("MPP_STRIPE_NETWORK_PROFILE_ID")
 _STRIPE_PRICE_CENTS = os.environ.get("MPP_STRIPE_PRICE_CENTS", "3")
 _STRIPE_CURRENCY = os.environ.get("MPP_STRIPE_CURRENCY", "usd")
 
-_TEMPO_RPC_URL = os.environ.get("MPP_TEMPO_RPC_URL")
+# Defaults below are Tempo mainnet's real, official values (chain ID, RPC,
+# and the actual USDC.e token contract) -- pulled directly from Tempo's own
+# SDK (the `mppx` package's tempo/internal/defaults.ts), not a placeholder.
+# The generic protocol spec's own example address is a *different* token
+# (pathUSD), so don't reuse that one here.
+_TEMPO_RPC_URL = os.environ.get("MPP_TEMPO_RPC_URL", "https://rpc.tempo.xyz")
 _TEMPO_CHAIN_ID = int(os.environ.get("MPP_TEMPO_CHAIN_ID", "4217"))
-_TEMPO_TOKEN_ADDRESS = os.environ.get("MPP_TEMPO_TOKEN_ADDRESS")
+_TEMPO_TOKEN_ADDRESS = os.environ.get(
+    "MPP_TEMPO_TOKEN_ADDRESS", "0x20C000000000000000000000b9537d11c60E8b50"
+)
 _TEMPO_RECIPIENT_ADDRESS = os.environ.get("MPP_TEMPO_RECIPIENT_ADDRESS")
 _TEMPO_PRICE_BASE_UNITS = os.environ.get("MPP_TEMPO_PRICE_BASE_UNITS", "30000")
 
