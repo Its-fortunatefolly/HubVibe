@@ -193,7 +193,11 @@ def free_scan(payload: FreeScanRequest, request: Request):
 
     violations = raw.get("violations", [])
     impact_rank = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3}
-    top_issues = sorted(violations, key=lambda v: impact_rank.get(v.get("impact"), 4))[:3]
+    FREE_SCAN_SHOWN_ISSUES = 2
+    top_issues = sorted(violations, key=lambda v: impact_rank.get(v.get("impact"), 4))[
+        :FREE_SCAN_SHOWN_ISSUES
+    ]
+    hidden_count = max(0, len(violations) - len(top_issues))
 
     try:
         billing.save_lead(payload.url, payload.email, len(violations))
@@ -203,6 +207,26 @@ def free_scan(payload: FreeScanRequest, request: Request):
         # on this deployment yet.
         pass
 
+    if violations:
+        note = (
+            f"Showing {len(top_issues)} of {len(violations)} issue(s) found. "
+            f"{hidden_count} more not shown here -- sign up for the full "
+            "list, exact locations, and continuous monitoring. Automated "
+            "scanning catches a meaningful share of WCAG issues, not all of "
+            "them -- this is not a compliance certification."
+            if hidden_count > 0
+            else "That's the only issue this scan found. Automated scanning "
+            "catches a meaningful share of WCAG issues, not all of them -- "
+            "this is not a compliance certification, so it's still worth a "
+            "full audit."
+        )
+    else:
+        note = (
+            "No issues found in this snapshot. Automated scanning catches a "
+            "meaningful share of WCAG issues, not all of them -- this is "
+            "not a compliance certification."
+        )
+
     return {
         "status": "ok",
         "pass": len(violations) == 0,
@@ -210,13 +234,7 @@ def free_scan(payload: FreeScanRequest, request: Request):
         "top_issues": [
             {"id": v["id"], "impact": v.get("impact"), "help": v.get("help")} for v in top_issues
         ],
-        "note": (
-            "One-time snapshot limited to your top issues, not the full "
-            "report. Automated scanning catches a meaningful share of WCAG "
-            "issues, not all of them -- this is not a compliance "
-            "certification. Sign up for full details and continuous "
-            "monitoring."
-        ),
+        "note": note,
     }
 
 
