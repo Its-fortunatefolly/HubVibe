@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field
 
 try:
-    from . import billing
+    from . import billing, mpp_payments, x402_payments
 except ImportError:
     # Loaded directly by file path (e.g. by tooling/tests) rather than as
     # part of the `app` package -- fall back to a path-relative import so
@@ -21,6 +21,8 @@ except ImportError:
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import billing  # type: ignore
+    import mpp_payments  # type: ignore
+    import x402_payments  # type: ignore
 
 app = FastAPI(title="WCAG Audit Engine")
 
@@ -71,25 +73,81 @@ class FreeScanRequest(BaseModel):
 
 
 class AuthContext:
-    __slots__ = ("billable", "customer_id")
+    __slots__ = ("stripe_billable", "customer_id", "payment_method")
 
-    def __init__(self, billable: bool, customer_id: Optional[str] = None):
-        self.billable = billable
+    def __init__(
+        self,
+        stripe_billable: bool,
+        customer_id: Optional[str] = None,
+        payment_method: str = "api_key",
+    ):
+        self.stripe_billable = stripe_billable
         self.customer_id = customer_id
+        self.payment_method = payment_method
 
 
-def _authenticate(x_api_key: Optional[str]) -> AuthContext:
-    if not x_api_key:
-        raise HTTPException(status_code=401, detail="Missing X-API-Key")
-    if API_KEY and secrets.compare_digest(x_api_key, API_KEY):
-        # Internal/testing key: unlimited, unmetered, never billed.
-        return AuthContext(billable=False)
-    if not billing.is_configured():
-        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
-    record = billing.lookup_key(x_api_key)
-    if record is None:
-        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
-    return AuthContext(billable=True, customer_id=record["customer_id"])
+def _payment_required_response(host: Optional[str] = None) -> JSONResponse:
+    """The 402 shape a caller needs to pay via x402, MPP, or get a Stripe
+    API key -- returned whenever none of those is attached and valid. This
+    is the sole "access denied" outcome for /audit; there is no path that
+    falls through to granting access.
+
+    Carries a WWW-Authenticate: Payment header per configured MPP method
+    (spec-required for MPP conformance -- see mpp_payments.py), bound to the
+    request's own Host header as the MPP realm, plus the x402-style JSON
+    body for callers that read price/payTo from the body instead.
+    Cache-Control: no-store is required by the MPP core spec on every 402.
+    """
+    response = JSONResponse(status_code=402, content=x402_payments.payment_required_body())
+    response.headers["Cache-Control"] = "no-store"
+    for header_value in mpp_payments.www_authenticate_headers(realm=host):
+        response.headers.append("WWW-Authenticate", header_value)
+    return response
+
+
+def _authenticate(
+    x_api_key: Optional[str],
+    x_payment: Optional[str],
+    authorization: Optional[str],
+    host: Optional[str] = None,
+):
+    """Returns an AuthContext on success, or a 402 JSONResponse on failure.
+
+    Three independent paths, checked cheapest-first, any one sufficient:
+    1. X-API-Key -- internal test key or a real Stripe-issued key.
+    2. X-PAYMENT -- x402 (crypto only), verified against a facilitator.
+    3. Authorization: Payment ... -- MPP (Stripe SPT for fiat, or Tempo for
+       crypto), verified directly against Stripe / the Tempo network.
+       `host` (the request's own Host header) must match the realm the
+       challenge was originally issued with.
+    """
+    if x_api_key:
+        if API_KEY and secrets.compare_digest(x_api_key, API_KEY):
+            # Internal/testing key: unlimited, unmetered, never billed.
+            return AuthContext(stripe_billable=False, payment_method="internal")
+        if billing.is_configured():
+            record = billing.lookup_key(x_api_key)
+            if record is not None:
+                return AuthContext(
+                    stripe_billable=True,
+                    customer_id=record["customer_id"],
+                    payment_method="stripe",
+                )
+
+    if x_payment and x402_payments.verify_and_settle_sync(x_payment):
+        # Payment already verified and settled on-chain by the facilitator
+        # -- nothing further to bill via Stripe.
+        return AuthContext(stripe_billable=False, payment_method="x402")
+
+    if authorization and authorization.startswith("Payment "):
+        credential = authorization[len("Payment "):].strip()
+        if credential and mpp_payments.verify_and_settle_sync(credential, realm=host):
+            # Already charged/settled (Stripe PaymentIntent or on-chain
+            # Tempo transfer) inside verify_and_settle_sync -- nothing
+            # further to bill.
+            return AuthContext(stripe_billable=False, payment_method="mpp")
+
+    return _payment_required_response(host=host)
 
 
 def _check_rate_limit(key: str) -> None:
@@ -254,15 +312,23 @@ def agent_manifest():
                 "path": "/audit",
                 "method": "POST",
                 "payment_required": True,
-                "price_usd": 0.01,
-                "auth": "X-API-Key header required (see /billing/checkout)",
+                "price_usd": 0.03,
+                "auth": (
+                    "One of: X-API-Key header (Stripe subscription billing, "
+                    "see /billing/checkout); X-PAYMENT header (x402, see 402 "
+                    "response body for price/network/payTo); or Authorization: "
+                    "Payment ... (MPP -- Stripe SPT for fiat or Tempo network "
+                    "for crypto, see the WWW-Authenticate response headers on "
+                    "a 402 for both challenges)"
+                ),
+                "payment_methods": ["stripe_api_key", "x402", "mpp"],
             },
             {
                 "path": "/scan/free",
                 "method": "POST",
                 "payment_required": False,
                 "rate_limit": "3/day per IP",
-                "note": "Top-3 issues only; use /audit for the full report",
+                "note": "Top-2 issues only; use /audit for the full report",
             },
         ],
     }
@@ -309,10 +375,31 @@ async def stripe_webhook(request: Request):
     return {"received": True}
 
 
+def _mpp_realm(request: Request) -> Optional[str]:
+    """MPP realm SHOULD be the server's bare hostname -- strip the port off
+    the Host header (":8811" locally, absent behind Cloud Run's HTTPS
+    frontend, but strip it either way rather than depend on that)."""
+    host = request.headers.get("host")
+    return host.split(":")[0] if host else None
+
+
 @app.post("/audit")
-def audit(payload: AuditRequest, x_api_key: Optional[str] = Header(None)):
-    auth = _authenticate(x_api_key)
-    _check_rate_limit(x_api_key)
+def audit(
+    payload: AuditRequest,
+    request: Request,
+    x_api_key: Optional[str] = Header(None),
+    x_payment: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    auth = _authenticate(x_api_key, x_payment, authorization, host=_mpp_realm(request))
+    if isinstance(auth, JSONResponse):
+        return auth
+
+    # x402 payers have no API key to key the limiter on -- fall back to IP.
+    # Either way this is best-effort abuse protection, not the billing
+    # boundary: that's Stripe usage records / on-chain settlement, above.
+    rate_limit_key = x_api_key or (request.client.host if request.client else "unknown")
+    _check_rate_limit(rate_limit_key)
 
     if not payload.html and not payload.url:
         raise HTTPException(status_code=400, detail="Provide 'html' or 'url'")
@@ -350,7 +437,7 @@ def audit(payload: AuditRequest, x_api_key: Optional[str] = Header(None)):
         ],
     }
 
-    if auth.billable:
+    if auth.stripe_billable:
         try:
             billing.record_usage(auth.customer_id)
         except Exception as exc:
