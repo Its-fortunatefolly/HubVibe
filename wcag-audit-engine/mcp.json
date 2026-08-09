@@ -1,0 +1,72 @@
+{
+  "mcpVersion": "2025-06-18",
+  "name": "hubvibe-site-audit",
+  "description": "Rule-based, verifiable site compliance audits -- accessibility (axe-core), SEO, security headers, and performance. Every result is a deterministic check against the actual page, never an LLM guess, and a check that couldn't run is never reported as a false pass.",
+  "note": "This service is a plain HTTP/REST API, not a live MCP stdio/SSE server. Each tool's `httpEndpoint` (a non-standard extension field) maps it onto the actual route; wrap these with an MCP-to-HTTP adapter, or call the endpoints directly (see /.well-known/agent.json for the same schema served live).",
+  "auth": {
+    "description": "Every tool below requires one of: X-API-Key (Stripe subscription), X-PAYMENT (x402), or Authorization: Payment ... (MPP). An unauthenticated call returns HTTP 402 with the price and payment challenge, not an error.",
+    "methods": ["stripe_api_key", "x402", "mpp"]
+  },
+  "tools": [
+    {
+      "name": "audit_wcag",
+      "description": "WCAG 2.1 A/AA accessibility audit via axe-core against raw HTML or a live URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html": {"type": "string", "description": "Raw HTML source to audit"},
+          "url": {"type": "string", "description": "Live URL to audit instead of raw HTML"}
+        }
+      },
+      "httpEndpoint": {"method": "POST", "path": "/audit/wcag", "price_usd": 0.03}
+    },
+    {
+      "name": "audit_seo",
+      "description": "Title, meta description, H1 structure, canonical link, OpenGraph tags, structured data, and lang attribute.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html": {"type": "string", "description": "Raw HTML source to audit"},
+          "url": {"type": "string", "description": "Live URL to audit instead of raw HTML"}
+        }
+      },
+      "httpEndpoint": {"method": "POST", "path": "/audit/seo", "price_usd": 0.03}
+    },
+    {
+      "name": "audit_security",
+      "description": "HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking protection, Referrer-Policy, and CORS from a live HTTP response. Not a TLS/cipher-suite scan or a penetration test.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {"type": "string", "description": "Live URL to audit"}
+        },
+        "required": ["url"]
+      },
+      "httpEndpoint": {"method": "POST", "path": "/audit/security", "price_usd": 0.03}
+    },
+    {
+      "name": "audit_performance",
+      "description": "DOM node count, transferred bytes, and request count from one real page load. Not a full Lighthouse-style audit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {"type": "string", "description": "Live URL to audit"}
+        },
+        "required": ["url"]
+      },
+      "httpEndpoint": {"method": "POST", "path": "/audit/performance", "price_usd": 0.03}
+    },
+    {
+      "name": "audit_bundle",
+      "description": "Runs audit_wcag + audit_seo + audit_security + audit_performance against one URL in a single call, billed once. If any dimension fails to run, the whole call fails and nothing is billed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {"type": "string", "description": "Live URL to audit"}
+        },
+        "required": ["url"]
+      },
+      "httpEndpoint": {"method": "POST", "path": "/audit/bundle", "price_usd": 0.10}
+    }
+  ]
+}

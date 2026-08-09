@@ -15,7 +15,12 @@ def _load_main(monkeypatch, api_key="test-key"):
     # No Stripe config in CI -- billing.is_configured() must be False, so
     # these tests only exercise the auth/rate-limit paths, never Firestore
     # or Stripe network calls.
-    for var in ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_METERED_PRICE_ID"):
+    for var in (
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_METERED_PRICE_ID",
+        "STRIPE_FLAT_SUBSCRIPTION_PRICE_ID",
+    ):
         monkeypatch.delenv(var, raising=False)
 
     spec = importlib.util.spec_from_file_location("wcag_audit_main", MAIN_PATH)
@@ -141,7 +146,7 @@ def test_authenticate_x402_success_grants_access(monkeypatch):
     # With a facilitator that confirms verification+settlement, a valid
     # X-PAYMENT alone (no API key) is sufficient.
     module = _load_main(monkeypatch, api_key=None)
-    monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header: True)
+    monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header, price=None: True)
     auth = module._authenticate(None, "some-signed-payment", None)
     assert isinstance(auth, module.AuthContext)
     assert auth.stripe_billable is False
@@ -150,7 +155,7 @@ def test_authenticate_x402_success_grants_access(monkeypatch):
 
 def test_authenticate_x402_failure_returns_402(monkeypatch):
     module = _load_main(monkeypatch, api_key=None)
-    monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header: False)
+    monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header, price=None: False)
     result = module._authenticate(None, "some-signed-payment", None)
     assert isinstance(result, module.JSONResponse)
     assert result.status_code == 402
@@ -220,7 +225,7 @@ def test_402_response_advertises_mpp_challenges_when_configured(monkeypatch):
     monkeypatch.setattr(
         module.mpp_payments,
         "www_authenticate_headers",
-        lambda realm=None: ["Payment id=\"x\", method=\"stripe\""],
+        lambda realm=None, price_usd=None: ["Payment id=\"x\", method=\"stripe\""],
     )
     client = TestClient(module.app)
     response = client.post("/audit", json={"url": "https://example.com"})
@@ -255,3 +260,195 @@ def test_free_scan_limit_rejects_after_threshold(monkeypatch):
     module._check_free_scan_limit("1.2.3.4")
     with pytest.raises(Exception):
         module._check_free_scan_limit("1.2.3.4")
+
+
+# --- New multi-route audit suite -------------------------------------------
+
+NEW_PAID_ROUTES = [
+    ("/audit/wcag", {"url": "https://example.com"}, 0.03),
+    ("/audit/seo", {"url": "https://example.com"}, 0.03),
+    ("/audit/security", {"url": "https://example.com"}, 0.03),
+    ("/audit/performance", {"url": "https://example.com"}, 0.03),
+    ("/audit/bundle", {"url": "https://example.com"}, 0.10),
+]
+
+
+@pytest.mark.parametrize("path,body,price", NEW_PAID_ROUTES)
+def test_new_routes_are_fail_closed_with_correct_price(monkeypatch, path, body, price):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    client = TestClient(module.app)
+    response = client.post(path, json=body)
+    assert response.status_code == 402
+    assert response.json()["price"] == f"${price:.2f}"
+
+
+@pytest.mark.parametrize("path,body", [(p, b) for p, b, _ in NEW_PAID_ROUTES])
+def test_new_routes_accept_internal_key_and_execute(monkeypatch, path, body):
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    with patch.object(module, "_run_axe", return_value={"violations": []}), patch.object(
+        module.audits, "run_seo_audit", return_value={"status": "ok", "pass": True, "findings": []}
+    ), patch.object(
+        module.audits, "run_security_audit", return_value={"status": "ok", "pass": True, "findings": []}
+    ), patch.object(
+        module.audits,
+        "run_performance_audit",
+        return_value={"status": "ok", "pass": True, "findings": [], "metrics": {}},
+    ):
+        client = TestClient(module.app)
+        response = client.post(path, json=body, headers={"X-API-Key": "test-key"})
+    assert response.status_code == 200
+    assert response.json()["pass"] is True
+
+
+def test_audit_wcag_seo_require_html_or_url(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    client = TestClient(module.app)
+    for path in ("/audit/wcag", "/audit/seo"):
+        response = client.post(path, json={}, headers={"X-API-Key": "test-key"})
+        assert response.status_code == 400
+
+
+def test_audit_security_url_field_required_by_schema(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    client = TestClient(module.app)
+    response = client.post("/audit/security", json={}, headers={"X-API-Key": "test-key"})
+    assert response.status_code == 422  # Pydantic validation: url is required
+
+
+def test_audit_route_execution_failure_returns_502_and_is_not_billed(monkeypatch):
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    calls = []
+    monkeypatch.setattr(module.billing, "record_usage", lambda *a, **k: calls.append(1))
+    with patch.object(module.audits, "run_seo_audit", side_effect=RuntimeError("boom")):
+        client = TestClient(module.app)
+        response = client.post(
+            "/audit/seo", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
+        )
+    assert response.status_code == 502
+    assert response.json()["pass"] is None
+    assert calls == []
+
+
+def test_bundle_failure_is_atomic_and_unbilled(monkeypatch):
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    calls = []
+    monkeypatch.setattr(module.billing, "record_usage", lambda *a, **k: calls.append(1))
+    with patch.object(module, "_run_axe", return_value={"violations": []}), patch.object(
+        module.audits, "run_seo_audit", return_value={"status": "ok", "pass": True, "findings": []}
+    ), patch.object(module.audits, "run_security_audit", side_effect=RuntimeError("network error")):
+        client = TestClient(module.app)
+        response = client.post(
+            "/audit/bundle", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
+        )
+    assert response.status_code == 502
+    assert calls == []
+
+
+def test_bundle_success_reports_three_billing_units(monkeypatch):
+    # Approximates the $0.10 bundle price against the existing $0.03 flat
+    # meter -- see billing.record_usage's docstring for why this is 3, not 1.
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    recorded = []
+    monkeypatch.setattr(
+        module.billing, "record_usage", lambda customer_id, units=1: recorded.append(units)
+    )
+    # Force the internal key path to look Stripe-billable so _bill() actually
+    # calls record_usage -- the internal key itself is normally unbilled.
+    real_authenticate = module._authenticate
+
+    def _fake_authenticate(*args, **kwargs):
+        auth = real_authenticate(*args, **kwargs)
+        if isinstance(auth, module.AuthContext):
+            auth.stripe_billable = True
+            auth.customer_id = "cus_test"
+        return auth
+
+    monkeypatch.setattr(module, "_authenticate", _fake_authenticate)
+
+    with patch.object(module, "_run_axe", return_value={"violations": []}), patch.object(
+        module.audits, "run_seo_audit", return_value={"status": "ok", "pass": True, "findings": []}
+    ), patch.object(
+        module.audits, "run_security_audit", return_value={"status": "ok", "pass": True, "findings": []}
+    ), patch.object(
+        module.audits,
+        "run_performance_audit",
+        return_value={"status": "ok", "pass": True, "findings": [], "metrics": {}},
+    ):
+        client = TestClient(module.app)
+        response = client.post(
+            "/audit/bundle", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
+        )
+    assert response.status_code == 200
+    assert recorded == [3]
+
+
+def test_agent_manifest_lists_all_five_audit_routes(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    response = client.get("/.well-known/agent.json")
+    paths = {e["path"] for e in response.json()["endpoints"]}
+    for expected in ("/audit/wcag", "/audit/seo", "/audit/security", "/audit/performance", "/audit/bundle"):
+        assert expected in paths
+    bundle = next(e for e in response.json()["endpoints"] if e["path"] == "/audit/bundle")
+    assert bundle["price_usd"] == 0.10
+
+
+# --- SaaS monthly quota ------------------------------------------------
+
+
+def test_authenticate_falls_back_to_402_when_quota_exceeded(monkeypatch):
+    # A valid Stripe key that's over its monthly quota must not be treated
+    # as sufficient on its own -- this is what makes "overage falls back to
+    # x402/MPP rates" actually true rather than just landing-page copy.
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: True)
+    monkeypatch.setattr(module.billing, "lookup_key", lambda key: {"customer_id": "cus_123"})
+    monkeypatch.setattr(module.billing, "check_and_increment_quota", lambda customer_id: False)
+
+    result = module._authenticate("real-stripe-key", None, None)
+    assert isinstance(result, module.JSONResponse)
+    assert result.status_code == 402
+
+
+def test_authenticate_succeeds_when_quota_available(monkeypatch):
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: True)
+    monkeypatch.setattr(module.billing, "lookup_key", lambda key: {"customer_id": "cus_123"})
+    monkeypatch.setattr(module.billing, "check_and_increment_quota", lambda customer_id: True)
+
+    auth = module._authenticate("real-stripe-key", None, None)
+    assert isinstance(auth, module.AuthContext)
+    assert auth.stripe_billable is True
+    assert auth.customer_id == "cus_123"
+
+
+def test_internal_key_bypasses_quota_check(monkeypatch):
+    module = _load_main(monkeypatch, api_key="test-key")
+    calls = []
+    monkeypatch.setattr(
+        module.billing, "check_and_increment_quota", lambda customer_id: calls.append(1) or False
+    )
+    auth = module._authenticate("test-key", None, None)
+    assert isinstance(auth, module.AuthContext)
+    assert auth.payment_method == "internal"
+    assert calls == []
