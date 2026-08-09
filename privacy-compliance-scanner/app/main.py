@@ -12,11 +12,25 @@ from pydantic import BaseModel
 try:
     from . import billing, scanner
 except ImportError:
-    import sys
+    # Loaded directly by file path (e.g. by tooling/tests) rather than as
+    # part of the `app` package -- fall back to loading each sibling module
+    # from its file path under a service-specific name, not a bare `import
+    # billing`. wcag-audit-engine also has a module literally named
+    # billing.py; a bare `import billing` caches whichever one loads first
+    # in sys.modules and silently hands a second service the wrong module
+    # if both get imported into the same process (as happens in this
+    # repo's shared test suite).
+    import importlib.util
 
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import billing  # type: ignore
-    import scanner  # type: ignore
+    def _load_sibling_module(name: str):
+        module_path = Path(__file__).resolve().parent / f"{name}.py"
+        spec = importlib.util.spec_from_file_location(f"privacy_compliance_scanner_{name}", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    billing = _load_sibling_module("billing")  # type: ignore
+    scanner = _load_sibling_module("scanner")  # type: ignore
 
 app = FastAPI(title="Privacy/Cookie Compliance Scanner")
 

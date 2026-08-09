@@ -197,7 +197,7 @@ def _www_authenticate_header(challenge: dict) -> str:
     return "Payment " + ", ".join(parts)
 
 
-def www_authenticate_headers(realm: Optional[str] = None) -> list:
+def www_authenticate_headers(realm: Optional[str] = None, price_usd: Optional[float] = None) -> list:
     """One WWW-Authenticate: Payment header per configured method, for a 402
     response -- lets the caller pick whichever method it can fulfill.
 
@@ -205,8 +205,18 @@ def www_authenticate_headers(realm: Optional[str] = None) -> list:
     match the server's hostname, and binding the challenge to it means a
     challenge issued on one hostname can never be replayed against another
     deployment that happens to share the same signing secret.
+
+    `price_usd` overrides the deploy-wide default (e.g. $0.10 for a bundle
+    route vs the default $0.03) -- the amount that ends up in each
+    method's challenge, and the amount that verification checks a
+    credential against, since the challenge (and its HMAC binding) is
+    itself the source of truth for what was actually charged.
     """
     realm = realm or _REALM_FALLBACK
+    stripe_price_cents = str(round(price_usd * 100)) if price_usd is not None else _STRIPE_PRICE_CENTS
+    tempo_price_base_units = (
+        str(round(price_usd * 1_000_000)) if price_usd is not None else _TEMPO_PRICE_BASE_UNITS
+    )
     headers = []
     if stripe_configured():
         challenge = _build_challenge(
@@ -214,7 +224,7 @@ def www_authenticate_headers(realm: Optional[str] = None) -> list:
             "stripe",
             "charge",
             {
-                "amount": _STRIPE_PRICE_CENTS,
+                "amount": stripe_price_cents,
                 "currency": _STRIPE_CURRENCY,
                 "methodDetails": {
                     "networkId": _STRIPE_NETWORK_PROFILE_ID,
@@ -229,7 +239,7 @@ def www_authenticate_headers(realm: Optional[str] = None) -> list:
             "tempo",
             "charge",
             {
-                "amount": _TEMPO_PRICE_BASE_UNITS,
+                "amount": tempo_price_base_units,
                 "currency": _TEMPO_TOKEN_ADDRESS,
                 "recipient": _TEMPO_RECIPIENT_ADDRESS,
                 "methodDetails": {"chainId": _TEMPO_CHAIN_ID, "supportedModes": ["push"]},

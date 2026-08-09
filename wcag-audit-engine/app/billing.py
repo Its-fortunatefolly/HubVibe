@@ -34,11 +34,25 @@ _WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 _METERED_PRICE_ID = os.environ.get("STRIPE_METERED_PRICE_ID")
 _METER_EVENT_NAME = os.environ.get("STRIPE_METER_EVENT_NAME", "wcag_audit_call")
 
+# The human "Agency / Developer" plan: a flat recurring Price (NOT
+# usage_type=metered) -- e.g. $49/month, created separately in the Stripe
+# Dashboard. If this isn't set, checkout falls back to the pure metered
+# price above so nothing regresses -- but the landing page's "$49/month,
+# 1,500 scans included" framing is only actually true once this is set.
+_FLAT_SUBSCRIPTION_PRICE_ID = os.environ.get("STRIPE_FLAT_SUBSCRIPTION_PRICE_ID")
+
+# Included scans per calendar month on the subscription plan before a
+# caller falls back to paying per-call via x402/MPP instead of the API key
+# alone. The meter above still reports every call regardless -- this is a
+# separate, additive limit on top of metered billing, not a replacement
+# for it (Stripe is still the source of truth for what a subscriber owes).
+SAAS_MONTHLY_QUOTA = int(os.environ.get("SAAS_MONTHLY_QUOTA", "1500"))
+
 _db = None
 
 
 def is_configured() -> bool:
-    return bool(stripe.api_key and _WEBHOOK_SECRET and _METERED_PRICE_ID)
+    return bool(stripe.api_key and _WEBHOOK_SECRET and (_FLAT_SUBSCRIPTION_PRICE_ID or _METERED_PRICE_ID))
 
 
 def _firestore():
@@ -51,12 +65,19 @@ def _firestore():
 
 
 def create_checkout_session(email: str, success_url: str, cancel_url: str) -> str:
-    """Start a metered subscription -- no upfront charge; billed per audit
-    call at the end of the billing period via Meter Events."""
+    """Start the subscription: the flat "Agency / Developer" price
+    (STRIPE_FLAT_SUBSCRIPTION_PRICE_ID) if configured, else the older pure
+    metered price -- so this keeps working even before the flat price is
+    set up. Either way, every real audit call still reports a Meter Event
+    (see billing.record_usage); the flat price just adds a base monthly
+    charge and an included-scans quota (see check_and_increment_quota) on
+    top of that.
+    """
+    price_id = _FLAT_SUBSCRIPTION_PRICE_ID or _METERED_PRICE_ID
     session = stripe.checkout.Session.create(
         mode="subscription",
         customer_email=email,
-        line_items=[{"price": _METERED_PRICE_ID}],
+        line_items=[{"price": price_id}],
         success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=cancel_url,
     )
@@ -130,15 +151,69 @@ def save_lead(url: str, email: Optional[str], violation_count: int) -> None:
     )
 
 
-def record_usage(customer_id: str) -> None:
-    """Bill exactly one audit call.
+def record_usage(customer_id: str, units: int = 1) -> None:
+    """Bill a completed audit call.
 
     Only call this after a real audit ran -- never for requests that errored
     out before producing a result. Uses a fresh idempotency identifier per
     call so a retried request can't double-bill.
+
+    The underlying meter is a flat per-event ($0.03) count, so a
+    higher-priced route (e.g. the $0.10 /audit/bundle) reports `units`
+    separate events to approximate its price against that same meter,
+    rather than requiring a second Stripe meter/price to be provisioned
+    just for this. This is an approximation (3 units ~= $0.09, not exactly
+    $0.10) -- a dedicated bundle price would make it exact, and can be
+    added later without changing this function's signature.
     """
-    stripe.billing.MeterEvent.create(
-        event_name=_METER_EVENT_NAME,
-        payload={"value": "1", "stripe_customer_id": customer_id},
-        identifier=str(uuid.uuid4()),
-    )
+    for _ in range(max(1, units)):
+        stripe.billing.MeterEvent.create(
+            event_name=_METER_EVENT_NAME,
+            payload={"value": "1", "stripe_customer_id": customer_id},
+            identifier=str(uuid.uuid4()),
+        )
+
+
+def check_and_increment_quota(customer_id: str) -> bool:
+    """Returns True and increments the counter if this call is within the
+    subscription's included monthly quota; returns False if the customer
+    has already used their included scans for this calendar month.
+
+    Callers should treat False as "the API key alone is no longer
+    sufficient" and require x402/MPP payment for this specific call,
+    matching the SaaS plan's advertised overage behavior -- Stripe still
+    bills every call via the meter either way, this only gates whether the
+    bare API key is enough on its own.
+
+    This is a business limit, not a security boundary, so unlike
+    authentication elsewhere in this codebase it fails OPEN on error
+    (treats the call as within quota) rather than closed: a transient
+    Firestore hiccup should not cut off a paying, already-authenticated
+    subscriber, and the worst case of failing open here is a small amount
+    of temporary under-enforcement, not unauthorized access.
+    """
+    import datetime
+
+    from google.cloud import firestore
+
+    try:
+        period = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m")
+        db = _firestore()
+        ref = db.collection("quota_usage").document(f"{customer_id}:{period}")
+
+        @firestore.transactional
+        def _increment(transaction):
+            snapshot = ref.get(transaction=transaction)
+            count = snapshot.get("count") if snapshot.exists else 0
+            if count >= SAAS_MONTHLY_QUOTA:
+                return False
+            transaction.set(
+                ref,
+                {"count": count + 1, "period": period, "customer_id": customer_id},
+                merge=True,
+            )
+            return True
+
+        return _increment(db.transaction())
+    except Exception:
+        return True

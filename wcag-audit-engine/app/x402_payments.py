@@ -40,7 +40,7 @@ _NETWORK = os.environ.get("X402_NETWORK", "eip155:8453")
 _PRICE = os.environ.get("X402_PRICE", "$0.03")
 
 _server: Optional[x402ResourceServer] = None
-_requirements = None
+_requirements_cache: dict = {}
 _initialized = False
 
 
@@ -58,39 +58,46 @@ def _get_server() -> x402ResourceServer:
     return _server
 
 
-async def _get_requirements():
-    global _requirements, _initialized
+async def _get_requirements(price: str):
+    """Cached per price -- a $0.03 payment must never satisfy a $0.10
+    challenge, so each price gets its own requirements object rather than
+    sharing one global cache across every route."""
+    global _initialized
     server = _get_server()
     if not _initialized:
         await server.initialize()
         _initialized = True
-    if _requirements is None:
+    if price not in _requirements_cache:
         config = ResourceConfig(
             scheme="exact",
             network=_NETWORK,
             pay_to=_PAY_TO_ADDRESS,
-            price=_PRICE,
+            price=price,
         )
-        _requirements = server.build_payment_requirements(config)
-    return _requirements
+        _requirements_cache[price] = server.build_payment_requirements(config)
+    return _requirements_cache[price]
 
 
-def payment_required_body() -> dict:
+def payment_required_body(price: Optional[str] = None) -> dict:
     """JSON body for a 402 response: what a caller needs to construct a
     valid payment, or an X-API-Key if they'd rather use Stripe billing."""
     return {
         "x402Version": 1,
         "scheme": "exact",
         "network": _NETWORK,
-        "price": _PRICE,
+        "price": price or _PRICE,
         "payTo": _PAY_TO_ADDRESS,
         "accepted_payment_header": "X-PAYMENT",
         "alternative": "X-API-Key header (Stripe-based billing) is also accepted",
     }
 
 
-async def verify_and_settle(payment_header: str) -> bool:
+async def verify_and_settle(payment_header: str, price: Optional[str] = None) -> bool:
     """Verify a signed X-PAYMENT header and settle it via the facilitator.
+
+    `price` must match whatever price the caller was actually challenged
+    with for this specific route -- defaults to the deploy-wide X402_PRICE
+    for callers (like the original /audit route) that don't vary price.
 
     Returns True only if the facilitator confirms both verification and
     settlement succeeded. Never raises past this boundary; any failure
@@ -101,7 +108,7 @@ async def verify_and_settle(payment_header: str) -> bool:
         return False
     try:
         payload = decode_payment_signature_header(payment_header)
-        requirements = await _get_requirements()
+        requirements = await _get_requirements(price or _PRICE)
         server = _get_server()
 
         verify_result = await server.verify_payment(payload, requirements[0])
@@ -114,12 +121,12 @@ async def verify_and_settle(payment_header: str) -> bool:
         return False
 
 
-def verify_and_settle_sync(payment_header: str) -> bool:
+def verify_and_settle_sync(payment_header: str, price: Optional[str] = None) -> bool:
     """Sync wrapper for the FastAPI route handler, which is itself sync
     (it calls Playwright's sync API). Any failure -- including there being
     no running event loop to reuse -- fails closed, same as the async path.
     """
     try:
-        return asyncio.run(verify_and_settle(payment_header))
+        return asyncio.run(verify_and_settle(payment_header, price))
     except Exception:
         return False

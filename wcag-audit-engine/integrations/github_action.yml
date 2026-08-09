@@ -1,0 +1,59 @@
+# HubVibe site-compliance bundle audit as a CI/CD gate.
+#
+# Copy this into .github/workflows/ in the repo you want audited, set the
+# HUBVIBE_API_KEY secret (from https://hubvibe-831480473793.us-south1.run.app,
+# see /billing/checkout for a subscription key), and adjust `AUDIT_URL`
+# below to point at your deployed preview/staging URL.
+#
+# Fails the build (non-zero exit) if the bundle's overall `pass` is false,
+# or if the request itself fails (including HTTP 402 -- an invalid or
+# missing HUBVIBE_API_KEY is treated as a hard failure, not skipped).
+
+name: HubVibe Site Compliance Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      audit_url:
+        description: "URL to audit (overrides AUDIT_URL below)"
+        required: false
+        type: string
+
+env:
+  AUDIT_URL: https://your-site.example.com
+  HUBVIBE_ENDPOINT: https://hubvibe-831480473793.us-south1.run.app/audit/bundle
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run HubVibe bundle audit ($0.10/call)
+        env:
+          HUBVIBE_API_KEY: ${{ secrets.HUBVIBE_API_KEY }}
+          TARGET_URL: ${{ inputs.audit_url || env.AUDIT_URL }}
+        run: |
+          set -euo pipefail
+
+          http_code=$(curl -s -o response.json -w "%{http_code}" -X POST "$HUBVIBE_ENDPOINT" \
+            -H "X-API-Key: $HUBVIBE_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"url\": \"$TARGET_URL\"}")
+
+          echo "HTTP status: $http_code"
+          python3 -m json.tool response.json || cat response.json
+
+          if [ "$http_code" != "200" ]; then
+            echo "::error::Audit request failed with HTTP $http_code (see response.json above)"
+            exit 1
+          fi
+
+          passed=$(python3 -c "import json; print(json.load(open('response.json'))['pass'])")
+          if [ "$passed" != "True" ]; then
+            echo "::error::Site compliance audit failed -- see findings above"
+            exit 1
+          fi
+
+          echo "Site compliance audit passed."

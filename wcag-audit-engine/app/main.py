@@ -12,17 +12,29 @@ from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field
 
 try:
-    from . import billing, mpp_payments, x402_payments
+    from . import audits, billing, mpp_payments, x402_payments
 except ImportError:
     # Loaded directly by file path (e.g. by tooling/tests) rather than as
-    # part of the `app` package -- fall back to a path-relative import so
-    # the module still resolves without requiring package context.
-    import sys
+    # part of the `app` package -- fall back to loading each sibling module
+    # from its file path under a service-specific name, not a bare `import
+    # billing`. Another service in this repo also has a module literally
+    # named billing.py; a bare `import billing` caches whichever one loads
+    # first in sys.modules and silently hands a second service the wrong
+    # module if both get imported into the same process (as happens in
+    # this repo's shared test suite).
+    import importlib.util
 
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import billing  # type: ignore
-    import mpp_payments  # type: ignore
-    import x402_payments  # type: ignore
+    def _load_sibling_module(name: str):
+        module_path = Path(__file__).resolve().parent / f"{name}.py"
+        spec = importlib.util.spec_from_file_location(f"wcag_audit_engine_{name}", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    audits = _load_sibling_module("audits")  # type: ignore
+    billing = _load_sibling_module("billing")  # type: ignore
+    mpp_payments = _load_sibling_module("mpp_payments")  # type: ignore
+    x402_payments = _load_sibling_module("x402_payments")  # type: ignore
 
 app = FastAPI(title="WCAG Audit Engine")
 
@@ -63,6 +75,14 @@ class AuditRequest(BaseModel):
     url: Optional[str] = Field(None, description="Live URL to audit instead of raw HTML")
 
 
+class UrlAuditRequest(BaseModel):
+    """For audit routes that need a live, fetchable URL -- security and
+    performance checks inspect real HTTP responses and real network
+    behavior, so raw HTML alone (no server to talk to) isn't enough."""
+
+    url: str
+
+
 class CheckoutRequest(BaseModel):
     email: str
 
@@ -86,21 +106,25 @@ class AuthContext:
         self.payment_method = payment_method
 
 
-def _payment_required_response(host: Optional[str] = None) -> JSONResponse:
+def _payment_required_response(host: Optional[str] = None, price_usd: float = 0.03) -> JSONResponse:
     """The 402 shape a caller needs to pay via x402, MPP, or get a Stripe
-    API key -- returned whenever none of those is attached and valid. This
-    is the sole "access denied" outcome for /audit; there is no path that
+    API key -- returned whenever none of those is attached and valid (or
+    a subscriber is over their included monthly quota). This is the sole
+    "access denied" outcome for a paid audit route; there is no path that
     falls through to granting access.
 
     Carries a WWW-Authenticate: Payment header per configured MPP method
     (spec-required for MPP conformance -- see mpp_payments.py), bound to the
-    request's own Host header as the MPP realm, plus the x402-style JSON
-    body for callers that read price/payTo from the body instead.
-    Cache-Control: no-store is required by the MPP core spec on every 402.
+    request's own Host header as the MPP realm and priced at this specific
+    route's rate, plus the x402-style JSON body for callers that read
+    price/payTo from the body instead. Cache-Control: no-store is required
+    by the MPP core spec on every 402.
     """
-    response = JSONResponse(status_code=402, content=x402_payments.payment_required_body())
+    response = JSONResponse(
+        status_code=402, content=x402_payments.payment_required_body(price=f"${price_usd:.2f}")
+    )
     response.headers["Cache-Control"] = "no-store"
-    for header_value in mpp_payments.www_authenticate_headers(realm=host):
+    for header_value in mpp_payments.www_authenticate_headers(realm=host, price_usd=price_usd):
         response.headers.append("WWW-Authenticate", header_value)
     return response
 
@@ -110,31 +134,38 @@ def _authenticate(
     x_payment: Optional[str],
     authorization: Optional[str],
     host: Optional[str] = None,
+    price_usd: float = 0.03,
 ):
     """Returns an AuthContext on success, or a 402 JSONResponse on failure.
 
     Three independent paths, checked cheapest-first, any one sufficient:
-    1. X-API-Key -- internal test key or a real Stripe-issued key.
-    2. X-PAYMENT -- x402 (crypto only), verified against a facilitator.
+    1. X-API-Key -- internal test key, or a real Stripe-issued key that
+       still has quota left in its included monthly allowance (once a
+       subscriber exceeds SAAS_MONTHLY_QUOTA scans this calendar month,
+       the bare key stops being sufficient on its own and falls through
+       to x402/MPP below, same as the landing page describes).
+    2. X-PAYMENT -- x402 (crypto only), verified against a facilitator,
+       for exactly `price_usd`.
     3. Authorization: Payment ... -- MPP (Stripe SPT for fiat, or Tempo for
-       crypto), verified directly against Stripe / the Tempo network.
-       `host` (the request's own Host header) must match the realm the
-       challenge was originally issued with.
+       crypto), verified directly against Stripe / the Tempo network, for
+       exactly `price_usd`. `host` (the request's own Host header) must
+       match the realm the challenge was originally issued with.
     """
     if x_api_key:
         if API_KEY and secrets.compare_digest(x_api_key, API_KEY):
-            # Internal/testing key: unlimited, unmetered, never billed.
+            # Internal/testing key: unlimited, unmetered, never billed,
+            # never quota-limited.
             return AuthContext(stripe_billable=False, payment_method="internal")
         if billing.is_configured():
             record = billing.lookup_key(x_api_key)
-            if record is not None:
+            if record is not None and billing.check_and_increment_quota(record["customer_id"]):
                 return AuthContext(
                     stripe_billable=True,
                     customer_id=record["customer_id"],
                     payment_method="stripe",
                 )
 
-    if x_payment and x402_payments.verify_and_settle_sync(x_payment):
+    if x_payment and x402_payments.verify_and_settle_sync(x_payment, price=f"${price_usd:.2f}"):
         # Payment already verified and settled on-chain by the facilitator
         # -- nothing further to bill via Stripe.
         return AuthContext(stripe_billable=False, payment_method="x402")
@@ -144,10 +175,52 @@ def _authenticate(
         if credential and mpp_payments.verify_and_settle_sync(credential, realm=host):
             # Already charged/settled (Stripe PaymentIntent or on-chain
             # Tempo transfer) inside verify_and_settle_sync -- nothing
-            # further to bill.
+            # further to bill. Note the credential itself carries the
+            # price (embedded in its HMAC-bound challenge), so there's
+            # nothing further to pass here beyond the realm check.
             return AuthContext(stripe_billable=False, payment_method="mpp")
 
-    return _payment_required_response(host=host)
+    return _payment_required_response(host=host, price_usd=price_usd)
+
+
+def _authorize_and_rate_limit(
+    x_api_key: Optional[str],
+    x_payment: Optional[str],
+    authorization: Optional[str],
+    request: Request,
+    price_usd: float,
+):
+    """Shared fail-closed auth + best-effort rate limiting for every paid
+    audit route. Returns (AuthContext, None) on success, or (None,
+    JSONResponse) when the caller should get that response immediately
+    instead of the route continuing.
+    """
+    auth = _authenticate(x_api_key, x_payment, authorization, host=_mpp_realm(request), price_usd=price_usd)
+    if isinstance(auth, JSONResponse):
+        return None, auth
+
+    # x402/MPP payers have no API key to key the limiter on -- fall back
+    # to IP. Either way this is best-effort abuse protection, not the
+    # billing boundary: that's Stripe usage records / on-chain settlement.
+    rate_limit_key = x_api_key or (request.client.host if request.client else "unknown")
+    _check_rate_limit(rate_limit_key)
+    return auth, None
+
+
+def _bill(auth, units: int = 1) -> Optional[str]:
+    """Records usage for a Stripe-subscription caller after a real audit
+    ran; a no-op for internal/x402/MPP callers, who are unmetered or
+    already settled. Returns a warning string on failure (never raises --
+    the customer already got a real, correct audit result, so a billing
+    hiccup should never withhold or corrupt that), or None on success/no-op.
+    """
+    if not auth.stripe_billable:
+        return None
+    try:
+        billing.record_usage(auth.customer_id, units=units)
+        return None
+    except Exception as exc:
+        return f"usage recording failed: {exc}"
 
 
 def _check_rate_limit(key: str) -> None:
@@ -296,16 +369,31 @@ def free_scan(payload: FreeScanRequest, request: Request):
     }
 
 
+_AUTH_DESCRIPTION = (
+    "One of: X-API-Key header (Stripe subscription billing, see "
+    "/billing/checkout -- included scans/month, then falls back to "
+    "per-call payment below); X-PAYMENT header (x402, see 402 response "
+    "body for price/network/payTo); or Authorization: Payment ... (MPP -- "
+    "Stripe SPT for fiat or Tempo network for crypto, see the "
+    "WWW-Authenticate response headers on a 402 for both challenges)"
+)
+_PAYMENT_METHODS = ["stripe_api_key", "x402", "mpp"]
+_URL_INPUT_SCHEMA = {"url": "string (required)"}
+_HTML_OR_URL_INPUT_SCHEMA = {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
+
+
 @app.get("/.well-known/agent.json")
 def agent_manifest():
     return {
         "schema_version": "1.0",
-        "name": "WCAG Audit Engine",
+        "name": "HubVibe Site Compliance Auditing Suite",
         "description": (
-            "Rule-based WCAG 2.1 A/AA accessibility audit powered by "
-            "axe-core, with optional AI-generated remediation notes. "
-            "Pass/fail is always determined by axe-core's rule engine, "
-            "never by the AI layer."
+            "Rule-based, verifiable site audits -- accessibility (axe-core), "
+            "SEO, security headers, and performance -- callable a la carte "
+            "or as a single bundle. Every result is a deterministic check "
+            "against the actual page; nothing here is an LLM guessing at "
+            "quality, and a check that couldn't run is never reported as a "
+            "false pass."
         ),
         "endpoints": [
             {
@@ -313,22 +401,77 @@ def agent_manifest():
                 "method": "POST",
                 "payment_required": True,
                 "price_usd": 0.03,
-                "auth": (
-                    "One of: X-API-Key header (Stripe subscription billing, "
-                    "see /billing/checkout); X-PAYMENT header (x402, see 402 "
-                    "response body for price/network/payTo); or Authorization: "
-                    "Payment ... (MPP -- Stripe SPT for fiat or Tempo network "
-                    "for crypto, see the WWW-Authenticate response headers on "
-                    "a 402 for both challenges)"
+                "input": _HTML_OR_URL_INPUT_SCHEMA,
+                "auth": _AUTH_DESCRIPTION,
+                "payment_methods": _PAYMENT_METHODS,
+                "note": "Alias of /audit/wcag, kept for backward compatibility.",
+            },
+            {
+                "path": "/audit/wcag",
+                "method": "POST",
+                "payment_required": True,
+                "price_usd": 0.03,
+                "input": _HTML_OR_URL_INPUT_SCHEMA,
+                "auth": _AUTH_DESCRIPTION,
+                "payment_methods": _PAYMENT_METHODS,
+                "description": "WCAG 2.1 A/AA accessibility audit via axe-core.",
+            },
+            {
+                "path": "/audit/seo",
+                "method": "POST",
+                "payment_required": True,
+                "price_usd": 0.03,
+                "input": _HTML_OR_URL_INPUT_SCHEMA,
+                "auth": _AUTH_DESCRIPTION,
+                "payment_methods": _PAYMENT_METHODS,
+                "description": (
+                    "Title, meta description, H1 structure, canonical link, "
+                    "OpenGraph tags, structured data, and lang attribute."
                 ),
-                "payment_methods": ["stripe_api_key", "x402", "mpp"],
+            },
+            {
+                "path": "/audit/security",
+                "method": "POST",
+                "payment_required": True,
+                "price_usd": 0.03,
+                "input": _URL_INPUT_SCHEMA,
+                "auth": _AUTH_DESCRIPTION,
+                "payment_methods": _PAYMENT_METHODS,
+                "description": (
+                    "HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking "
+                    "protection, Referrer-Policy, and CORS from a live HTTP "
+                    "response -- not a TLS/cipher scan or a penetration test."
+                ),
+            },
+            {
+                "path": "/audit/performance",
+                "method": "POST",
+                "payment_required": True,
+                "price_usd": 0.03,
+                "input": _URL_INPUT_SCHEMA,
+                "auth": _AUTH_DESCRIPTION,
+                "payment_methods": _PAYMENT_METHODS,
+                "description": (
+                    "DOM node count, transferred bytes, and request count "
+                    "from one real page load -- not a full Lighthouse audit."
+                ),
+            },
+            {
+                "path": "/audit/bundle",
+                "method": "POST",
+                "payment_required": True,
+                "price_usd": 0.10,
+                "input": _URL_INPUT_SCHEMA,
+                "auth": _AUTH_DESCRIPTION,
+                "payment_methods": _PAYMENT_METHODS,
+                "description": "Runs wcag + seo + security + performance against one URL, billed as a single call.",
             },
             {
                 "path": "/scan/free",
                 "method": "POST",
                 "payment_required": False,
                 "rate_limit": "3/day per IP",
-                "note": "Top-2 issues only; use /audit for the full report",
+                "note": "WCAG only, top-2 issues shown; use /audit/wcag for the full report.",
             },
         ],
     }
@@ -391,15 +534,9 @@ def audit(
     x_payment: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
 ):
-    auth = _authenticate(x_api_key, x_payment, authorization, host=_mpp_realm(request))
-    if isinstance(auth, JSONResponse):
-        return auth
-
-    # x402 payers have no API key to key the limiter on -- fall back to IP.
-    # Either way this is best-effort abuse protection, not the billing
-    # boundary: that's Stripe usage records / on-chain settlement, above.
-    rate_limit_key = x_api_key or (request.client.host if request.client else "unknown")
-    _check_rate_limit(rate_limit_key)
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    if err:
+        return err
 
     if not payload.html and not payload.url:
         raise HTTPException(status_code=400, detail="Provide 'html' or 'url'")
@@ -437,16 +574,203 @@ def audit(
         ],
     }
 
-    if auth.stripe_billable:
-        try:
-            billing.record_usage(auth.customer_id)
-        except Exception as exc:
-            # Revenue-affecting, but the customer already got a real,
-            # correct audit result -- never withhold or corrupt that
-            # because our own billing call failed.
-            result["billing_warning"] = f"usage recording failed: {exc}"
+    warning = _bill(auth)
+    if warning:
+        result["billing_warning"] = warning
 
     remediation = _remediation_notes(violations)
     if remediation is not None:
         result["remediation"] = remediation
+    return result
+
+
+@app.post("/audit/wcag")
+def audit_wcag(
+    payload: AuditRequest,
+    request: Request,
+    x_api_key: Optional[str] = Header(None),
+    x_payment: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Identical to /audit -- same axe-core check, same $0.03 price, kept
+    as its own path alongside the other 4 audit dimensions so a caller can
+    request accessibility specifically without relying on /audit's name."""
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    if err:
+        return err
+
+    if not payload.html and not payload.url:
+        raise HTTPException(status_code=400, detail="Provide 'html' or 'url'")
+
+    try:
+        raw = _run_axe(payload.html, payload.url)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
+        )
+
+    violations = raw.get("violations", [])
+    result = {
+        "status": "ok",
+        "pass": len(violations) == 0,
+        "engine": "axe-core",
+        "ruleset": "wcag2a, wcag2aa, wcag21a, wcag21aa",
+        "violations": [
+            {
+                "id": v["id"],
+                "impact": v.get("impact"),
+                "help": v.get("help"),
+                "help_url": v.get("helpUrl"),
+                "nodes_affected": len(v.get("nodes", [])),
+            }
+            for v in violations
+        ],
+    }
+    warning = _bill(auth)
+    if warning:
+        result["billing_warning"] = warning
+    return result
+
+
+@app.post("/audit/seo")
+def audit_seo(
+    payload: AuditRequest,
+    request: Request,
+    x_api_key: Optional[str] = Header(None),
+    x_payment: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    if err:
+        return err
+
+    if not payload.html and not payload.url:
+        raise HTTPException(status_code=400, detail="Provide 'html' or 'url'")
+
+    try:
+        result = audits.run_seo_audit(payload.html, payload.url)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
+        )
+
+    warning = _bill(auth)
+    if warning:
+        result["billing_warning"] = warning
+    return result
+
+
+@app.post("/audit/security")
+def audit_security(
+    payload: UrlAuditRequest,
+    request: Request,
+    x_api_key: Optional[str] = Header(None),
+    x_payment: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    if err:
+        return err
+
+    try:
+        result = audits.run_security_audit(payload.url)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
+        )
+
+    warning = _bill(auth)
+    if warning:
+        result["billing_warning"] = warning
+    return result
+
+
+@app.post("/audit/performance")
+def audit_performance(
+    payload: UrlAuditRequest,
+    request: Request,
+    x_api_key: Optional[str] = Header(None),
+    x_payment: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    if err:
+        return err
+
+    try:
+        result = audits.run_performance_audit(payload.url)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
+        )
+
+    warning = _bill(auth)
+    if warning:
+        result["billing_warning"] = warning
+    return result
+
+
+@app.post("/audit/bundle")
+def audit_bundle(
+    payload: UrlAuditRequest,
+    request: Request,
+    x_api_key: Optional[str] = Header(None),
+    x_payment: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Runs all four audits against one URL. Priced and billed as a single
+    $0.10 unit, not four separate $0.03 charges -- if any dimension fails
+    to run, the whole call fails (502) and nothing is billed, since a
+    partial bundle isn't the product being sold here."""
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.10)
+    if err:
+        return err
+
+    try:
+        wcag_raw = _run_axe(None, payload.url)
+        wcag_violations = wcag_raw.get("violations", [])
+        wcag_result = {
+            "status": "ok",
+            "pass": len(wcag_violations) == 0,
+            "engine": "axe-core",
+            "violations": [
+                {
+                    "id": v["id"],
+                    "impact": v.get("impact"),
+                    "help": v.get("help"),
+                    "help_url": v.get("helpUrl"),
+                    "nodes_affected": len(v.get("nodes", [])),
+                }
+                for v in wcag_violations
+            ],
+        }
+        seo_result = audits.run_seo_audit(None, payload.url)
+        security_result = audits.run_security_audit(payload.url)
+        performance_result = audits.run_performance_audit(payload.url)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "pass": None, "detail": f"Bundle audit could not complete: {exc}"},
+        )
+
+    result = {
+        "status": "ok",
+        "pass": all(
+            r["pass"] for r in (wcag_result, seo_result, security_result, performance_result)
+        ),
+        "wcag": wcag_result,
+        "seo": seo_result,
+        "security": security_result,
+        "performance": performance_result,
+    }
+    # 3 units against the existing $0.03 meter (~$0.09) for Stripe
+    # subscribers -- see billing.record_usage's docstring for why this is
+    # an approximation of the $0.10 price rather than exact.
+    warning = _bill(auth, units=3)
+    if warning:
+        result["billing_warning"] = warning
     return result

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WCAG Audit Engine — accessibility monitoring for small business sites</title>
-<meta name="description" content="Free automated WCAG 2.1 AA scan, plus continuous monitoring so you have a documented remediation record before an ADA demand letter shows up.">
+<title>HubVibe — site compliance auditing for humans and AI agents</title>
+<meta name="description" content="Real, rule-based accessibility, SEO, security, and performance audits. One free human scan, an Agency plan for teams, and per-call machine pricing for AI agents.">
 <style>
   :root {
     --bg: #0b0f14;
@@ -59,13 +59,29 @@
   .issue:last-child { border-bottom: none; }
   .impact { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
   .muted-note { color: var(--muted); font-size: 0.85rem; margin-top: 14px; }
-  .pricing-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .pricing-columns { display: grid; grid-template-columns: 1fr; gap: 20px; }
+  @media (min-width: 720px) { .pricing-columns { grid-template-columns: 1fr 1fr; } }
   .price { font-size: 2rem; font-weight: 700; }
   .price span { font-size: 0.95rem; color: var(--muted); font-weight: 400; }
+  .rate-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; margin: 4px 0 16px; }
+  .rate-table td { padding: 8px 0; border-bottom: 1px solid var(--panel-border); }
+  .rate-table td:last-child { text-align: right; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .tier-badge {
+    display: inline-block; font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--muted); background: rgba(159,176,195,0.12); border: 1px solid var(--panel-border);
+    padding: 3px 9px; border-radius: 999px; margin-bottom: 10px;
+  }
   ul.features { list-style: none; padding: 0; margin: 14px 0 20px; color: var(--muted); }
   ul.features li { padding: 4px 0; }
   ul.features li::before { content: "✓ "; color: var(--ok); }
   .disclosure { color: var(--muted); font-size: 0.85rem; }
+  pre.curl-block {
+    background: #0e1420; border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 14px; font-size: 0.82rem; overflow-x: auto; margin: 4px 0 8px; position: relative;
+  }
+  .copy-button {
+    padding: 6px 12px; font-size: 0.8rem; margin-top: 4px;
+  }
   footer { padding: 40px 0 60px; color: var(--muted); font-size: 0.85rem; text-align: center; }
   a { color: var(--accent-strong); }
   code { background: #0e1420; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
@@ -74,17 +90,19 @@
 <body>
 <div class="wrap">
   <header class="hero">
-    <span class="badge">axe-core powered · not a legal certification</span>
-    <h1>Know what's actually wrong with your site's accessibility — before someone else finds it first.</h1>
+    <span class="badge">axe-core + real rule-based checks · not a legal certification</span>
+    <h1>Site compliance auditing built for humans and for the AI agents that increasingly buy on their behalf.</h1>
     <p class="sub">
-      A free instant scan, then continuous monitoring so you have a real,
-      dated remediation record. Built on axe-core, the same rule engine
-      real accessibility tools use — not an AI guessing at compliance.
+      Real, deterministic checks — accessibility (axe-core), SEO, security
+      headers, and performance — never an LLM guessing at quality. One
+      free human scan below, an Agency plan for teams, and per-call
+      machine pricing so an AI agent can pay and audit a site without a
+      human setting up billing first.
     </p>
   </header>
 
   <section>
-    <h2>Free instant scan</h2>
+    <h2>Free scan (one per visitor, humans only)</h2>
     <div class="panel">
       <form class="scan-form" id="scan-form">
         <input type="url" id="scan-url" placeholder="https://yoursite.com" required>
@@ -93,29 +111,63 @@
       </form>
       <div id="scan-result"></div>
       <p class="disclosure">
-        Limited to 3 free scans/day per visitor, and shows your top 2 issues
-        only — not the full report. This is a one-time snapshot, not
-        certification of compliance: automated tools like this one catch a
-        meaningful share of WCAG issues, not all of them.
+        Limited to 3 free WCAG scans/day per visitor, and shows your top 2
+        issues only — not the full report, and not SEO/security/performance.
+        This is a one-time snapshot, not certification of compliance:
+        automated tools like this one catch a meaningful share of WCAG
+        issues, not all of them. Every other path below is a paid call —
+        there is no unlimited or unauthenticated tier for programmatic use.
       </p>
     </div>
   </section>
 
   <section>
-    <h2>Continuous monitoring</h2>
-    <div class="panel pricing-grid">
-      <div class="price">$0.03 <span>per scan — billed monthly via Stripe, no minimum, no flat fee</span></div>
-      <ul class="features">
-        <li>Full violation list with every axe-core finding, not just the top 2</li>
-        <li>AI-drafted, plain-language remediation notes per issue</li>
-        <li>Dated scan history — the paper trail that matters if you're ever challenged</li>
-        <li>Programmatic access via API (<code>X-API-Key</code>) for CI pipelines</li>
-      </ul>
-      <form id="checkout-form">
-        <input type="email" id="checkout-email" placeholder="you@company.com" required style="width:100%; margin-bottom: 12px;">
-        <button type="submit" id="checkout-button">Start monitoring</button>
-      </form>
-      <p class="disclosure" id="checkout-message"></p>
+    <h2>Pricing</h2>
+    <div class="pricing-columns">
+      <div class="panel">
+        <span class="tier-badge">SaaS · humans</span>
+        <h3 style="margin:0 0 4px;">Agency / Developer Plan</h3>
+        <div class="price">$49 <span>/ month, via Stripe Checkout</span></div>
+        <ul class="features">
+          <li>Up to 1,500 automated page scans/month included</li>
+          <li>Overage beyond 1,500 falls back to per-call machine rates automatically</li>
+          <li>All four audit types: accessibility, SEO, security, performance</li>
+          <li>AI-drafted, plain-language remediation notes per issue</li>
+          <li>Dated scan history and programmatic access via <code>X-API-Key</code></li>
+        </ul>
+        <form id="checkout-form">
+          <input type="email" id="checkout-email" placeholder="you@company.com" required style="width:100%; margin-bottom: 12px;">
+          <button type="submit" id="checkout-button">Start subscription</button>
+        </form>
+        <p class="disclosure" id="checkout-message"></p>
+      </div>
+
+      <div class="panel">
+        <span class="tier-badge">A2A · AI swarms &amp; APIs</span>
+        <h3 style="margin:0 0 4px;">Programmatic x402 / MPP Micropayments</h3>
+        <p class="disclosure" style="margin-top:0;">No signup, no subscription — an agent pays per call and gets the result. Software doesn't need a free tier.</p>
+        <table class="rate-table">
+          <tr><td><code>/audit/wcag</code></td><td>$0.03 / call</td></tr>
+          <tr><td><code>/audit/seo</code></td><td>$0.03 / call</td></tr>
+          <tr><td><code>/audit/security</code></td><td>$0.03 / call</td></tr>
+          <tr><td><code>/audit/performance</code></td><td>$0.03 / call</td></tr>
+          <tr><td><code>/audit/bundle</code> (all four)</td><td>$0.10 / call</td></tr>
+        </table>
+        <p class="disclosure" style="margin-bottom:6px;">Example: a $0.10 x402 call to the full bundle —</p>
+        <pre class="curl-block" id="curl-example">curl -X POST https://hubvibe-831480473793.us-south1.run.app/audit/bundle \
+  -H "Content-Type: application/json" \
+  -H "X-PAYMENT: &lt;signed x402 payment header&gt;" \
+  -d '{"url": "https://example.com"}'</pre>
+        <button type="button" class="copy-button" id="copy-curl-button">Copy</button>
+        <p class="disclosure">
+          No X-PAYMENT header, or an invalid one? You get back HTTP 402
+          with the exact price, network, and payment address needed —
+          construct the header with an x402 client library (or MPP, see
+          the <a href="/.well-known/agent.json">agent manifest</a>), not by
+          hand. A Stripe <code>X-API-Key</code> works here too if you'd
+          rather bill an agent's calls to a human account.
+        </p>
+      </div>
     </div>
   </section>
 
@@ -188,11 +240,23 @@ document.getElementById("checkout-form").addEventListener("submit", async (e) =>
 
   if (!ok || !data.checkout_url) {
     button.disabled = false;
-    button.textContent = "Start monitoring";
+    button.textContent = "Start subscription";
     messageEl.textContent = data.detail || "Checkout isn't available right now.";
     return;
   }
   window.location.href = data.checkout_url;
+});
+
+document.getElementById("copy-curl-button").addEventListener("click", async () => {
+  const button = document.getElementById("copy-curl-button");
+  const text = document.getElementById("curl-example").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "Copied";
+  } catch (err) {
+    button.textContent = "Select the text above to copy";
+  }
+  setTimeout(() => { button.textContent = "Copy"; }, 2000);
 });
 </script>
 </body>

@@ -1,12 +1,16 @@
-# WCAG Audit Engine
+# HubVibe Site Compliance Auditing Suite
 
-A metered A2A agent that audits HTML (or a live URL) against WCAG 2.1 A/AA
-using [axe-core](https://github.com/dequelabs/axe-core) — the same
-rule-based accessibility engine used by Deque's own tooling and most other
-real accessibility scanners — via
-[axe-playwright-python](https://pypi.org/project/axe-playwright-python/).
-An optional AI layer (Gemini) can generate plain-language remediation notes,
-but it never decides pass/fail — that's always axe-core's rule engine.
+A metered A2A service with five real, rule-based audit endpoints:
+**accessibility** (WCAG 2.1 A/AA via
+[axe-core](https://github.com/dequelabs/axe-core)/
+[axe-playwright-python](https://pypi.org/project/axe-playwright-python/)),
+**SEO** (title/meta/OpenGraph/structured-data), **security** (HTTPS/HSTS/
+CSP/CORS response headers), **performance** (DOM size/payload weight/request
+count from a real page load), and a **bundle** that runs all four in one
+call. An optional AI layer (Gemini) can generate plain-language remediation
+notes on the accessibility results, but it never decides pass/fail — that's
+always the deterministic rule engine for each check (see `app/audits.py`
+for SEO/security/performance).
 
 ## Why this exists
 
@@ -36,10 +40,26 @@ tell "verified compliant" from "the check never ran." This version instead:
 
 ## API
 
-`POST /audit`
-Headers: `X-API-Key: <key>` **or** `X-PAYMENT: <x402 signed payment>` **or**
+Five paid audit routes, all with identical auth (see below) and identical
+honest-failure behavior (502 + `"pass": null` if the check itself couldn't
+run, never billed):
+
+| Route | Input | Price | Checks |
+|---|---|---|---|
+| `POST /audit` | `html` or `url` | $0.03 | Alias of `/audit/wcag`, kept for compatibility |
+| `POST /audit/wcag` | `html` or `url` | $0.03 | WCAG 2.1 A/AA via axe-core |
+| `POST /audit/seo` | `html` or `url` | $0.03 | Title, meta description, H1s, canonical, OpenGraph, structured data, lang |
+| `POST /audit/security` | `url` (required) | $0.03 | HTTPS, HSTS, CSP, X-Content-Type-Options, frame protection, Referrer-Policy, CORS |
+| `POST /audit/performance` | `url` (required) | $0.03 | DOM node count, transferred bytes, request count from one real page load |
+| `POST /audit/bundle` | `url` (required) | $0.10 | All four above, atomically -- if any fails, the whole call fails and nothing is billed |
+
+`security`/`performance`/`bundle` need a live, fetchable URL (they inspect a
+real HTTP response / real browser load) -- raw HTML alone isn't enough for
+those three, unlike `wcag`/`seo`.
+
+Headers on every route: `X-API-Key: <key>` **or**
+`X-PAYMENT: <x402 signed payment>` **or**
 `Authorization: Payment <base64url MPP credential>`
-Body: `{"html": "<...>"}` or `{"url": "https://..."}`
 
 If none of those is present or valid, the response is HTTP 402 with both:
 - the x402-style JSON body (for callers reading price/payTo out of the body)
@@ -94,11 +114,28 @@ submitted about their own site through the form, nothing scraped or bought.
 
 ## Getting paid
 
-Billing is Stripe usage-based (metered) billing: a customer subscribes once
-via Checkout, and every real `/audit` call reports one Meter Event. Stripe
+Two human/machine tiers, both real:
+
+- **Agency / Developer Plan** ($49/month, Stripe subscription Checkout):
+  1,500 scans/month included across all five routes; once a subscriber
+  exceeds that in a calendar month, their `X-API-Key` alone is no longer
+  sufficient (`billing.check_and_increment_quota`, Firestore-backed, reset
+  monthly) and the call falls through to x402/MPP per-call payment instead
+  -- same three-way auth check every route already does, so "overage"
+  isn't a special code path, just the existing fallback kicking in.
+- **Programmatic machine payments** ($0.03/call individual, $0.10/call
+  bundle): x402 or MPP, no subscription, no signup -- see the two sections
+  below.
+
+Every real call also still reports a Stripe Meter Event
+(`billing.record_usage`) regardless of which auth path was used to bill it
+via Stripe, so usage history stays centralized in Stripe either way. Stripe
 owns the balance and the invoicing — this service only stores a thin
 `api_key -> Stripe customer_id` mapping in Firestore, so there's no custom
 balance-tracking code that can drift from what Stripe actually charges.
+(The $0.10 bundle price is approximated as 3 Meter Events, ~$0.09, against
+the existing flat per-event meter rather than requiring a second Stripe
+Price/meter just for this -- see `record_usage`'s docstring.)
 
 Customer-facing flow (all handled by this service, no external pages
 required to make it work):
@@ -109,19 +146,29 @@ required to make it work):
    `CHECKOUT_SUCCESS_URL`, if you set one to override the default). That
    page polls `GET /billing/api-key` until the webhook lands and displays
    the customer's key with a ready-to-run `curl` example.
-3. The customer uses that key as `X-API-Key` on `/audit`. Every successful
-   audit reports usage to Stripe; Stripe bills them on its normal cycle.
+3. The customer uses that key as `X-API-Key` on any `/audit*` route. Every
+   successful audit reports usage to Stripe; Stripe bills them on its
+   normal cycle.
 
 One-time setup in the Stripe Dashboard (not something this code can do for
 you — it needs your Stripe account):
 
-1. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`,
+1. **Product catalog**: create a flat recurring Price (e.g. $49/month,
+   *not* `usage_type: metered`) for the Agency/Developer plan. Note the
+   Price ID -> `STRIPE_FLAT_SUBSCRIPTION_PRICE_ID`. If you skip this,
+   checkout falls back to the pure-metered price below so nothing breaks
+   -- but the "$49/month, 1,500 included" landing-page copy is only
+   actually true once this exists.
+2. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`,
    aggregation = count).
-2. **Product catalog**: create a recurring Price with `usage_type: metered`
-   attached to that meter (e.g. $0.01 per unit). Note the Price ID.
-3. **Developers > Webhooks**: add an endpoint at
+3. **Product catalog**: create a recurring Price with `usage_type: metered`
+   attached to that meter (e.g. $0.03 per unit). Note the Price ID ->
+   `STRIPE_METERED_PRICE_ID`.
+4. **Developers > Webhooks**: add an endpoint at
    `https://<your-service>/billing/webhook` subscribed to
    `checkout.session.completed`. Note the signing secret.
+
+`SAAS_MONTHLY_QUOTA` (default `1500`) controls the included-scans cap.
 
 Then provision the secrets and deploy (see below). `AUDIT_API_KEY` remains
 available as an internal/testing key that bypasses Stripe entirely — leave
@@ -220,6 +267,23 @@ header on a 402 for that method) and stays inert:
   `Host` header (minus port), which is what the spec calls for and is what
   `mppx validate` checks for. Only set this to override that.
 
+## Pipeline integrations
+
+- `integrations/langchain_tool.py` — a LangChain `@tool`-decorated function
+  calling `/audit/bundle`; recent CrewAI versions accept LangChain tools
+  directly, so this works for both without a separate wrapper. Auth is
+  `HUBVIBE_API_KEY` only (x402/MPP payment construction is out of scope for
+  a thin tool wrapper -- use the `x402`/`mppx` client libraries directly if
+  an agent should pay per-call instead of holding a subscription key).
+- `integrations/github_action.yml` — a copy-paste GitHub Actions workflow
+  that runs `/audit/bundle` as a CI/CD gate and fails the build on either a
+  failed audit or a failed/unauthenticated request.
+- `mcp.json` (repo root of this service) — tool definitions for all five
+  routes in MCP's `{name, description, inputSchema}` shape, with a
+  non-standard `httpEndpoint` extension mapping each onto its actual route
+  and price, since this is a plain REST API, not a live MCP stdio/SSE
+  server. The same schema is also served live at `/.well-known/agent.json`.
+
 ## Local development
 
 ```bash
@@ -258,7 +322,7 @@ gcloud run deploy wcag-audit-engine \
   --source=wcag-audit-engine \
   --region=us-central1 \
   --memory=1Gi \
-  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
+  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,STRIPE_FLAT_SUBSCRIPTION_PRICE_ID=price_...,SAAS_MONTHLY_QUOTA=1500,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
 
