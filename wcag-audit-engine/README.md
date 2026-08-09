@@ -22,10 +22,13 @@ tell "verified compliant" from "the check never ran." This version instead:
   LLM to guess at conformance.
 - **Never coerces an error into a pass.** If the audit can't run, `/audit`
   returns HTTP 502 with `"pass": null`, not `"pass": true`.
-- **Requires an API key** (`X-API-Key` header, checked with constant-time
-  comparison) and rate-limits per key, since this is a metered endpoint
-  sitting in front of a paid LLM call — an open, unauthenticated endpoint is
-  a wallet-drain vector, not just a security gap.
+- **Requires either an API key or a verified x402 payment** (`X-API-Key`,
+  checked with constant-time comparison, or `X-PAYMENT`, verified and
+  settled against a facilitator) and rate-limits per key, since this is a
+  metered endpoint sitting in front of a paid LLM call — an open,
+  unauthenticated endpoint is a wallet-drain vector, not just a security
+  gap. Neither header present, or both invalid, always gets HTTP 402 with
+  the price/network/payTo details needed to pay — never a fallback pass.
 - **Keeps secrets out of the deploy command.** `GEMINI_API_KEY` and
   `AUDIT_API_KEY` are meant to be provisioned via Secret Manager, not
   `--set-env-vars` (which lands in shell history and Cloud Build logs).
@@ -33,8 +36,22 @@ tell "verified compliant" from "the check never ran." This version instead:
 ## API
 
 `POST /audit`
-Headers: `X-API-Key: <key>`
+Headers: `X-API-Key: <key>` **or** `X-PAYMENT: <x402 signed payment>`
 Body: `{"html": "<...>"}` or `{"url": "https://..."}`
+
+If neither header is present or valid, the response is HTTP 402:
+
+```json
+{
+  "x402Version": 1,
+  "scheme": "exact",
+  "network": "eip155:8453",
+  "price": "$0.03",
+  "payTo": "0x...",
+  "accepted_payment_header": "X-PAYMENT",
+  "alternative": "X-API-Key header (Stripe-based billing) is also accepted"
+}
+```
 
 ```json
 {
@@ -105,6 +122,28 @@ available as an internal/testing key that bypasses Stripe entirely — leave
 it unset once real customers exist, or keep it only for your own smoke
 tests.
 
+### Getting paid without Stripe: x402
+
+`/audit` also accepts a per-request x402 payment (`X-PAYMENT` header) as an
+alternative to a Stripe-issued API key — for AI agents that can pay
+on-the-fly without a human first setting up billing. Verification and
+settlement are delegated entirely to a facilitator via the official
+[`x402`](https://pypi.org/project/x402/) package
+(`wcag-audit-engine/app/x402_payments.py`); this service never hand-rolls
+signature checking, and fails closed (rejects with 402) on any missing
+config, malformed header, or facilitator error.
+
+Until these are set, `x402_payments.is_configured()` is `False` and every
+`X-PAYMENT` header is rejected — the Stripe `X-API-Key` path is unaffected
+either way:
+
+- `X402_FACILITATOR_URL` — your facilitator's base URL (Stripe now offers a
+  native x402 facilitator on the same Stripe account used above; any
+  x402-compatible facilitator works).
+- `X402_PAY_TO_ADDRESS` — the wallet address that receives payment.
+- `X402_NETWORK` — CAIP-2 network id (default `eip155:8453`, Base mainnet).
+- `X402_PRICE` — default `$0.03`.
+
 ## Local development
 
 ```bash
@@ -143,7 +182,7 @@ gcloud run deploy wcag-audit-engine \
   --source=wcag-audit-engine \
   --region=us-central1 \
   --memory=1Gi \
-  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call \
+  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03 \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
 
@@ -151,7 +190,8 @@ gcloud run deploy wcag-audit-engine \
 actual credentials go through `--set-secrets`. `CHECKOUT_SUCCESS_URL` /
 `CHECKOUT_CANCEL_URL` default to this same service's own `/billing/success`
 and `/billing/cancel` pages — only set them if you're fronting this with a
-different public domain.)
+different public domain. Omit the `X402_*` vars entirely to deploy without
+x402 support — the Stripe `X-API-Key` path works unchanged either way.)
 
 `--allow-unauthenticated` at the Cloud Run/IAM layer is fine here (or
 omit it and front the service with your own gateway) — request-level access

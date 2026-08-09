@@ -55,12 +55,18 @@ def test_agent_manifest_advertises_payment(monkeypatch):
 
 
 def test_audit_requires_api_key(monkeypatch):
+    # Neither X-API-Key nor X-PAYMENT attached -- caller gets a 402 telling
+    # them how to pay, not a silent pass and not a bare 401.
     from fastapi.testclient import TestClient
 
     module = _load_main(monkeypatch)
     client = TestClient(module.app)
     response = client.post("/audit", json={"url": "https://example.com"})
-    assert response.status_code == 401
+    assert response.status_code == 402
+    body = response.json()
+    assert body["price"] == "$0.03"
+    assert body["accepted_payment_header"] == "X-PAYMENT"
+    assert "payTo" in body
 
 
 def test_audit_rejects_wrong_api_key(monkeypatch):
@@ -71,7 +77,7 @@ def test_audit_rejects_wrong_api_key(monkeypatch):
     response = client.post(
         "/audit", json={"url": "https://example.com"}, headers={"X-API-Key": "wrong"}
     )
-    assert response.status_code == 401
+    assert response.status_code == 402
 
 
 def test_audit_rejects_unbilled_key_when_billing_unconfigured(monkeypatch):
@@ -85,7 +91,68 @@ def test_audit_rejects_unbilled_key_when_billing_unconfigured(monkeypatch):
     response = client.post(
         "/audit", json={"url": "https://example.com"}, headers={"X-API-Key": "anything"}
     )
-    assert response.status_code == 401
+    assert response.status_code == 402
+
+
+def test_audit_rejects_garbage_x_payment_header(monkeypatch):
+    # A malformed/unsigned X-PAYMENT must fail closed exactly like a bad
+    # API key -- never fall through to a free audit.
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "not-a-real-payment"},
+    )
+    assert response.status_code == 402
+
+
+def test_audit_rejects_x_payment_when_x402_unconfigured(monkeypatch):
+    # No X402_FACILITATOR_URL / X402_PAY_TO_ADDRESS set in CI -- even a
+    # well-formed-looking X-PAYMENT header must be rejected, never trusted
+    # on its own.
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    assert module.x402_payments.is_configured() is False
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "eyJmYWtlIjogInBheWxvYWQifQ=="},
+    )
+    assert response.status_code == 402
+
+
+def test_authenticate_accepts_internal_key_without_x_payment(monkeypatch):
+    # The existing Stripe/internal-key path must keep working untouched by
+    # the x402 addition -- it doesn't need an X-PAYMENT header at all.
+    module = _load_main(monkeypatch, api_key="test-key")
+    auth = module._authenticate("test-key", None)
+    assert isinstance(auth, module.AuthContext)
+    assert auth.stripe_billable is False
+    assert auth.payment_method == "internal"
+
+
+def test_authenticate_x402_success_grants_access(monkeypatch):
+    # With a facilitator that confirms verification+settlement, a valid
+    # X-PAYMENT alone (no API key) is sufficient.
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header: True)
+    auth = module._authenticate(None, "some-signed-payment")
+    assert isinstance(auth, module.AuthContext)
+    assert auth.stripe_billable is False
+    assert auth.payment_method == "x402"
+
+
+def test_authenticate_x402_failure_returns_402(monkeypatch):
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header: False)
+    result = module._authenticate(None, "some-signed-payment")
+    assert isinstance(result, module.JSONResponse)
+    assert result.status_code == 402
 
 
 def test_billing_endpoints_501_when_unconfigured(monkeypatch):
