@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field
 
 try:
-    from . import billing, x402_payments
+    from . import billing, mpp_payments, x402_payments
 except ImportError:
     # Loaded directly by file path (e.g. by tooling/tests) rather than as
     # part of the `app` package -- fall back to a path-relative import so
@@ -21,6 +21,7 @@ except ImportError:
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import billing  # type: ignore
+    import mpp_payments  # type: ignore
     import x402_payments  # type: ignore
 
 app = FastAPI(title="WCAG Audit Engine")
@@ -85,21 +86,40 @@ class AuthContext:
         self.payment_method = payment_method
 
 
-def _payment_required_response() -> JSONResponse:
-    """The 402 shape a caller needs to either pay via x402 or get a Stripe
-    API key -- returned whenever neither a valid X-API-Key nor a valid
-    X-PAYMENT is attached. This is the sole "access denied" outcome for
-    /audit; there is no path that falls through to granting access."""
-    return JSONResponse(status_code=402, content=x402_payments.payment_required_body())
+def _payment_required_response(host: Optional[str] = None) -> JSONResponse:
+    """The 402 shape a caller needs to pay via x402, MPP, or get a Stripe
+    API key -- returned whenever none of those is attached and valid. This
+    is the sole "access denied" outcome for /audit; there is no path that
+    falls through to granting access.
+
+    Carries a WWW-Authenticate: Payment header per configured MPP method
+    (spec-required for MPP conformance -- see mpp_payments.py), bound to the
+    request's own Host header as the MPP realm, plus the x402-style JSON
+    body for callers that read price/payTo from the body instead.
+    Cache-Control: no-store is required by the MPP core spec on every 402.
+    """
+    response = JSONResponse(status_code=402, content=x402_payments.payment_required_body())
+    response.headers["Cache-Control"] = "no-store"
+    for header_value in mpp_payments.www_authenticate_headers(realm=host):
+        response.headers.append("WWW-Authenticate", header_value)
+    return response
 
 
-def _authenticate(x_api_key: Optional[str], x_payment: Optional[str]):
+def _authenticate(
+    x_api_key: Optional[str],
+    x_payment: Optional[str],
+    authorization: Optional[str],
+    host: Optional[str] = None,
+):
     """Returns an AuthContext on success, or a 402 JSONResponse on failure.
 
-    X-API-Key (internal test key or a real Stripe-issued key) is checked
-    first since it's the cheaper check; X-PAYMENT (x402) is only verified
-    against the facilitator if no valid API key was presented. Either path
-    succeeding is sufficient -- this never requires both.
+    Three independent paths, checked cheapest-first, any one sufficient:
+    1. X-API-Key -- internal test key or a real Stripe-issued key.
+    2. X-PAYMENT -- x402 (crypto only), verified against a facilitator.
+    3. Authorization: Payment ... -- MPP (Stripe SPT for fiat, or Tempo for
+       crypto), verified directly against Stripe / the Tempo network.
+       `host` (the request's own Host header) must match the realm the
+       challenge was originally issued with.
     """
     if x_api_key:
         if API_KEY and secrets.compare_digest(x_api_key, API_KEY):
@@ -119,7 +139,15 @@ def _authenticate(x_api_key: Optional[str], x_payment: Optional[str]):
         # -- nothing further to bill via Stripe.
         return AuthContext(stripe_billable=False, payment_method="x402")
 
-    return _payment_required_response()
+    if authorization and authorization.startswith("Payment "):
+        credential = authorization[len("Payment "):].strip()
+        if credential and mpp_payments.verify_and_settle_sync(credential, realm=host):
+            # Already charged/settled (Stripe PaymentIntent or on-chain
+            # Tempo transfer) inside verify_and_settle_sync -- nothing
+            # further to bill.
+            return AuthContext(stripe_billable=False, payment_method="mpp")
+
+    return _payment_required_response(host=host)
 
 
 def _check_rate_limit(key: str) -> None:
@@ -286,11 +314,14 @@ def agent_manifest():
                 "payment_required": True,
                 "price_usd": 0.03,
                 "auth": (
-                    "Either an X-API-Key header (Stripe billing, see "
-                    "/billing/checkout) or an X-PAYMENT header (x402, see "
-                    "402 response body for price/network/payTo)"
+                    "One of: X-API-Key header (Stripe subscription billing, "
+                    "see /billing/checkout); X-PAYMENT header (x402, see 402 "
+                    "response body for price/network/payTo); or Authorization: "
+                    "Payment ... (MPP -- Stripe SPT for fiat or Tempo network "
+                    "for crypto, see the WWW-Authenticate response headers on "
+                    "a 402 for both challenges)"
                 ),
-                "payment_methods": ["stripe_api_key", "x402"],
+                "payment_methods": ["stripe_api_key", "x402", "mpp"],
             },
             {
                 "path": "/scan/free",
@@ -344,14 +375,23 @@ async def stripe_webhook(request: Request):
     return {"received": True}
 
 
+def _mpp_realm(request: Request) -> Optional[str]:
+    """MPP realm SHOULD be the server's bare hostname -- strip the port off
+    the Host header (":8811" locally, absent behind Cloud Run's HTTPS
+    frontend, but strip it either way rather than depend on that)."""
+    host = request.headers.get("host")
+    return host.split(":")[0] if host else None
+
+
 @app.post("/audit")
 def audit(
     payload: AuditRequest,
     request: Request,
     x_api_key: Optional[str] = Header(None),
     x_payment: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
-    auth = _authenticate(x_api_key, x_payment)
+    auth = _authenticate(x_api_key, x_payment, authorization, host=_mpp_realm(request))
     if isinstance(auth, JSONResponse):
         return auth
 

@@ -22,13 +22,14 @@ tell "verified compliant" from "the check never ran." This version instead:
   LLM to guess at conformance.
 - **Never coerces an error into a pass.** If the audit can't run, `/audit`
   returns HTTP 502 with `"pass": null`, not `"pass": true`.
-- **Requires either an API key or a verified x402 payment** (`X-API-Key`,
-  checked with constant-time comparison, or `X-PAYMENT`, verified and
-  settled against a facilitator) and rate-limits per key, since this is a
-  metered endpoint sitting in front of a paid LLM call — an open,
-  unauthenticated endpoint is a wallet-drain vector, not just a security
-  gap. Neither header present, or both invalid, always gets HTTP 402 with
-  the price/network/payTo details needed to pay — never a fallback pass.
+- **Requires an API key, a verified x402 payment, or a verified MPP
+  payment** (`X-API-Key`, checked with constant-time comparison; `X-PAYMENT`,
+  verified and settled against an x402 facilitator; or `Authorization:
+  Payment ...`, verified directly against Stripe or the Tempo network) and
+  rate-limits per key, since this is a metered endpoint sitting in front of
+  a paid LLM call — an open, unauthenticated endpoint is a wallet-drain
+  vector, not just a security gap. None present, or all invalid, always
+  gets HTTP 402 with everything needed to pay — never a fallback pass.
 - **Keeps secrets out of the deploy command.** `GEMINI_API_KEY` and
   `AUDIT_API_KEY` are meant to be provisioned via Secret Manager, not
   `--set-env-vars` (which lands in shell history and Cloud Build logs).
@@ -36,10 +37,15 @@ tell "verified compliant" from "the check never ran." This version instead:
 ## API
 
 `POST /audit`
-Headers: `X-API-Key: <key>` **or** `X-PAYMENT: <x402 signed payment>`
+Headers: `X-API-Key: <key>` **or** `X-PAYMENT: <x402 signed payment>` **or**
+`Authorization: Payment <base64url MPP credential>`
 Body: `{"html": "<...>"}` or `{"url": "https://..."}`
 
-If neither header is present or valid, the response is HTTP 402:
+If none of those is present or valid, the response is HTTP 402 with both:
+- the x402-style JSON body (for callers reading price/payTo out of the body)
+- one `WWW-Authenticate: Payment ...` header per configured MPP method (the
+  spec-conformant challenge -- see mppx validate below), each carrying its
+  own base64url-encoded `request` with method-specific price/recipient/etc.
 
 ```json
 {
@@ -144,6 +150,56 @@ either way:
 - `X402_NETWORK` — CAIP-2 network id (default `eip155:8453`, Base mainnet).
 - `X402_PRICE` — default `$0.03`.
 
+### Getting paid without Stripe subscriptions: MPP
+
+`/audit` also accepts [MPP](https://docs.stripe.com/payments/machine/mpp)
+(Machine Payments Protocol -- an open standard co-authored by Stripe and
+Tempo) via `Authorization: Payment <credential>`. Unlike x402 (crypto-only,
+Coinbase-authored) or the Stripe subscription flow above (human sets up
+billing once, in advance), MPP covers **both** fiat and crypto per-request,
+with no advance setup on the payer's side:
+
+- **stripe** method: a single-use Stripe Shared Payment Token (`spt_...`).
+  The server creates and confirms a PaymentIntent with
+  `shared_payment_granted_token=<spt>` -- Stripe enforces single-use on the
+  token itself.
+- **tempo** method: USDC on the Tempo network, "push" mode only -- the
+  caller broadcasts their own signed transfer and hands us the tx hash; the
+  server fetches the receipt and checks the `Transfer` event log matches the
+  challenge's amount/recipient/token. (Pull mode and the zero-amount
+  EIP-712 "proof" credential type aren't implemented -- both fail closed.)
+
+There's no official Python SDK for MPP (only the Node `mppx` package), so
+`wcag-audit-engine/app/mpp_payments.py` hand-implements the wire protocol
+directly against the published spec
+([tempoxyz/mpp-specs](https://github.com/tempoxyz/mpp-specs)): the
+challenge/response headers, the HMAC-based stateless challenge binding
+(derived from `STRIPE_SECRET_KEY`, so no separate signing key to manage),
+and the per-method request/payload shapes. Validate any running instance
+against the reference implementation:
+
+```bash
+npx mppx@latest validate http://localhost:8000 \
+  --endpoint "POST:/audit" \
+  --header "Content-Type:application/json" \
+  --body '{"url":"https://example.com"}'
+```
+
+Until these are set, neither MPP method is offered (no `WWW-Authenticate`
+header on a 402) and both are inert:
+
+- `MPP_STRIPE_NETWORK_PROFILE_ID` — your Stripe Business Network Profile ID.
+- `MPP_STRIPE_PRICE_CENTS` — default `3` ($0.03). `MPP_STRIPE_CURRENCY` —
+  default `usd`. `MPP_STRIPE_API_VERSION` — default `2026-05-27.preview`.
+- `MPP_TEMPO_RPC_URL` — a Tempo JSON-RPC endpoint.
+- `MPP_TEMPO_TOKEN_ADDRESS` — the TIP-20 USDC contract address.
+- `MPP_TEMPO_RECIPIENT_ADDRESS` — the wallet address that receives payment.
+- `MPP_TEMPO_CHAIN_ID` — default `4217`. `MPP_TEMPO_PRICE_BASE_UNITS` —
+  default `30000` ($0.03 at 6 decimals).
+- `MPP_REALM` — optional; the challenge realm defaults to the request's own
+  `Host` header (minus port), which is what the spec calls for and is what
+  `mppx validate` checks for. Only set this to override that.
+
 ## Local development
 
 ```bash
@@ -182,7 +238,7 @@ gcloud run deploy wcag-audit-engine \
   --source=wcag-audit-engine \
   --region=us-central1 \
   --memory=1Gi \
-  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03 \
+  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
 
@@ -190,8 +246,9 @@ gcloud run deploy wcag-audit-engine \
 actual credentials go through `--set-secrets`. `CHECKOUT_SUCCESS_URL` /
 `CHECKOUT_CANCEL_URL` default to this same service's own `/billing/success`
 and `/billing/cancel` pages — only set them if you're fronting this with a
-different public domain. Omit the `X402_*` vars entirely to deploy without
-x402 support — the Stripe `X-API-Key` path works unchanged either way.)
+different public domain. Omit the `X402_*` vars to deploy without x402, and
+the `MPP_*` vars to deploy without MPP — the Stripe `X-API-Key` path works
+unchanged regardless of either.)
 
 `--allow-unauthenticated` at the Cloud Run/IAM layer is fine here (or
 omit it and front the service with your own gateway) — request-level access

@@ -128,9 +128,10 @@ def test_audit_rejects_x_payment_when_x402_unconfigured(monkeypatch):
 
 def test_authenticate_accepts_internal_key_without_x_payment(monkeypatch):
     # The existing Stripe/internal-key path must keep working untouched by
-    # the x402 addition -- it doesn't need an X-PAYMENT header at all.
+    # the x402/MPP additions -- it doesn't need an X-PAYMENT or Authorization
+    # header at all.
     module = _load_main(monkeypatch, api_key="test-key")
-    auth = module._authenticate("test-key", None)
+    auth = module._authenticate("test-key", None, None)
     assert isinstance(auth, module.AuthContext)
     assert auth.stripe_billable is False
     assert auth.payment_method == "internal"
@@ -141,7 +142,7 @@ def test_authenticate_x402_success_grants_access(monkeypatch):
     # X-PAYMENT alone (no API key) is sufficient.
     module = _load_main(monkeypatch, api_key=None)
     monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header: True)
-    auth = module._authenticate(None, "some-signed-payment")
+    auth = module._authenticate(None, "some-signed-payment", None)
     assert isinstance(auth, module.AuthContext)
     assert auth.stripe_billable is False
     assert auth.payment_method == "x402"
@@ -150,9 +151,83 @@ def test_authenticate_x402_success_grants_access(monkeypatch):
 def test_authenticate_x402_failure_returns_402(monkeypatch):
     module = _load_main(monkeypatch, api_key=None)
     monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header: False)
-    result = module._authenticate(None, "some-signed-payment")
+    result = module._authenticate(None, "some-signed-payment", None)
     assert isinstance(result, module.JSONResponse)
     assert result.status_code == 402
+
+
+def test_authenticate_mpp_success_grants_access(monkeypatch):
+    # A valid Authorization: Payment ... credential alone (no API key, no
+    # X-PAYMENT) is sufficient when MPP verification succeeds.
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(module.mpp_payments, "verify_and_settle_sync", lambda header, realm=None: True)
+    auth = module._authenticate(None, None, "Payment some-base64url-credential")
+    assert isinstance(auth, module.AuthContext)
+    assert auth.stripe_billable is False
+    assert auth.payment_method == "mpp"
+
+
+def test_authenticate_mpp_failure_returns_402(monkeypatch):
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(module.mpp_payments, "verify_and_settle_sync", lambda header, realm=None: False)
+    result = module._authenticate(None, None, "Payment some-base64url-credential")
+    assert isinstance(result, module.JSONResponse)
+    assert result.status_code == 402
+
+
+def test_authenticate_ignores_non_payment_authorization_scheme(monkeypatch):
+    # An Authorization header using a different scheme (e.g. Bearer) must
+    # never be handed to MPP verification -- only the literal "Payment "
+    # prefix triggers it.
+    module = _load_main(monkeypatch, api_key=None)
+    calls = []
+    monkeypatch.setattr(
+        module.mpp_payments,
+        "verify_and_settle_sync",
+        lambda header, realm=None: calls.append(header) or False,
+    )
+    result = module._authenticate(None, None, "Bearer some-jwt")
+    assert isinstance(result, module.JSONResponse)
+    assert calls == []
+
+
+def test_audit_accepts_mpp_authorization_header(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(module.mpp_payments, "verify_and_settle_sync", lambda header, realm=None: True)
+    monkeypatch.setattr(
+        module,
+        "_run_axe",
+        lambda html, url: {"violations": []},
+    )
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit",
+        json={"url": "https://example.com"},
+        headers={"Authorization": "Payment some-base64url-credential"},
+    )
+    assert response.status_code == 200
+    assert response.json()["pass"] is True
+
+
+def test_402_response_advertises_mpp_challenges_when_configured(monkeypatch):
+    # When MPP is configured, the 402 response must carry a
+    # WWW-Authenticate: Payment header per spec, not just the x402 JSON body.
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(
+        module.mpp_payments,
+        "www_authenticate_headers",
+        lambda realm=None: ["Payment id=\"x\", method=\"stripe\""],
+    )
+    client = TestClient(module.app)
+    response = client.post("/audit", json={"url": "https://example.com"})
+    assert response.status_code == 402
+    assert response.headers["cache-control"] == "no-store"
+    www_auth_values = response.headers.get_list("www-authenticate")
+    assert any('method="stripe"' in v for v in www_auth_values)
 
 
 def test_billing_endpoints_501_when_unconfigured(monkeypatch):
