@@ -630,3 +630,75 @@ def test_internal_key_bypasses_quota_check(monkeypatch):
     assert isinstance(auth, module.AuthContext)
     assert auth.payment_method == "internal"
     assert calls == []
+
+
+# --- Agent-facing discovery manifest ---------------------------------------
+
+
+def test_manifest_prices_match_what_routes_actually_charge(monkeypatch):
+    """The manifest is what an agent budgets against. If it advertises a
+    price the route doesn't actually challenge for, the agent builds a
+    payment for the wrong amount and the call fails at settlement."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    manifest = client.get("/.well-known/agent.json").json()
+
+    advertised = {
+        e["path"]: e["price_usd"]
+        for e in manifest["endpoints"]
+        if e.get("payment_required")
+    }
+    assert advertised, "manifest advertised no paid endpoints"
+
+    for path, price in advertised.items():
+        body = {"url": "https://example.com"}
+        challenged = client.post(path, json=body).json()
+        assert challenged["price_usd"] == price, f"{path} advertises {price}, charges {challenged['price_usd']}"
+
+
+def test_manifest_only_lists_payment_methods_that_can_settle(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    manifest = client.get("/.well-known/agent.json").json()
+
+    # Nothing is configured in CI, so an honest manifest lists nothing.
+    assert manifest["payment"]["methods"] == []
+
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: True)
+    refreshed = client.get("/.well-known/agent.json").json()
+    assert "mpp-tempo" in refreshed["payment"]["methods"]
+
+
+def test_manifest_points_at_reachable_discovery_documents(monkeypatch):
+    """Every discovery URL the manifest advertises must actually resolve --
+    a 404 here is an agent's dead end."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    manifest = client.get("/.well-known/agent.json").json()
+
+    for name, url in manifest["discovery"].items():
+        path = url.replace(manifest["base_url"], "")
+        assert client.get(path).status_code == 200, f"{name} -> {path} is not reachable"
+
+
+def test_cors_exposes_www_authenticate_so_browser_agents_can_pay(monkeypatch):
+    """Without WWW-Authenticate in expose_headers a browser-resident agent
+    cannot read the MPP challenge off a 402, so it has no way to pay."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"Origin": "https://some-agent.example"},
+    )
+    assert response.status_code == 402
+    exposed = response.headers.get("access-control-expose-headers", "")
+    assert "WWW-Authenticate" in exposed

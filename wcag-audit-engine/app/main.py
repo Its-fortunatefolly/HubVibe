@@ -577,16 +577,91 @@ _AUTH_DESCRIPTION = (
     "Stripe SPT for fiat or Tempo network for crypto, see the "
     "WWW-Authenticate response headers on a 402 for both challenges)"
 )
-_PAYMENT_METHODS = ["stripe_api_key", "x402", "mpp"]
 _URL_INPUT_SCHEMA = {"url": "string (required)"}
 _HTML_OR_URL_INPUT_SCHEMA = {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
 
+# One row per sellable route. Kept as data rather than hand-written JSON so
+# the manifest, the pricing an agent reads, and the prices the routes
+# actually charge cannot drift apart.
+_CATALOG = [
+    {
+        "path": "/audit/wcag",
+        "price_usd": 0.03,
+        "input": _HTML_OR_URL_INPUT_SCHEMA,
+        "description": "WCAG 2.1 A/AA accessibility audit via axe-core.",
+        "returns": "pass (bool), violations[] with id/impact/help/help_url/nodes_affected.",
+    },
+    {
+        "path": "/audit/seo",
+        "price_usd": 0.03,
+        "input": _HTML_OR_URL_INPUT_SCHEMA,
+        "description": (
+            "Title, meta description, H1 structure, canonical link, "
+            "OpenGraph tags, structured data, and lang attribute."
+        ),
+        "returns": "pass (bool), findings[] with id/severity/detail.",
+    },
+    {
+        "path": "/audit/security",
+        "price_usd": 0.03,
+        "input": _URL_INPUT_SCHEMA,
+        "description": (
+            "HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking "
+            "protection, Referrer-Policy, and CORS from a live HTTP "
+            "response -- not a TLS/cipher scan or a penetration test."
+        ),
+        "returns": "pass (bool), findings[] with id/severity/detail.",
+    },
+    {
+        "path": "/audit/performance",
+        "price_usd": 0.03,
+        "input": _URL_INPUT_SCHEMA,
+        "description": (
+            "DOM node count, transferred bytes, and request count "
+            "from one real page load -- not a full Lighthouse audit."
+        ),
+        "returns": "pass (bool), metrics{}, findings[] with id/severity/detail.",
+    },
+    {
+        "path": "/audit/bundle",
+        "price_usd": 0.10,
+        "input": _URL_INPUT_SCHEMA,
+        "description": (
+            "Runs wcag + seo + security + performance against one URL, "
+            "billed as a single call. Atomic: if any dimension fails to "
+            "run, the whole call fails and nothing is billed."
+        ),
+        "returns": "pass (bool) plus wcag{}, seo{}, security{}, performance{} sub-results.",
+    },
+]
 
-@app.get("/.well-known/agent.json")
-def agent_manifest():
+
+def _payment_methods_live() -> list:
+    """Only the rails that can actually settle on this deployment.
+
+    An agent picks a payment method from this list, so listing a method that
+    isn't configured would send it down a path that cannot possibly succeed.
+    """
+    methods = []
+    if x402_payments.is_configured():
+        methods.append("x402")
+    if mpp_payments.stripe_configured():
+        methods.append("mpp-stripe")
+    if mpp_payments.tempo_configured():
+        methods.append("mpp-tempo")
+    if billing.is_configured():
+        methods.append("stripe_api_key")
+    return methods
+
+
+@app.get("/.well-known/agent.json", tags=["discovery"])
+def agent_manifest(request: Request):
+    base = PUBLIC_BASE_URL
+    live_methods = _payment_methods_live()
     return {
         "schema_version": "1.0",
         "name": "HubVibe Site Compliance Auditing Suite",
+        "base_url": base,
         "description": (
             "Rule-based, verifiable site audits -- accessibility (axe-core), "
             "SEO, security headers, and performance -- callable a la carte "
@@ -595,7 +670,66 @@ def agent_manifest():
             "quality, and a check that couldn't run is never reported as a "
             "false pass."
         ),
+        "pricing": {
+            "model": "per-call",
+            "currency": "USD",
+            "single_audit_usd": 0.03,
+            "bundle_usd": 0.10,
+            "subscription": {
+                "usd_per_month": 49,
+                "included_calls_per_month": billing.SAAS_MONTHLY_QUOTA,
+                "overage": "falls back to per-call payment at the prices above",
+                "checkout": f"{base}/billing/checkout",
+            },
+        },
+        "payment": {
+            "methods": live_methods,
+            "challenge": (
+                "Unauthenticated calls return HTTP 402 with a machine-readable "
+                "`accepts` array in the body and, for MPP, one signed "
+                "WWW-Authenticate: Payment challenge per method."
+            ),
+            "note": (
+                "Only methods actually configured on this deployment are listed; "
+                "an empty list means no machine payment rail is live right now."
+            ),
+        },
+        "limits": {
+            "rate_limit_per_minute": RATE_LIMIT_PER_MINUTE,
+            "on_limit": "HTTP 429 with Retry-After; nothing is billed.",
+        },
+        "discovery": {
+            "openapi": f"{base}/openapi.json",
+            "mcp": f"{base}/mcp.json",
+            "llms_txt": f"{base}/llms.txt",
+            "docs": f"{base}/docs",
+        },
+        "guarantees": [
+            "A check that could not run returns HTTP 502 and is never billed "
+            "and never reported as a pass.",
+            "Rate-limited requests are rejected before any payment is settled.",
+        ],
         "endpoints": [
+            {
+                "path": entry["path"],
+                "method": "POST",
+                "payment_required": True,
+                "price_usd": entry["price_usd"],
+                "input": entry["input"],
+                "returns": entry["returns"],
+                "description": entry["description"],
+                "auth": _AUTH_DESCRIPTION,
+                "payment_methods": live_methods,
+                "example_request": {
+                    "url": f"{base}{entry['path']}",
+                    "method": "POST",
+                    "headers": {"Content-Type": "application/json", "X-API-Key": "<your key>"},
+                    "body": {"url": "https://example.com"},
+                },
+            }
+            for entry in _CATALOG
+        ]
+        + [
             {
                 "path": "/audit",
                 "method": "POST",
@@ -603,75 +737,19 @@ def agent_manifest():
                 "price_usd": 0.03,
                 "input": _HTML_OR_URL_INPUT_SCHEMA,
                 "auth": _AUTH_DESCRIPTION,
-                "payment_methods": _PAYMENT_METHODS,
+                "payment_methods": live_methods,
                 "note": "Alias of /audit/wcag, kept for backward compatibility.",
-            },
-            {
-                "path": "/audit/wcag",
-                "method": "POST",
-                "payment_required": True,
-                "price_usd": 0.03,
-                "input": _HTML_OR_URL_INPUT_SCHEMA,
-                "auth": _AUTH_DESCRIPTION,
-                "payment_methods": _PAYMENT_METHODS,
-                "description": "WCAG 2.1 A/AA accessibility audit via axe-core.",
-            },
-            {
-                "path": "/audit/seo",
-                "method": "POST",
-                "payment_required": True,
-                "price_usd": 0.03,
-                "input": _HTML_OR_URL_INPUT_SCHEMA,
-                "auth": _AUTH_DESCRIPTION,
-                "payment_methods": _PAYMENT_METHODS,
-                "description": (
-                    "Title, meta description, H1 structure, canonical link, "
-                    "OpenGraph tags, structured data, and lang attribute."
-                ),
-            },
-            {
-                "path": "/audit/security",
-                "method": "POST",
-                "payment_required": True,
-                "price_usd": 0.03,
-                "input": _URL_INPUT_SCHEMA,
-                "auth": _AUTH_DESCRIPTION,
-                "payment_methods": _PAYMENT_METHODS,
-                "description": (
-                    "HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking "
-                    "protection, Referrer-Policy, and CORS from a live HTTP "
-                    "response -- not a TLS/cipher scan or a penetration test."
-                ),
-            },
-            {
-                "path": "/audit/performance",
-                "method": "POST",
-                "payment_required": True,
-                "price_usd": 0.03,
-                "input": _URL_INPUT_SCHEMA,
-                "auth": _AUTH_DESCRIPTION,
-                "payment_methods": _PAYMENT_METHODS,
-                "description": (
-                    "DOM node count, transferred bytes, and request count "
-                    "from one real page load -- not a full Lighthouse audit."
-                ),
-            },
-            {
-                "path": "/audit/bundle",
-                "method": "POST",
-                "payment_required": True,
-                "price_usd": 0.10,
-                "input": _URL_INPUT_SCHEMA,
-                "auth": _AUTH_DESCRIPTION,
-                "payment_methods": _PAYMENT_METHODS,
-                "description": "Runs wcag + seo + security + performance against one URL, billed as a single call.",
             },
             {
                 "path": "/scan/free",
                 "method": "POST",
                 "payment_required": False,
-                "rate_limit": "3/day per IP",
-                "note": "WCAG only, top-2 issues shown; use /audit/wcag for the full report.",
+                "rate_limit": f"{FREE_SCAN_LIMIT_PER_DAY}/day per IP",
+                "note": (
+                    "Human-facing demo only: WCAG, top-2 issues. Machine "
+                    "callers should use /audit/wcag -- this endpoint is "
+                    "hard-capped per IP and is not a free tier."
+                ),
             },
         ],
     }
