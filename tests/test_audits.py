@@ -128,19 +128,6 @@ def test_performance_audit_flags_high_dom_complexity_and_heavy_page():
     fake_page = MagicMock()
     fake_page.evaluate.return_value = 2000  # over the 1500 threshold
 
-    fake_browser = MagicMock()
-    fake_browser.new_page.return_value = fake_page
-
-    fake_chromium = MagicMock()
-    fake_chromium.launch.return_value = fake_browser
-
-    fake_playwright_ctx = MagicMock()
-    fake_playwright_ctx.chromium = fake_chromium
-
-    fake_playwright_cm = MagicMock()
-    fake_playwright_cm.__enter__.return_value = fake_playwright_ctx
-    fake_playwright_cm.__exit__.return_value = False
-
     def _capture_response_handler(event_name, handler):
         # Simulate one large response so total bytes crosses the 3MB threshold.
         fake_response = MagicMock()
@@ -149,7 +136,12 @@ def test_performance_audit_flags_high_dom_complexity_and_heavy_page():
 
     fake_page.on.side_effect = _capture_response_handler
 
-    with patch.object(audits, "sync_playwright", return_value=fake_playwright_cm):
+    # The audit now runs on a pooled browser (see app/browser_pool.py) rather
+    # than launching its own, so stand in for the pool's page handout.
+    def _fake_with_page(fn, **context_kwargs):
+        return fn(fake_page)
+
+    with patch.object(audits.browser_pool, "with_page", _fake_with_page):
         result = audits.run_performance_audit("https://example.com")
 
     ids = {f["id"] for f in result["findings"]}
@@ -158,3 +150,24 @@ def test_performance_audit_flags_high_dom_complexity_and_heavy_page():
     assert result["pass"] is False
     assert result["metrics"]["dom_node_count"] == 2000
     assert result["metrics"]["total_bytes_transferred"] == 4000000
+
+
+def test_performance_audit_gets_an_isolated_context_not_a_shared_cache():
+    """Reusing a warmed cache across audits would under-report transferred
+    bytes and request count, quietly scoring a heavy page as light."""
+    fake_page = MagicMock()
+    fake_page.evaluate.return_value = 10
+    fake_page.on.side_effect = lambda event_name, handler: None
+
+    seen = {}
+
+    def _fake_with_page(fn, **context_kwargs):
+        seen.update(context_kwargs)
+        return fn(fake_page)
+
+    with patch.object(audits.browser_pool, "with_page", _fake_with_page):
+        audits.run_performance_audit("https://example.com")
+
+    # A per-call context is what provides isolation; assert we asked for one
+    # with our own user agent rather than reusing a default shared page.
+    assert seen.get("user_agent") == audits._USER_AGENT

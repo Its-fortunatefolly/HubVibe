@@ -249,6 +249,50 @@ def www_authenticate_headers(realm: Optional[str] = None, price_usd: Optional[fl
     return headers
 
 
+def accepts_entries(price_usd: Optional[float] = None) -> list:
+    """Entries for the 402 body's machine-readable `accepts` list, one per
+    method that is actually configured here.
+
+    Same information the WWW-Authenticate challenges carry, restated in the
+    JSON body: a browser-based or higher-level agent that never sees raw
+    response headers can still discover how to pay. The authoritative,
+    signed challenge is still the header -- this is a discovery aid, not a
+    credential, so it deliberately carries no HMAC binding or opaque token.
+    """
+    entries = []
+    if stripe_configured():
+        entries.append(
+            {
+                "protocol": "mpp",
+                "method": "stripe",
+                "asset": _STRIPE_CURRENCY,
+                "amount_minor_units": (
+                    str(round(price_usd * 100)) if price_usd is not None else _STRIPE_PRICE_CENTS
+                ),
+                "send_via_header": "Authorization: Payment ...",
+                "challenge_in": "WWW-Authenticate",
+            }
+        )
+    if tempo_configured():
+        entries.append(
+            {
+                "protocol": "mpp",
+                "method": "tempo",
+                "asset": _TEMPO_TOKEN_ADDRESS,
+                "chain_id": _TEMPO_CHAIN_ID,
+                "recipient": _TEMPO_RECIPIENT_ADDRESS,
+                "amount_minor_units": (
+                    str(round(price_usd * 1_000_000))
+                    if price_usd is not None
+                    else _TEMPO_PRICE_BASE_UNITS
+                ),
+                "send_via_header": "Authorization: Payment ...",
+                "challenge_in": "WWW-Authenticate",
+            }
+        )
+    return entries
+
+
 def _verify_challenge_binding(challenge: dict, expected_realm: Optional[str] = None) -> bool:
     try:
         expected_id = _challenge_id(

@@ -79,8 +79,19 @@ async def _get_requirements(price: str):
 
 
 def payment_required_body(price: Optional[str] = None) -> dict:
-    """JSON body for a 402 response: what a caller needs to construct a
-    valid payment, or an X-API-Key if they'd rather use Stripe billing."""
+    """The x402 half of a 402 body, or `{}` when x402 can't actually settle.
+
+    Returning the x402 shape unconditionally -- which is what this used to do
+    -- actively misleads a paying agent on a deployment where x402 isn't
+    configured: it advertises X-PAYMENT as an accepted header and then names
+    `payTo: null` as the recipient. A conforming client either hard-errors or
+    builds a payment to a null address, and either way the caller can't buy
+    and we can't sell. If x402 isn't live here, say nothing about x402 rather
+    than something false; the MPP challenges on the same 402 still give the
+    caller a real way to pay.
+    """
+    if not is_configured():
+        return {}
     return {
         "x402Version": 1,
         "scheme": "exact",
@@ -88,7 +99,21 @@ def payment_required_body(price: Optional[str] = None) -> dict:
         "price": price or _PRICE,
         "payTo": _PAY_TO_ADDRESS,
         "accepted_payment_header": "X-PAYMENT",
-        "alternative": "X-API-Key header (Stripe-based billing) is also accepted",
+    }
+
+
+def accepts_entry(price: Optional[str] = None) -> Optional[dict]:
+    """This method's entry for the 402's machine-readable `accepts` list, or
+    None when x402 isn't configured."""
+    if not is_configured():
+        return None
+    return {
+        "protocol": "x402",
+        "scheme": "exact",
+        "network": _NETWORK,
+        "price": price or _PRICE,
+        "pay_to": _PAY_TO_ADDRESS,
+        "send_via_header": "X-PAYMENT",
     }
 
 

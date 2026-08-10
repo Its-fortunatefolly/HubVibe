@@ -1,18 +1,20 @@
 import os
 import secrets
+import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
 from axe_playwright_python.sync_playwright import Axe
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from playwright.sync_api import sync_playwright
 from pydantic import BaseModel, Field
 
 try:
-    from . import audits, billing, mpp_payments, x402_payments
+    from . import audits, billing, browser_pool, mpp_payments, x402_payments
 except ImportError:
     # Loaded directly by file path (e.g. by tooling/tests) rather than as
     # part of the `app` package -- fall back to loading each sibling module
@@ -23,20 +25,97 @@ except ImportError:
     # module if both get imported into the same process (as happens in
     # this repo's shared test suite).
     import importlib.util
+    import sys
 
     def _load_sibling_module(name: str):
+        # Register under the unique name in sys.modules BEFORE executing, so
+        # a sibling that imports the same module by this name (audits.py ->
+        # browser_pool) gets this exact instance instead of loading a second
+        # copy with its own thread-local browser state.
+        unique_name = f"wcag_audit_engine_{name}"
+        cached = sys.modules.get(unique_name)
+        if cached is not None:
+            return cached
         module_path = Path(__file__).resolve().parent / f"{name}.py"
-        spec = importlib.util.spec_from_file_location(f"wcag_audit_engine_{name}", module_path)
+        spec = importlib.util.spec_from_file_location(unique_name, module_path)
         module = importlib.util.module_from_spec(spec)
+        sys.modules[unique_name] = module
         spec.loader.exec_module(module)
         return module
 
+    browser_pool = _load_sibling_module("browser_pool")  # type: ignore
     audits = _load_sibling_module("audits")  # type: ignore
     billing = _load_sibling_module("billing")  # type: ignore
     mpp_payments = _load_sibling_module("mpp_payments")  # type: ignore
     x402_payments = _load_sibling_module("x402_payments")  # type: ignore
 
-app = FastAPI(title="WCAG Audit Engine")
+PUBLIC_BASE_URL = os.environ.get(
+    "PUBLIC_BASE_URL", "https://hubvibe-831480473793.us-south1.run.app"
+)
+
+# Each in-flight audit holds a Chromium browser (see browser_pool), so the
+# ceiling on concurrent audits is really a memory ceiling, not a CPU one.
+# FastAPI runs these sync routes in anyio's threadpool, which defaults to 40
+# threads -- 40 simultaneous Chromium instances would OOM any reasonably
+# sized container, so cap it explicitly and size the container to match
+# (see README: --memory / --cpu / --concurrency should agree with this).
+MAX_CONCURRENT_AUDITS = int(os.environ.get("MAX_CONCURRENT_AUDITS", "4"))
+
+
+@asynccontextmanager
+async def _lifespan(_app: "FastAPI"):
+    try:
+        import anyio.to_thread
+
+        anyio.to_thread.current_default_thread_limiter().total_tokens = MAX_CONCURRENT_AUDITS
+    except Exception:
+        # Not fatal: worst case we run on anyio's default thread count.
+        pass
+    yield
+
+
+app = FastAPI(
+    lifespan=_lifespan,
+    title="HubVibe Site Compliance Auditing Suite",
+    version="1.1.0",
+    description=(
+        "Machine-payable site compliance audits. Four deterministic audit "
+        "dimensions -- accessibility (axe-core), SEO, security headers, and "
+        "performance -- callable a la carte at $0.03/call or as a single "
+        "$0.10 bundle.\n\n"
+        "Built for agent-to-agent use: every paid route answers an "
+        "unauthenticated request with HTTP 402 carrying a machine-readable "
+        "payment challenge (x402 JSON body and/or MPP WWW-Authenticate "
+        "headers), so a paying agent can discover the price and settle "
+        "without a human in the loop.\n\n"
+        "Every result is a rule-based check against the actual page. Nothing "
+        "here is an LLM judging quality, and a check that could not run is "
+        "reported as an error, never as a passing result.\n\n"
+        "Discovery: /.well-known/agent.json, /llms.txt, /mcp.json, "
+        "/openapi.json"
+    ),
+    servers=[{"url": PUBLIC_BASE_URL, "description": "Production"}],
+    openapi_tags=[
+        {"name": "audit", "description": "Paid, machine-payable audit routes."},
+        {"name": "discovery", "description": "Manifests agents use to find and price these tools."},
+        {"name": "billing", "description": "Human subscription checkout and key issuance."},
+    ],
+)
+
+# Agents call this from browsers, edge workers, and other origins. There are
+# no cookies or sessions here -- authentication is an explicit per-request
+# header -- so a wildcard origin grants no ambient authority. WWW-Authenticate
+# must be exposed or a browser-side caller literally cannot read the MPP
+# payment challenge off a 402 and would have no way to pay.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["WWW-Authenticate", "Cache-Control"],
+    max_age=86400,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -55,19 +134,85 @@ AXE_OPTIONS = {
 API_KEY = os.environ.get("AUDIT_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # optional; enables remediation notes only
 
-RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "30"))
-# Best-effort, single-instance rate limiting. Cloud Run can scale to many
-# instances that don't share this dict, so this alone is not sufficient for
-# production abuse protection -- pair it with a quota policy at the API
-# Gateway / Cloud Armor layer in front of the service.
-_request_log: dict[str, deque] = defaultdict(deque)
+# Ceiling per API key (or per IP for x402/MPP callers, who have no key).
+# This exists to stop a runaway client from exhausting the browser pool --
+# it is NOT a monetisation lever. Every request past the paywall has already
+# been paid for, so throttling a paying agent is refusing revenue: keep this
+# well above any legitimate caller's burst rate. 600/min = 10 req/s per key.
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "600"))
 
 FREE_SCAN_LIMIT_PER_DAY = int(os.environ.get("FREE_SCAN_LIMIT_PER_DAY", "3"))
+
+
+class _SlidingWindowLimiter:
+    """Sliding-window rate limiter with bounded memory.
+
+    The bounded part is the point. A plain dict-of-deques keyed by caller IP
+    never removes the entry for an IP that made one request and went away,
+    so the table grows for the lifetime of the process -- at the request
+    volume this service is built for that is an eventual OOM, not a
+    theoretical concern. Expired windows are swept periodically and the
+    table is hard-capped as a backstop.
+
+    Still best-effort across instances: Cloud Run runs many containers that
+    don't share this state, so treat it as per-instance overload protection
+    and put Cloud Armor in front for real abuse policy.
+    """
+
+    def __init__(self, limit: int, window_seconds: float, max_keys: int = 50_000,
+                 sweep_interval: float = 60.0):
+        self._limit = limit
+        self._window = window_seconds
+        self._max_keys = max_keys
+        self._sweep_interval = sweep_interval
+        self._log: dict[str, deque] = {}
+        self._lock = threading.Lock()
+        self._last_sweep = 0.0
+
+    def check(self, key: str) -> bool:
+        """Record a hit and return True if allowed, False if over the limit.
+
+        Returns a bool rather than raising so the caller decides the response
+        shape -- agents need a machine-readable 429 with Retry-After, not an
+        opaque error.
+        """
+        now = time.time()
+        with self._lock:
+            self._sweep_locked(now)
+            window = self._log.get(key)
+            if window is None:
+                window = deque()
+                self._log[key] = window
+            cutoff = now - self._window
+            while window and window[0] <= cutoff:
+                window.popleft()
+            if len(window) >= self._limit:
+                return False
+            window.append(now)
+            return True
+
+    def _sweep_locked(self, now: float) -> None:
+        if now - self._last_sweep < self._sweep_interval and len(self._log) <= self._max_keys:
+            return
+        self._last_sweep = now
+        cutoff = now - self._window
+        for key in [k for k, w in self._log.items() if not w or w[-1] <= cutoff]:
+            del self._log[key]
+        if len(self._log) > self._max_keys:
+            # Pathological key cardinality (e.g. a spoofed-source flood).
+            # Drop the least-recently-seen half; discarding limiter state can
+            # only ever forgive a request, never wrongly deny one.
+            oldest = sorted(self._log, key=lambda k: self._log[k][-1])[: len(self._log) // 2]
+            for key in oldest:
+                del self._log[key]
+
+
+_audit_limiter = _SlidingWindowLimiter(RATE_LIMIT_PER_MINUTE, 60.0)
 # Free scans run the same real axe-core audit as the paid endpoint and cost
 # real compute, so this is capped harder and keyed by IP rather than an API
 # key -- it's a lead magnet, not a way to get unlimited paid-tier usage for
 # free.
-_free_scan_log: dict[str, deque] = defaultdict(deque)
+_free_scan_limiter = _SlidingWindowLimiter(FREE_SCAN_LIMIT_PER_DAY, 86_400.0)
 
 
 class AuditRequest(BaseModel):
@@ -120,9 +265,35 @@ def _payment_required_response(host: Optional[str] = None, price_usd: float = 0.
     price/payTo from the body instead. Cache-Control: no-store is required
     by the MPP core spec on every 402.
     """
-    response = JSONResponse(
-        status_code=402, content=x402_payments.payment_required_body(price=f"${price_usd:.2f}")
-    )
+    price = f"${price_usd:.2f}"
+
+    # `accepts` lists only the rails that can actually settle on THIS
+    # deployment, so an agent can pick one programmatically instead of
+    # guessing from prose or trying a method that was never configured.
+    accepts = []
+    x402_entry = x402_payments.accepts_entry(price=price)
+    if x402_entry:
+        accepts.append(x402_entry)
+    accepts.extend(mpp_payments.accepts_entries(price_usd=price_usd))
+
+    body = {
+        "error": "payment_required",
+        "price_usd": price_usd,
+        "price": price,
+        "accepts": accepts,
+        "alternative": {
+            "header": "X-API-Key",
+            "detail": "Stripe subscription key; included scans/month, then per-call payment above.",
+            "get_one": f"{PUBLIC_BASE_URL}/billing/checkout",
+        },
+        "docs": f"{PUBLIC_BASE_URL}/.well-known/agent.json",
+    }
+    # Keep x402's standard top-level keys alongside `accepts` when x402 is
+    # live, so off-the-shelf x402 clients that read the canonical shape keep
+    # working unchanged.
+    body.update(x402_payments.payment_required_body(price=price))
+
+    response = JSONResponse(status_code=402, content=body)
     response.headers["Cache-Control"] = "no-store"
     for header_value in mpp_payments.www_authenticate_headers(realm=host, price_usd=price_usd):
         response.headers.append("WWW-Authenticate", header_value)
@@ -195,15 +366,24 @@ def _authorize_and_rate_limit(
     JSONResponse) when the caller should get that response immediately
     instead of the route continuing.
     """
+    # Order matters, and it is load-bearing: _authenticate SETTLES REAL MONEY
+    # for x402/MPP callers (verify_and_settle_sync moves funds on-chain or
+    # confirms a Stripe PaymentIntent). Checking the rate limit after that
+    # point meant an over-limit caller paid, then got a 429 -- money taken,
+    # no audit delivered, no refund path. Anyone who is going to be rejected
+    # must be rejected before their payment instrument is touched.
+    #
+    # x402/MPP payers have no API key to key the limiter on -- fall back to
+    # IP. Either way this is per-instance overload protection, not the
+    # billing boundary: that's Stripe usage records / on-chain settlement.
+    rate_limit_key = x_api_key or (request.client.host if request.client else "unknown")
+    if not _audit_limiter.check(rate_limit_key):
+        return None, _rate_limited_response()
+
     auth = _authenticate(x_api_key, x_payment, authorization, host=_mpp_realm(request), price_usd=price_usd)
     if isinstance(auth, JSONResponse):
         return None, auth
 
-    # x402/MPP payers have no API key to key the limiter on -- fall back
-    # to IP. Either way this is best-effort abuse protection, not the
-    # billing boundary: that's Stripe usage records / on-chain settlement.
-    rate_limit_key = x_api_key or (request.client.host if request.client else "unknown")
-    _check_rate_limit(rate_limit_key)
     return auth, None
 
 
@@ -223,42 +403,38 @@ def _bill(auth, units: int = 1) -> Optional[str]:
         return f"usage recording failed: {exc}"
 
 
-def _check_rate_limit(key: str) -> None:
-    now = time.time()
-    window = _request_log[key]
-    while window and now - window[0] > 60:
-        window.popleft()
-    if len(window) >= RATE_LIMIT_PER_MINUTE:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    window.append(now)
-
-
-def _check_free_scan_limit(client_id: str) -> None:
-    now = time.time()
-    window = _free_scan_log[client_id]
-    while window and now - window[0] > 86400:
-        window.popleft()
-    if len(window) >= FREE_SCAN_LIMIT_PER_DAY:
-        raise HTTPException(
-            status_code=429,
-            detail="Free scan limit reached for today. Sign up for monitoring to scan more.",
-        )
-    window.append(now)
+def _rate_limited_response() -> JSONResponse:
+    """429 an agent can actually act on: Retry-After tells a machine caller
+    when to come back instead of hammering the endpoint or giving up on it
+    permanently. Nothing has been billed at this point -- the limiter runs
+    before any payment is settled."""
+    response = JSONResponse(
+        status_code=429,
+        content={
+            "status": "error",
+            "detail": (
+                f"Rate limit exceeded ({RATE_LIMIT_PER_MINUTE} requests/minute). "
+                "Nothing was charged for this request."
+            ),
+            "limit_per_minute": RATE_LIMIT_PER_MINUTE,
+            "retry_after_seconds": 60,
+            "billed": False,
+        },
+    )
+    response.headers["Retry-After"] = "60"
+    return response
 
 
 def _run_axe(html: Optional[str], url: Optional[str]) -> dict:
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(args=["--no-sandbox"])
-        page = browser.new_page()
-        try:
-            if url:
-                page.goto(url, wait_until="networkidle", timeout=15000)
-            else:
-                page.set_content(html, wait_until="networkidle", timeout=15000)
-            results = _axe.run(page, options=AXE_OPTIONS)
-        finally:
-            browser.close()
-    return results.response
+    def _audit(page) -> dict:
+        if url:
+            page.goto(url, wait_until="networkidle", timeout=15000)
+        else:
+            page.set_content(html, wait_until="networkidle", timeout=15000)
+        return _axe.run(page, options=AXE_OPTIONS).response
+
+    # Pooled browser, fresh isolated context per call -- see browser_pool.
+    return browser_pool.with_page(_audit)
 
 
 def _remediation_notes(violations: list) -> Optional[dict]:
@@ -332,7 +508,11 @@ def health_check():
 @app.post("/scan/free")
 def free_scan(payload: FreeScanRequest, request: Request):
     client_ip = request.client.host if request.client else "unknown"
-    _check_free_scan_limit(client_ip)
+    if not _free_scan_limiter.check(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Free scan limit reached for today. Sign up for monitoring to scan more.",
+        )
 
     try:
         raw = _run_axe(None, payload.url)
