@@ -39,7 +39,6 @@ except ImportError:
 app = FastAPI(title="WCAG Audit Engine")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-SERVICE_ROOT = Path(__file__).resolve().parent.parent
 
 _axe = Axe()
 
@@ -312,7 +311,7 @@ def llms_txt():
 
 @app.get("/mcp.json", response_class=FileResponse)
 def mcp_manifest():
-    return FileResponse(SERVICE_ROOT / "mcp.json", media_type="application/json")
+    return FileResponse(STATIC_DIR / "mcp.json", media_type="application/json")
 
 
 @app.get("/healthz")
