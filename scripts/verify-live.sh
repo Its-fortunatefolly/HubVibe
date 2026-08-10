@@ -20,20 +20,37 @@ pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASSES=$((PASSES + 1)); }
 fail() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
 
 # expect_status <method> <path> <expected> [description]
+#
+# Retries before failing. This script is usually run seconds after a deploy,
+# which is exactly when Cloud Run is still migrating traffic to the new
+# revision -- the first request or two can land mid-cutover and come back 404
+# or 503 from the frontend even though the route is fine. A checker that
+# reports a scary false failure in its most common usage window is a checker
+# people learn to ignore, so a result only counts as a failure if it persists.
 expect_status() {
   local method="$1" path="$2" expected="$3" desc="${4:-$path}"
-  local code
-  if [ "$method" = "POST" ]; then
-    code=$(curl -sS -m 45 -o /dev/null -w '%{http_code}' -X POST "$BASE$path" \
-      -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
-  else
-    code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' "$BASE$path" 2>/dev/null)
-  fi
-  if [ "$code" = "$expected" ]; then
-    pass "$desc -> $code"
-  else
-    fail "$desc -> got $code, expected $expected"
-  fi
+  local code attempt
+
+  for attempt in 1 2 3; do
+    if [ "$method" = "POST" ]; then
+      code=$(curl -sS -m 45 -o /dev/null -w '%{http_code}' -X POST "$BASE$path" \
+        -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
+    else
+      code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' "$BASE$path" 2>/dev/null)
+    fi
+
+    if [ "$code" = "$expected" ]; then
+      if [ "$attempt" -eq 1 ]; then
+        pass "$desc -> $code"
+      else
+        pass "$desc -> $code (after $attempt attempts; first was transient)"
+      fi
+      return
+    fi
+    [ "$attempt" -lt 3 ] && sleep 3
+  done
+
+  fail "$desc -> got $code, expected $expected (persisted over 3 attempts)"
 }
 
 echo
