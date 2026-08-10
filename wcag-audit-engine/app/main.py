@@ -490,7 +490,20 @@ def mcp_manifest():
     return FileResponse(STATIC_DIR / "mcp.json", media_type="application/json")
 
 
-@app.get("/robots.txt", response_class=FileResponse)
+@app.get("/favicon.svg", response_class=FileResponse, tags=["discovery"])
+def favicon():
+    return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/og-image.png", response_class=FileResponse, tags=["discovery"])
+def og_image():
+    # Referenced by og:image/twitter:image. Social scrapers fetch this
+    # unauthenticated and cache aggressively, so it must stay a stable,
+    # public URL -- a link with no preview card is a link people don't click.
+    return FileResponse(STATIC_DIR / "og-image.png", media_type="image/png")
+
+
+@app.get("/robots.txt", response_class=FileResponse, tags=["discovery"])
 def robots_txt():
     return FileResponse(STATIC_DIR / "robots.txt", media_type="text/plain")
 

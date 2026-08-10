@@ -702,3 +702,36 @@ def test_cors_exposes_www_authenticate_so_browser_agents_can_pay(monkeypatch):
     assert response.status_code == 402
     exposed = response.headers.get("access-control-expose-headers", "")
     assert "WWW-Authenticate" in exposed
+
+
+def test_favicon_and_og_image_are_served(monkeypatch):
+    """og:image referenced in the page head must actually resolve, or link
+    previews render blank and the shared link loses its click-through."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    favicon = client.get("/favicon.svg")
+    assert favicon.status_code == 200
+    assert "image/svg+xml" in favicon.headers["content-type"]
+
+    og = client.get("/og-image.png")
+    assert og.status_code == 200
+    assert "image/png" in og.headers["content-type"]
+
+
+def test_page_head_social_tags_point_at_served_assets(monkeypatch):
+    import re
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    html = client.get("/").text
+
+    referenced = set(re.findall(r'(?:href|content)="https://[^"]+?(/[^"/]+\.(?:svg|png))"', html))
+    referenced |= set(re.findall(r'href="(/[^"]+\.svg)"', html))
+    assert referenced, "page head references no image assets at all"
+    for path in referenced:
+        assert client.get(path).status_code == 200, f"{path} is referenced but 404s"

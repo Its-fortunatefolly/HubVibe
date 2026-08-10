@@ -6,8 +6,18 @@
 > nothing here is an LLM guessing at quality, and a check that couldn't
 > run is never reported as a false pass.
 
-Full machine-readable manifest: /.well-known/agent.json
-Static MCP tool discovery manifest: /mcp.json (lists all 5 tools with their httpEndpoint)
+Base URL: https://hubvibe-831480473793.us-south1.run.app
+
+Machine-readable discovery:
+- /.well-known/agent.json -- full manifest: pricing, live payment rails,
+  rate limits, per-endpoint examples
+- /openapi.json -- OpenAPI 3.1 spec for all routes
+- /mcp.json -- MCP tool definitions for all 5 tools with their httpEndpoint
+- /docs -- interactive API reference
+
+Rate limit: 600 requests/minute per API key (or per IP for x402/MPP
+callers). Exceeding it returns HTTP 429 with a Retry-After header and
+nothing is billed -- the limit is checked before any payment is settled.
 
 ## Endpoints
 
@@ -41,7 +51,7 @@ free demo scan through the website UI only.
 
 ## Payment and auth
 
-Three ways to pay, all fail-closed (no valid credential/payment means no
+Up to three rails, all fail-closed (no valid credential/payment means no
 audit runs, and nothing partially executes on a rejected payment):
 
 1. Stripe API key -- `X-API-Key` header. Subscribers on the $49/mo Agency
@@ -51,6 +61,17 @@ audit runs, and nothing partially executes on a rejected payment):
    through a facilitator, never trusted client-side.
 3. MPP (Machine Payments Protocol) -- Stripe Shared Payment Tokens (fiat)
    or Tempo network (crypto), co-authored by Stripe and Tempo.
+
+Which of these are actually live is deployment-specific. Do not assume:
+read the `accepts` array in any 402 response body, or `payment.methods` in
+/.well-known/agent.json. Both list only rails that can genuinely settle
+right now -- a rail that isn't configured is omitted rather than advertised
+with a null recipient.
+
+An unauthenticated POST to any paid route returns HTTP 402 carrying that
+`accepts` array plus, for MPP, one signed `WWW-Authenticate: Payment`
+challenge per method. That is the intended discovery path for an agent:
+call the endpoint, read the price and rails off the 402, pay, retry.
 
 ## Integrations
 
