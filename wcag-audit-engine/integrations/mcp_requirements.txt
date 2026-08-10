@@ -1,0 +1,6 @@
+# Standalone requirements for integrations/mcp_server.py -- kept out of
+# the deployed service's requirements.txt because the `mcp` package pulls
+# in a newer starlette than wcag-audit-engine pins for FastAPI. Install
+# these in their own venv/container, separate from the deployed service.
+mcp==2.0.0
+httpx==0.28.1
