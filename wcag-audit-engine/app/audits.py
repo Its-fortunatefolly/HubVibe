@@ -19,7 +19,28 @@ from html.parser import HTMLParser
 from typing import Optional
 
 import httpx
-from playwright.sync_api import sync_playwright
+
+try:
+    from . import browser_pool
+except ImportError:
+    # Loaded by file path rather than as part of the `app` package (see the
+    # matching fallback in main.py). Register under the same canonical name
+    # main.py uses and reuse anything already loaded, so both entry points
+    # share ONE browser_pool -- two copies would mean two thread-local
+    # browsers per worker thread, doubling memory for no benefit.
+    import importlib.util
+    import sys
+    from pathlib import Path as _Path
+
+    _POOL_NAME = "wcag_audit_engine_browser_pool"
+    browser_pool = sys.modules.get(_POOL_NAME)
+    if browser_pool is None:
+        _spec = importlib.util.spec_from_file_location(
+            _POOL_NAME, _Path(__file__).resolve().parent / "browser_pool.py"
+        )
+        browser_pool = importlib.util.module_from_spec(_spec)
+        sys.modules[_POOL_NAME] = browser_pool
+        _spec.loader.exec_module(browser_pool)
 
 _USER_AGENT = "HubVibeAuditBot/1.0 (+https://hubvibe.dev)"
 _HTTP_TIMEOUT = 15.0
@@ -267,15 +288,16 @@ def run_performance_audit(url: Optional[str]) -> dict:
         if length and length.isdigit():
             resource_bytes += int(length)
 
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(args=["--no-sandbox"])
-        try:
-            page = browser.new_page(user_agent=_USER_AGENT)
-            page.on("response", _on_response)
-            page.goto(url, wait_until="networkidle", timeout=30000)
-            dom_node_count = page.evaluate("document.querySelectorAll('*').length")
-        finally:
-            browser.close()
+    def _measure(page) -> int:
+        page.on("response", _on_response)
+        page.goto(url, wait_until="networkidle", timeout=30000)
+        return page.evaluate("document.querySelectorAll('*').length")
+
+    # Pooled browser, fresh isolated context per call -- see browser_pool.
+    # Isolation matters for this audit in particular: a shared cache would
+    # make transferred-bytes and request-count read low on any URL a previous
+    # audit had already warmed, silently reporting a page as lighter than it is.
+    dom_node_count = browser_pool.with_page(_measure, user_agent=_USER_AGENT)
 
     findings = []
     if dom_node_count > 1500:

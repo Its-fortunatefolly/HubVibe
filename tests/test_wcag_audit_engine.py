@@ -1,4 +1,5 @@
 import importlib.util
+import time
 from pathlib import Path
 
 import pytest
@@ -116,8 +117,59 @@ def test_audit_requires_api_key(monkeypatch):
     assert response.status_code == 402
     body = response.json()
     assert body["price"] == "$0.03"
+    assert body["price_usd"] == 0.03
+    assert body["error"] == "payment_required"
+    # Machine-readable list of rails that can actually settle here.
+    assert isinstance(body["accepts"], list)
+    assert body["alternative"]["header"] == "X-API-Key"
+
+
+def test_402_never_advertises_x402_when_it_cannot_settle(monkeypatch):
+    """Regression: an unconfigured x402 used to still emit
+    accepted_payment_header=X-PAYMENT with payTo=null, telling a paying agent
+    to send a payment to nowhere. Advertise a rail only if it works."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    assert module.x402_payments.is_configured() is False, "test presumes x402 is off in CI"
+
+    client = TestClient(module.app)
+    response = client.post("/audit", json={"url": "https://example.com"})
+    body = response.json()
+
+    assert response.status_code == 402
+    assert "payTo" not in body
+    assert "accepted_payment_header" not in body
+    assert not any(entry.get("protocol") == "x402" for entry in body["accepts"])
+
+
+def test_402_advertises_x402_when_it_is_configured(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.x402_payments, "is_configured", lambda: True)
+    monkeypatch.setattr(module.x402_payments, "_PAY_TO_ADDRESS", "0xabc")
+
+    client = TestClient(module.app)
+    body = client.post("/audit", json={"url": "https://example.com"}).json()
+
+    assert body["payTo"] == "0xabc"
     assert body["accepted_payment_header"] == "X-PAYMENT"
-    assert "payTo" in body
+    x402_entries = [e for e in body["accepts"] if e["protocol"] == "x402"]
+    assert len(x402_entries) == 1
+    assert x402_entries[0]["pay_to"] == "0xabc"
+    assert x402_entries[0]["price"] == "$0.03"
+
+
+def test_402_bundle_price_is_carried_everywhere(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    body = client.post("/audit/bundle", json={"url": "https://example.com"}).json()
+
+    assert body["price"] == "$0.10"
+    assert body["price_usd"] == 0.10
 
 
 def test_audit_rejects_wrong_api_key(monkeypatch):
@@ -292,20 +344,100 @@ def test_billing_endpoints_501_when_unconfigured(monkeypatch):
 
 def test_rate_limit_rejects_after_threshold(monkeypatch):
     module = _load_main(monkeypatch)
-    monkeypatch.setattr(module, "RATE_LIMIT_PER_MINUTE", 2)
-    module._check_rate_limit("some-key")
-    module._check_rate_limit("some-key")
-    with pytest.raises(Exception):
-        module._check_rate_limit("some-key")
+    limiter = module._SlidingWindowLimiter(limit=2, window_seconds=60.0)
+    assert limiter.check("some-key") is True
+    assert limiter.check("some-key") is True
+    assert limiter.check("some-key") is False
+
+
+def test_rate_limit_is_per_key_not_global(monkeypatch):
+    module = _load_main(monkeypatch)
+    limiter = module._SlidingWindowLimiter(limit=1, window_seconds=60.0)
+    assert limiter.check("key-a") is True
+    assert limiter.check("key-a") is False
+    # A different paying caller must not be throttled by someone else's usage.
+    assert limiter.check("key-b") is True
+
+
+def test_rate_limit_window_expires(monkeypatch):
+    module = _load_main(monkeypatch)
+    limiter = module._SlidingWindowLimiter(limit=1, window_seconds=0.05)
+    assert limiter.check("k") is True
+    assert limiter.check("k") is False
+    time.sleep(0.06)
+    assert limiter.check("k") is True
+
+
+def test_rate_limiter_evicts_idle_keys_and_stays_bounded(monkeypatch):
+    """A dict-of-deques keyed by caller IP that never evicts is an OOM at
+    volume -- one leaked entry per unique caller, forever."""
+    module = _load_main(monkeypatch)
+    limiter = module._SlidingWindowLimiter(
+        limit=5, window_seconds=0.05, sweep_interval=0.0
+    )
+    for i in range(500):
+        limiter.check(f"ip-{i}")
+    assert len(limiter._log) == 500
+    time.sleep(0.06)
+    # One more call triggers a sweep, which must drop the 500 expired windows.
+    limiter.check("fresh-key")
+    assert len(limiter._log) == 1
+
+
+def test_rate_limiter_hard_caps_table_under_key_flood(monkeypatch):
+    module = _load_main(monkeypatch)
+    limiter = module._SlidingWindowLimiter(
+        limit=5, window_seconds=600.0, max_keys=100, sweep_interval=1e9
+    )
+    for i in range(400):
+        limiter.check(f"ip-{i}")
+    # Windows are all still live, so eviction-by-expiry can't help; the hard
+    # cap is the only thing standing between this and unbounded growth.
+    assert len(limiter._log) <= 400
+    assert len(limiter._log) < 400 or limiter._max_keys >= 400
 
 
 def test_free_scan_limit_rejects_after_threshold(monkeypatch):
     module = _load_main(monkeypatch)
-    monkeypatch.setattr(module, "FREE_SCAN_LIMIT_PER_DAY", 2)
-    module._check_free_scan_limit("1.2.3.4")
-    module._check_free_scan_limit("1.2.3.4")
-    with pytest.raises(Exception):
-        module._check_free_scan_limit("1.2.3.4")
+    limiter = module._SlidingWindowLimiter(limit=2, window_seconds=86_400.0)
+    assert limiter.check("1.2.3.4") is True
+    assert limiter.check("1.2.3.4") is True
+    assert limiter.check("1.2.3.4") is False
+
+
+def test_rate_limit_is_enforced_before_any_payment_is_settled(monkeypatch):
+    """Regression: the limiter used to run AFTER _authenticate, which is
+    where x402/MPP payments actually settle. An over-limit caller therefore
+    paid, then received a 429 -- money taken, no audit, no refund. Rejection
+    must happen before the payment instrument is touched."""
+    module = _load_main(monkeypatch)
+
+    settled = []
+
+    def _exploding_verify(payment_header, price=None):
+        settled.append(payment_header)
+        return True
+
+    monkeypatch.setattr(
+        module.x402_payments, "verify_and_settle_sync", _exploding_verify
+    )
+    # Exhaust the limiter for this key before the request comes in.
+    monkeypatch.setattr(module, "_audit_limiter", module._SlidingWindowLimiter(limit=0, window_seconds=60.0))
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "some-signed-payment"},
+    )
+
+    assert response.status_code == 429
+    assert settled == [], "payment was settled despite the caller being rate limited"
+    body = response.json()
+    assert body["billed"] is False
+    assert response.headers["Retry-After"] == "60"
 
 
 # --- New multi-route audit suite -------------------------------------------
@@ -498,3 +630,108 @@ def test_internal_key_bypasses_quota_check(monkeypatch):
     assert isinstance(auth, module.AuthContext)
     assert auth.payment_method == "internal"
     assert calls == []
+
+
+# --- Agent-facing discovery manifest ---------------------------------------
+
+
+def test_manifest_prices_match_what_routes_actually_charge(monkeypatch):
+    """The manifest is what an agent budgets against. If it advertises a
+    price the route doesn't actually challenge for, the agent builds a
+    payment for the wrong amount and the call fails at settlement."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    manifest = client.get("/.well-known/agent.json").json()
+
+    advertised = {
+        e["path"]: e["price_usd"]
+        for e in manifest["endpoints"]
+        if e.get("payment_required")
+    }
+    assert advertised, "manifest advertised no paid endpoints"
+
+    for path, price in advertised.items():
+        body = {"url": "https://example.com"}
+        challenged = client.post(path, json=body).json()
+        assert challenged["price_usd"] == price, f"{path} advertises {price}, charges {challenged['price_usd']}"
+
+
+def test_manifest_only_lists_payment_methods_that_can_settle(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    manifest = client.get("/.well-known/agent.json").json()
+
+    # Nothing is configured in CI, so an honest manifest lists nothing.
+    assert manifest["payment"]["methods"] == []
+
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: True)
+    refreshed = client.get("/.well-known/agent.json").json()
+    assert "mpp-tempo" in refreshed["payment"]["methods"]
+
+
+def test_manifest_points_at_reachable_discovery_documents(monkeypatch):
+    """Every discovery URL the manifest advertises must actually resolve --
+    a 404 here is an agent's dead end."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    manifest = client.get("/.well-known/agent.json").json()
+
+    for name, url in manifest["discovery"].items():
+        path = url.replace(manifest["base_url"], "")
+        assert client.get(path).status_code == 200, f"{name} -> {path} is not reachable"
+
+
+def test_cors_exposes_www_authenticate_so_browser_agents_can_pay(monkeypatch):
+    """Without WWW-Authenticate in expose_headers a browser-resident agent
+    cannot read the MPP challenge off a 402, so it has no way to pay."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"Origin": "https://some-agent.example"},
+    )
+    assert response.status_code == 402
+    exposed = response.headers.get("access-control-expose-headers", "")
+    assert "WWW-Authenticate" in exposed
+
+
+def test_favicon_and_og_image_are_served(monkeypatch):
+    """og:image referenced in the page head must actually resolve, or link
+    previews render blank and the shared link loses its click-through."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    favicon = client.get("/favicon.svg")
+    assert favicon.status_code == 200
+    assert "image/svg+xml" in favicon.headers["content-type"]
+
+    og = client.get("/og-image.png")
+    assert og.status_code == 200
+    assert "image/png" in og.headers["content-type"]
+
+
+def test_page_head_social_tags_point_at_served_assets(monkeypatch):
+    import re
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    html = client.get("/").text
+
+    referenced = set(re.findall(r'(?:href|content)="https://[^"]+?(/[^"/]+\.(?:svg|png))"', html))
+    referenced |= set(re.findall(r'href="(/[^"]+\.svg)"', html))
+    assert referenced, "page head references no image assets at all"
+    for path in referenced:
+        assert client.get(path).status_code == 200, f"{path} is referenced but 404s"

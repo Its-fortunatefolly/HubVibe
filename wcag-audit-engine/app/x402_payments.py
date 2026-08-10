@@ -26,6 +26,7 @@ Requires, at deploy time:
 
 import asyncio
 import os
+import threading
 from typing import Optional
 
 from x402 import x402ResourceServer
@@ -41,7 +42,9 @@ _PRICE = os.environ.get("X402_PRICE", "$0.03")
 
 _server: Optional[x402ResourceServer] = None
 _requirements_cache: dict = {}
-_initialized = False
+
+# Reentrant because _get_requirements calls _get_server while holding it.
+_LOCK = threading.RLock()
 
 
 def is_configured() -> bool:
@@ -49,38 +52,63 @@ def is_configured() -> bool:
 
 
 def _get_server() -> x402ResourceServer:
+    """Build and initialize the resource server once, then reuse it.
+
+    `x402ResourceServer.initialize()` is a SYNCHRONOUS method (it performs
+    blocking HTTP calls to the facilitator to discover supported
+    scheme/network kinds). It must not be awaited: `await` on the None it
+    returns raises TypeError, and because verify_and_settle deliberately
+    catches every exception and fails closed, that TypeError would be
+    swallowed into a plain "payment invalid". The visible symptom is x402
+    being fully configured and yet rejecting 100% of payments with no
+    diagnostic anywhere -- which is exactly what this code did before.
+
+    The server is only cached after initialize() succeeds, so a facilitator
+    that is briefly unreachable results in a retry on the next request
+    rather than a permanently poisoned server object.
+    """
     global _server
-    if _server is None:
-        facilitator = HTTPFacilitatorClient(FacilitatorConfig(url=_FACILITATOR_URL))
-        server = x402ResourceServer(facilitator)
-        server.register(_NETWORK, ExactEvmServerScheme())
-        _server = server
-    return _server
+    with _LOCK:
+        if _server is None:
+            facilitator = HTTPFacilitatorClient(FacilitatorConfig(url=_FACILITATOR_URL))
+            server = x402ResourceServer(facilitator)
+            server.register(_NETWORK, ExactEvmServerScheme())
+            server.initialize()
+            _server = server
+        return _server
 
 
-async def _get_requirements(price: str):
+def _get_requirements(price: str):
     """Cached per price -- a $0.03 payment must never satisfy a $0.10
     challenge, so each price gets its own requirements object rather than
     sharing one global cache across every route."""
-    global _initialized
-    server = _get_server()
-    if not _initialized:
-        await server.initialize()
-        _initialized = True
-    if price not in _requirements_cache:
-        config = ResourceConfig(
-            scheme="exact",
-            network=_NETWORK,
-            pay_to=_PAY_TO_ADDRESS,
-            price=price,
-        )
-        _requirements_cache[price] = server.build_payment_requirements(config)
-    return _requirements_cache[price]
+    with _LOCK:
+        server = _get_server()
+        if price not in _requirements_cache:
+            config = ResourceConfig(
+                scheme="exact",
+                network=_NETWORK,
+                pay_to=_PAY_TO_ADDRESS,
+                price=price,
+            )
+            _requirements_cache[price] = server.build_payment_requirements(config)
+        return _requirements_cache[price]
 
 
 def payment_required_body(price: Optional[str] = None) -> dict:
-    """JSON body for a 402 response: what a caller needs to construct a
-    valid payment, or an X-API-Key if they'd rather use Stripe billing."""
+    """The x402 half of a 402 body, or `{}` when x402 can't actually settle.
+
+    Returning the x402 shape unconditionally -- which is what this used to do
+    -- actively misleads a paying agent on a deployment where x402 isn't
+    configured: it advertises X-PAYMENT as an accepted header and then names
+    `payTo: null` as the recipient. A conforming client either hard-errors or
+    builds a payment to a null address, and either way the caller can't buy
+    and we can't sell. If x402 isn't live here, say nothing about x402 rather
+    than something false; the MPP challenges on the same 402 still give the
+    caller a real way to pay.
+    """
+    if not is_configured():
+        return {}
     return {
         "x402Version": 1,
         "scheme": "exact",
@@ -88,7 +116,21 @@ def payment_required_body(price: Optional[str] = None) -> dict:
         "price": price or _PRICE,
         "payTo": _PAY_TO_ADDRESS,
         "accepted_payment_header": "X-PAYMENT",
-        "alternative": "X-API-Key header (Stripe-based billing) is also accepted",
+    }
+
+
+def accepts_entry(price: Optional[str] = None) -> Optional[dict]:
+    """This method's entry for the 402's machine-readable `accepts` list, or
+    None when x402 isn't configured."""
+    if not is_configured():
+        return None
+    return {
+        "protocol": "x402",
+        "scheme": "exact",
+        "network": _NETWORK,
+        "price": price or _PRICE,
+        "pay_to": _PAY_TO_ADDRESS,
+        "send_via_header": "X-PAYMENT",
     }
 
 
@@ -108,7 +150,7 @@ async def verify_and_settle(payment_header: str, price: Optional[str] = None) ->
         return False
     try:
         payload = decode_payment_signature_header(payment_header)
-        requirements = await _get_requirements(price or _PRICE)
+        requirements = _get_requirements(price or _PRICE)
         server = _get_server()
 
         verify_result = await server.verify_payment(payload, requirements[0])

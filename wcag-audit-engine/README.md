@@ -321,10 +321,39 @@ Build and deploy:
 gcloud run deploy wcag-audit-engine \
   --source=wcag-audit-engine \
   --region=us-central1 \
-  --memory=1Gi \
+  --memory=2Gi \
+  --cpu=2 \
+  --concurrency=4 \
+  --min-instances=1 \
   --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,STRIPE_FLAT_SUBSCRIPTION_PRICE_ID=price_...,SAAS_MONTHLY_QUOTA=1500,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
+
+### Why those sizing flags
+
+They are not arbitrary, and they have to agree with `MAX_CONCURRENT_AUDITS`
+(default 4) or the container will either waste money or die under load:
+
+- `--memory=2Gi` — each concurrent audit pins a Chromium instance from the
+  pool in `app/browser_pool.py`. Chromium wants roughly 300–500 MB under a
+  real page load, so four concurrent audits plus the Python process does not
+  fit in 1 Gi. Under-provisioning here shows up as OOM-killed requests, which
+  Cloud Run reports as a 5xx with no useful traceback.
+- `--concurrency=4` — matches `MAX_CONCURRENT_AUDITS`. Letting Cloud Run send
+  more simultaneous requests than the app will run in parallel just queues
+  them inside the container, where they burn the caller's timeout instead of
+  being load-balanced onto another instance.
+- `--cpu=2` — a headless page load is CPU-bound during parse/layout; one vCPU
+  shared across four page loads makes every one of them slow.
+- `--min-instances=1` — cold-starting this image means starting Python *and*
+  launching Chromium. An agent with a short client timeout gives up before a
+  cold instance ever answers, which reads as an unreliable API rather than a
+  slow one. One warm instance is the difference between a machine caller
+  retrying and a machine caller dropping you.
+
+Scale the whole set together: to serve more parallel audits, raise
+`MAX_CONCURRENT_AUDITS`, `--concurrency`, `--memory`, and `--cpu` in step
+rather than any one alone.
 
 (Price/event IDs aren't secrets, so `--set-env-vars` is fine for those; the
 actual credentials go through `--set-secrets`. `CHECKOUT_SUCCESS_URL` /
