@@ -1,0 +1,71 @@
+# HubVibe Site Compliance Auditing Suite
+
+> Rule-based, verifiable site audits -- accessibility (axe-core), SEO,
+> security headers, and performance -- callable a la carte or as a single
+> bundle. Every result is a deterministic check against the actual page;
+> nothing here is an LLM guessing at quality, and a check that couldn't
+> run is never reported as a false pass.
+
+Full machine-readable manifest: /.well-known/agent.json
+Static MCP tool discovery manifest: /mcp.json (lists all 5 tools with their httpEndpoint)
+
+## Endpoints
+
+All endpoints below are POST, priced per call, and accept a Stripe API
+key, an x402 on-chain payment, or an MPP (Machine Payments Protocol)
+payment -- no unauthenticated or free machine access. Humans get one
+free demo scan through the website UI only.
+
+- POST /audit/wcag -- $0.03 -- WCAG 2.1 A/AA accessibility audit via axe-core.
+  Input: {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
+
+- POST /audit/seo -- $0.03 -- Title, meta description, H1 structure,
+  canonical link, OpenGraph tags, structured data, and lang attribute.
+  Input: {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
+
+- POST /audit/security -- $0.03 -- HTTPS, HSTS, CSP, X-Content-Type-Options,
+  clickjacking protection, Referrer-Policy, and CORS from a live HTTP
+  response. Not a TLS/cipher scan or a penetration test.
+  Input: {"url": "string (required)"}
+
+- POST /audit/performance -- $0.03 -- DOM node count, transferred bytes,
+  and request count from one real page load. Not a full Lighthouse audit.
+  Input: {"url": "string (required)"}
+
+- POST /audit/bundle -- $0.10 -- Runs wcag + seo + security + performance
+  against one URL, billed as a single call. Atomic: if any dimension
+  fails to run, nothing is billed.
+  Input: {"url": "string (required)"}
+
+- POST /audit -- $0.03 -- Alias of /audit/wcag, kept for backward compatibility.
+
+## Payment and auth
+
+Three ways to pay, all fail-closed (no valid credential/payment means no
+audit runs, and nothing partially executes on a rejected payment):
+
+1. Stripe API key -- `X-API-Key` header. Subscribers on the $49/mo Agency
+   plan get 1,500 scans/month included; overage falls back to per-call
+   machine pricing above.
+2. x402 -- on-chain payment via the x402 protocol; verified and settled
+   through a facilitator, never trusted client-side.
+3. MPP (Machine Payments Protocol) -- Stripe Shared Payment Tokens (fiat)
+   or Tempo network (crypto), co-authored by Stripe and Tempo.
+
+## Integrations
+
+Source for these lives in the repo, not on this server -- they are
+client-side wrappers around the endpoints above, not additional routes:
+https://github.com/its-fortunatefolly/hubvibe/tree/main/wcag-audit-engine/integrations
+
+- langchain_tool.py -- LangChain tool wrapper
+- github_action.yml -- GitHub Action for CI audit-on-push
+- mcp_server.py -- MCP server using the official Model Context Protocol
+  SDK; standalone script with its own requirements.txt, not part of this
+  deployed service (its dependencies conflict with this service's FastAPI
+  version) -- see that file's docstring for setup.
+
+## Pricing
+
+Agency plan: $49/mo, 1,500 scans included, all 5 audit dimensions.
+Machine/per-call: $0.03 per single-dimension audit, $0.10 per bundle.
