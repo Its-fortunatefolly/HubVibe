@@ -42,7 +42,8 @@ except ImportError:
         sys.modules[_POOL_NAME] = browser_pool
         _spec.loader.exec_module(browser_pool)
 
-_USER_AGENT = "HubVibeAuditBot/1.0 (+https://hubvibe.dev)"
+USER_AGENT = "HubVibeAuditBot/1.0 (+https://hubvibe.dev)"
+_USER_AGENT = USER_AGENT  # backwards-compatible alias
 _HTTP_TIMEOUT = 15.0
 
 _SEVERITY_RANK = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3}
@@ -96,7 +97,21 @@ class _SEOParser(HTMLParser):
             self.title += data
 
 
-def run_seo_audit(html: Optional[str], url: Optional[str]) -> dict:
+def fetch_once(url: str):
+    """One HTTP GET whose response can serve several audits.
+
+    The SEO and security audits both need the same GET of the same URL --
+    SEO wants the body, security wants the headers and the post-redirect
+    URL. Fetching separately doubles the load we put on the site being
+    audited for no new information, and a bundle that hits a stranger's
+    origin four times per call is how an audit bot earns itself a block.
+    """
+    return httpx.get(
+        url, timeout=_HTTP_TIMEOUT, follow_redirects=True, headers={"User-Agent": USER_AGENT}
+    )
+
+
+def run_seo_audit(html: Optional[str], url: Optional[str], response=None) -> dict:
     """Checks title, meta description, H1 structure, canonical link,
     OpenGraph tags, JSON-LD structured data, and the <html lang> attribute.
 
@@ -108,9 +123,7 @@ def run_seo_audit(html: Optional[str], url: Optional[str]) -> dict:
     if not html and not url:
         raise ValueError("Provide 'html' or 'url'")
     if not html:
-        resp = httpx.get(
-            url, timeout=_HTTP_TIMEOUT, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
-        )
+        resp = response if response is not None else fetch_once(url)
         resp.raise_for_status()
         html = resp.text
 
@@ -189,7 +202,7 @@ def run_seo_audit(html: Optional[str], url: Optional[str]) -> dict:
     }
 
 
-def run_security_audit(url: Optional[str]) -> dict:
+def run_security_audit(url: Optional[str], response=None) -> dict:
     """Checks the final response's transport (HTTPS) and a handful of
     security-relevant response headers: HSTS, CSP, X-Content-Type-Options,
     clickjacking protection, Referrer-Policy, and CORS.
@@ -200,9 +213,7 @@ def run_security_audit(url: Optional[str]) -> dict:
     """
     if not url:
         raise ValueError("Provide 'url'")
-    resp = httpx.get(
-        url, timeout=_HTTP_TIMEOUT, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
-    )
+    resp = response if response is not None else fetch_once(url)
     final_url = str(resp.url)
     headers = {k.lower(): v for k, v in resp.headers.items()}
 
@@ -266,39 +277,16 @@ def run_security_audit(url: Optional[str]) -> dict:
     }
 
 
-def run_performance_audit(url: Optional[str]) -> dict:
-    """Loads the page in a real browser (Playwright/Chromium) and reports
-    DOM node count, total transferred bytes (from Content-Length response
-    headers), and request count from a single page load.
+def performance_result_from_metrics(
+    dom_node_count: int, resource_bytes: int, request_count: int
+) -> dict:
+    """Score already-measured page metrics.
 
-    Real measured values from one load on this server's network, not a
-    full Lighthouse-style audit (no field data, no repeated-run averaging,
-    no render-timing metrics).
+    Split out from run_performance_audit so a caller that has already loaded
+    the page for another reason -- /audit/bundle, which needs the same page
+    rendered for the accessibility check -- can score it without paying for a
+    second page load of the same URL.
     """
-    if not url:
-        raise ValueError("Provide 'url'")
-
-    resource_bytes = 0
-    request_count = 0
-
-    def _on_response(response):
-        nonlocal resource_bytes, request_count
-        request_count += 1
-        length = response.headers.get("content-length")
-        if length and length.isdigit():
-            resource_bytes += int(length)
-
-    def _measure(page) -> int:
-        page.on("response", _on_response)
-        page.goto(url, wait_until="networkidle", timeout=30000)
-        return page.evaluate("document.querySelectorAll('*').length")
-
-    # Pooled browser, fresh isolated context per call -- see browser_pool.
-    # Isolation matters for this audit in particular: a shared cache would
-    # make transferred-bytes and request-count read low on any URL a previous
-    # audit had already warmed, silently reporting a page as lighter than it is.
-    dom_node_count = browser_pool.with_page(_measure, user_agent=_USER_AGENT)
-
     findings = []
     if dom_node_count > 1500:
         findings.append(
@@ -337,3 +325,39 @@ def run_performance_audit(url: Optional[str]) -> dict:
         "findings": findings,
         "disclosure": "Single-page-load measurement, not a full Lighthouse-style audit.",
     }
+
+
+def run_performance_audit(url: Optional[str]) -> dict:
+    """Loads the page in a real browser (Playwright/Chromium) and reports
+    DOM node count, total transferred bytes (from Content-Length response
+    headers), and request count from a single page load.
+
+    Real measured values from one load on this server's network, not a
+    full Lighthouse-style audit (no field data, no repeated-run averaging,
+    no render-timing metrics).
+    """
+    if not url:
+        raise ValueError("Provide 'url'")
+
+    resource_bytes = 0
+    request_count = 0
+
+    def _on_response(response):
+        nonlocal resource_bytes, request_count
+        request_count += 1
+        length = response.headers.get("content-length")
+        if length and length.isdigit():
+            resource_bytes += int(length)
+
+    def _measure(page) -> int:
+        page.on("response", _on_response)
+        page.goto(url, wait_until="networkidle", timeout=30000)
+        return page.evaluate("document.querySelectorAll('*').length")
+
+    # Pooled browser, fresh isolated context per call -- see browser_pool.
+    # Isolation matters for this audit in particular: a shared cache would
+    # make transferred-bytes and request-count read low on any URL a previous
+    # audit had already warmed, silently reporting a page as lighter than it is.
+    dom_node_count = browser_pool.with_page(_measure, user_agent=_USER_AGENT)
+
+    return performance_result_from_metrics(dom_node_count, resource_bytes, request_count)
