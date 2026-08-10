@@ -314,6 +314,16 @@ def mcp_manifest():
     return FileResponse(STATIC_DIR / "mcp.json", media_type="application/json")
 
 
+@app.get("/robots.txt", response_class=FileResponse)
+def robots_txt():
+    return FileResponse(STATIC_DIR / "robots.txt", media_type="text/plain")
+
+
+@app.get("/sitemap.xml", response_class=FileResponse)
+def sitemap_xml():
+    return FileResponse(STATIC_DIR / "sitemap.xml", media_type="application/xml")
+
+
 @app.get("/healthz")
 def health_check():
     return {"status": "ok", "service": "wcag-audit-engine"}
