@@ -241,19 +241,23 @@ def test_authenticate_accepts_internal_key_without_x_payment(monkeypatch):
 
 
 def test_authenticate_x402_success_grants_access(monkeypatch):
-    # With a facilitator that confirms verification+settlement, a valid
-    # X-PAYMENT alone (no API key) is sufficient.
+    # With a facilitator that confirms verification, a valid X-PAYMENT alone
+    # (no API key) is sufficient to gain access. Note the payment is only
+    # VERIFIED at this point, not settled -- settlement waits until an audit
+    # has actually produced a result (see _bill).
     module = _load_main(monkeypatch, api_key=None)
-    monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header, price=None: True)
+    pending = object()
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None: pending)
     auth = module._authenticate(None, "some-signed-payment", None)
     assert isinstance(auth, module.AuthContext)
     assert auth.stripe_billable is False
     assert auth.payment_method == "x402"
+    assert auth.pending_payment is pending, "payment must be held unsettled until delivery"
 
 
 def test_authenticate_x402_failure_returns_402(monkeypatch):
     module = _load_main(monkeypatch, api_key=None)
-    monkeypatch.setattr(module.x402_payments, "verify_and_settle_sync", lambda header, price=None: False)
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None: None)
     result = module._authenticate(None, "some-signed-payment", None)
     assert isinstance(result, module.JSONResponse)
     assert result.status_code == 402
@@ -735,3 +739,116 @@ def test_page_head_social_tags_point_at_served_assets(monkeypatch):
     assert referenced, "page head references no image assets at all"
     for path in referenced:
         assert client.get(path).status_code == 200, f"{path} is referenced but 404s"
+
+
+# --- Machine payers are charged only for audits that actually ran ----------
+
+
+def _x402_caller(monkeypatch, module, *, settle_ok=True):
+    """Make an X-PAYMENT header authenticate, tracking verify/settle calls."""
+    calls = {"verified": 0, "settled": 0}
+    sentinel = object()
+
+    def _verify(header, price=None):
+        calls["verified"] += 1
+        return sentinel
+
+    def _settle(pending):
+        calls["settled"] += 1
+        assert pending is sentinel
+        return settle_ok
+
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", _verify)
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _settle)
+    return calls
+
+
+def test_failed_audit_does_not_settle_an_x402_payment(monkeypatch):
+    """Regression: settlement used to happen during authentication, so a
+    caller whose audit then failed to run had paid for nothing. Audits fail
+    routinely at volume -- the site being audited goes down or times out."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _x402_caller(monkeypatch, module)
+
+    def _boom(*a, **k):
+        raise RuntimeError("target site unreachable")
+
+    monkeypatch.setattr(module, "_run_axe", _boom)
+
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "signed-payment"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["pass"] is None
+    assert calls["verified"] == 1, "payment should still be verified to gate access"
+    assert calls["settled"] == 0, "a failed audit must never be charged for"
+
+
+def test_successful_audit_settles_the_x402_payment(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _x402_caller(monkeypatch, module)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "signed-payment"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["pass"] is True
+    assert calls["settled"] == 1, "a delivered audit must actually be charged for"
+    assert "billing_warning" not in response.json()
+
+
+def test_settlement_failure_after_delivery_is_surfaced_not_hidden(monkeypatch):
+    """If we delivered but couldn't collect, say so on the response rather
+    than silently eating the loss."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _x402_caller(monkeypatch, module, settle_ok=False)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    client = TestClient(module.app)
+    body = client.post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "signed-payment"},
+    ).json()
+
+    assert "billing_warning" in body
+    assert "not charged" in body["billing_warning"]
+
+
+def test_failed_bundle_does_not_settle_either(monkeypatch):
+    """The bundle is the $0.10 route -- the most expensive thing to wrongly
+    charge for."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _x402_caller(monkeypatch, module)
+
+    def _boom(*a, **k):
+        raise RuntimeError("target site unreachable")
+
+    monkeypatch.setattr(module, "_run_axe", _boom)
+
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit/bundle",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "signed-payment"},
+    )
+
+    assert response.status_code == 502
+    assert calls["settled"] == 0
