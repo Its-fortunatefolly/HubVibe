@@ -278,8 +278,8 @@ header on a 402 for that method) and stays inert:
 - `integrations/github_action.yml` — a copy-paste GitHub Actions workflow
   that runs `/audit/bundle` as a CI/CD gate and fails the build on either a
   failed audit or a failed/unauthenticated request.
-- `mcp.json` (repo root of this service) — tool definitions for all five
-  routes in MCP's `{name, description, inputSchema}` shape, with a
+- `app/static/mcp.json`, served live at `/mcp.json` — tool definitions for
+  all five routes in MCP's `{name, description, inputSchema}` shape, with a
   non-standard `httpEndpoint` extension mapping each onto its actual route
   and price, since this is a plain REST API, not a live MCP stdio/SSE
   server. The same schema is also served live at `/.well-known/agent.json`.
