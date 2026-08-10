@@ -472,14 +472,19 @@ def test_new_routes_accept_internal_key_and_execute(monkeypatch, path, body):
     from unittest.mock import patch
 
     module = _load_main(monkeypatch, api_key="test-key")
+    _perf = {"status": "ok", "pass": True, "findings": [], "metrics": {}}
     with patch.object(module, "_run_axe", return_value={"violations": []}), patch.object(
+        module, "_run_axe_and_performance", return_value=({"violations": []}, _perf)
+    ), patch.object(
+        module.audits, "fetch_once", return_value=object()
+    ), patch.object(
         module.audits, "run_seo_audit", return_value={"status": "ok", "pass": True, "findings": []}
     ), patch.object(
         module.audits, "run_security_audit", return_value={"status": "ok", "pass": True, "findings": []}
     ), patch.object(
         module.audits,
         "run_performance_audit",
-        return_value={"status": "ok", "pass": True, "findings": [], "metrics": {}},
+        return_value=_perf,
     ):
         client = TestClient(module.app)
         response = client.post(path, json=body, headers={"X-API-Key": "test-key"})
@@ -565,14 +570,19 @@ def test_bundle_success_reports_three_billing_units(monkeypatch):
 
     monkeypatch.setattr(module, "_authenticate", _fake_authenticate)
 
+    _perf = {"status": "ok", "pass": True, "findings": [], "metrics": {}}
     with patch.object(module, "_run_axe", return_value={"violations": []}), patch.object(
+        module, "_run_axe_and_performance", return_value=({"violations": []}, _perf)
+    ), patch.object(
+        module.audits, "fetch_once", return_value=object()
+    ), patch.object(
         module.audits, "run_seo_audit", return_value={"status": "ok", "pass": True, "findings": []}
     ), patch.object(
         module.audits, "run_security_audit", return_value={"status": "ok", "pass": True, "findings": []}
     ), patch.object(
         module.audits,
         "run_performance_audit",
-        return_value={"status": "ok", "pass": True, "findings": [], "metrics": {}},
+        return_value=_perf,
     ):
         client = TestClient(module.app)
         response = client.post(
@@ -852,3 +862,101 @@ def test_failed_bundle_does_not_settle_either(monkeypatch):
 
     assert response.status_code == 502
     assert calls["settled"] == 0
+
+
+def test_bundle_hits_the_target_url_only_twice(monkeypatch):
+    """The bundle used to fetch the audited URL four times per call: two full
+    Chromium page loads (axe, performance) plus two HTTP GETs (SEO, security).
+    That is 4x the latency on the priciest route, and four hits on a
+    stranger's origin per call is how an audit bot gets its user agent
+    blocked. One rendered load feeds both browser checks; one GET feeds both
+    response checks."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    page_loads = {"n": 0}
+    http_gets = {"n": 0}
+
+    def _count_page_load(fn, **kwargs):
+        page_loads["n"] += 1
+        page = _FakePage()
+        return fn(page)
+
+    def _count_http_get(url):
+        http_gets["n"] += 1
+        return object()
+
+    with patch.object(module.browser_pool, "with_page", _count_page_load), patch.object(
+        module.audits, "fetch_once", _count_http_get
+    ), patch.object(
+        module.audits, "run_seo_audit", return_value={"status": "ok", "pass": True, "findings": []}
+    ), patch.object(
+        module.audits, "run_security_audit", return_value={"status": "ok", "pass": True, "findings": []}
+    ), patch.object(
+        module._axe, "run", return_value=_FakeAxeResult()
+    ):
+        client = TestClient(module.app)
+        response = client.post(
+            "/audit/bundle", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
+        )
+
+    assert response.status_code == 200
+    assert page_loads["n"] == 1, f"expected 1 rendered page load, got {page_loads['n']}"
+    assert http_gets["n"] == 1, f"expected 1 HTTP GET, got {http_gets['n']}"
+
+
+def test_bundle_shares_one_http_response_between_seo_and_security(monkeypatch):
+    """Both response-based checks must be handed the SAME response object --
+    if either re-fetches, we are back to hammering the origin."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    shared = object()
+    seen = []
+
+    def _seo(html, url, response=None):
+        seen.append(("seo", response))
+        return {"status": "ok", "pass": True, "findings": []}
+
+    def _security(url, response=None):
+        seen.append(("security", response))
+        return {"status": "ok", "pass": True, "findings": []}
+
+    _perf = {"status": "ok", "pass": True, "findings": [], "metrics": {}}
+    with patch.object(
+        module, "_run_axe_and_performance", return_value=({"violations": []}, _perf)
+    ), patch.object(module.audits, "fetch_once", lambda url: shared), patch.object(
+        module.audits, "run_seo_audit", _seo
+    ), patch.object(
+        module.audits, "run_security_audit", _security
+    ):
+        client = TestClient(module.app)
+        response = client.post(
+            "/audit/bundle", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
+        )
+
+    assert response.status_code == 200
+    assert [name for name, _ in seen] == ["seo", "security"]
+    assert all(resp is shared for _, resp in seen), "an audit re-fetched instead of sharing"
+
+
+class _FakePage:
+    """Minimal stand-in for a Playwright page in the combined-load path."""
+
+    def on(self, event, handler):
+        fake_response = type("R", (), {"headers": {"content-length": "100"}})()
+        handler(fake_response)
+
+    def goto(self, url, **kwargs):
+        return None
+
+    def evaluate(self, script):
+        return 42
+
+
+class _FakeAxeResult:
+    response = {"violations": []}

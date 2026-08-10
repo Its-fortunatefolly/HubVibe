@@ -459,6 +459,42 @@ def _run_axe(html: Optional[str], url: Optional[str]) -> dict:
     return browser_pool.with_page(_audit)
 
 
+def _run_axe_and_performance(url: str):
+    """One page load serving BOTH the accessibility and performance audits.
+
+    /audit/bundle used to hit the target URL four times for a single call:
+    two full Chromium page loads (axe, then performance) plus two separate
+    HTTP GETs (SEO, then security). That is four times the latency on the
+    most expensive route, and four hits on a stranger's origin per call is
+    how an audit bot gets its user agent blocked -- which would cost us the
+    ability to audit that site at all.
+
+    Both browser-based checks need exactly the same thing: the page,
+    rendered, once. The response listener must be attached before navigation
+    or the measurement misses the requests it is meant to count.
+    """
+    stats = {"bytes": 0, "requests": 0}
+
+    def _on_response(response):
+        stats["requests"] += 1
+        length = response.headers.get("content-length")
+        if length and length.isdigit():
+            stats["bytes"] += int(length)
+
+    def _both(page):
+        page.on("response", _on_response)
+        page.goto(url, wait_until="networkidle", timeout=30000)
+        dom_node_count = page.evaluate("document.querySelectorAll('*').length")
+        # axe runs against the already-loaded page rather than reloading it.
+        return _axe.run(page, options=AXE_OPTIONS).response, dom_node_count
+
+    axe_raw, dom_node_count = browser_pool.with_page(_both, user_agent=audits.USER_AGENT)
+    performance = audits.performance_result_from_metrics(
+        dom_node_count, stats["bytes"], stats["requests"]
+    )
+    return axe_raw, performance
+
+
 def _remediation_notes(violations: list) -> Optional[dict]:
     """Best-effort, clearly-labeled AI remediation suggestions.
 
@@ -1049,7 +1085,10 @@ def audit_bundle(
         return err
 
     try:
-        wcag_raw = _run_axe(None, payload.url)
+        # Two fetches of the target, not four: one rendered page load feeding
+        # both browser-based checks, and one HTTP GET feeding both
+        # response-based checks. See _run_axe_and_performance.
+        wcag_raw, performance_result = _run_axe_and_performance(payload.url)
         wcag_violations = wcag_raw.get("violations", [])
         wcag_result = {
             "status": "ok",
@@ -1066,9 +1105,9 @@ def audit_bundle(
                 for v in wcag_violations
             ],
         }
-        seo_result = audits.run_seo_audit(None, payload.url)
-        security_result = audits.run_security_audit(payload.url)
-        performance_result = audits.run_performance_audit(payload.url)
+        shared_response = audits.fetch_once(payload.url)
+        seo_result = audits.run_seo_audit(None, payload.url, response=shared_response)
+        security_result = audits.run_security_audit(payload.url, response=shared_response)
     except Exception as exc:
         return JSONResponse(
             status_code=502,
