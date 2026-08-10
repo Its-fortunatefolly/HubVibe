@@ -39,6 +39,7 @@ except ImportError:
 app = FastAPI(title="WCAG Audit Engine")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+SERVICE_ROOT = Path(__file__).resolve().parent.parent
 
 _axe = Axe()
 
@@ -302,6 +303,16 @@ def checkout_success_page():
 @app.get("/billing/cancel", response_class=FileResponse)
 def checkout_cancel_page():
     return FileResponse(STATIC_DIR / "cancel.html")
+
+
+@app.get("/llms.txt", response_class=FileResponse)
+def llms_txt():
+    return FileResponse(STATIC_DIR / "llms.txt", media_type="text/plain")
+
+
+@app.get("/mcp.json", response_class=FileResponse)
+def mcp_manifest():
+    return FileResponse(SERVICE_ROOT / "mcp.json", media_type="application/json")
 
 
 @app.get("/healthz")

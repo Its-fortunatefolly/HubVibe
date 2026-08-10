@@ -49,6 +49,30 @@ def test_landing_page_served_at_root(monkeypatch):
     assert "text/html" in response.headers["content-type"]
 
 
+def test_llms_txt_served_at_root(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    response = client.get("/llms.txt")
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+    assert "/audit/bundle" in response.text
+
+
+def test_mcp_json_served_and_matches_repo_manifest(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    response = client.get("/mcp.json")
+    assert response.status_code == 200
+    assert "application/json" in response.headers["content-type"]
+    body = response.json()
+    tool_names = {tool["name"] for tool in body["tools"]}
+    assert tool_names == {"audit_wcag", "audit_seo", "audit_security", "audit_performance", "audit_bundle"}
+
+
 def test_agent_manifest_advertises_payment(monkeypatch):
     from fastapi.testclient import TestClient
 
