@@ -4,195 +4,158 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HubVibe — site compliance auditing for humans and AI agents</title>
-<meta name="description" content="Real, rule-based accessibility, SEO, security, and performance audits. Agency plans for teams, plus per-call machine pricing for AI agents.">
+<meta name="description" content="Real, rule-based accessibility, SEO, security, and performance audits. An Agency plan for teams, and per-call machine pricing for AI agents.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #05070c;
-    --bg-2: #0a0d15;
-    --panel: #10131c;
-    --panel-2: #141826;
-    --panel-border: #232838;
-    --panel-border-soft: #1a1f2c;
-    --text: #edf0f7;
-    --muted: #9aa3b8;
-    --muted-2: #6b7488;
-    --accent: #7c6cf6;
-    --accent-2: #4f8cff;
-    --accent-text: #b9aeff;
-    --ok: #3ecf8e;
-    --bad: #ff6b6b;
-    --gradient: linear-gradient(135deg, #7c6cf6 0%, #4f8cff 100%);
+    --bg: #07080b;
+    --bg-2: #0c0e13;
+    --panel: #101216;
+    --panel-2: #16181e;
+    --panel-border: #23262e;
+    --panel-border-soft: #1a1c22;
+    --text: #f2f3f5;
+    --muted: #9599a3;
+    --muted-2: #6b6f78;
+    --accent: #8b7cf6;
+    --ok: #4ade80;
+    --bad: #f87171;
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
     margin: 0;
     background: var(--bg);
-    background-image:
-      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(124,108,246,0.16), transparent),
-      radial-gradient(ellipse 700px 500px at 90% 5%, rgba(79,140,255,0.10), transparent);
-    background-repeat: no-repeat;
     color: var(--text);
     font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    line-height: 1.55;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
-  a { color: var(--accent-text); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--text); text-decoration: underline; text-decoration-color: var(--panel-border); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--muted); }
   code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
-  code { background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 5px; font-size: 0.86em; color: var(--accent-text); }
+  code { background: var(--panel-2); padding: 2px 7px; border-radius: 4px; font-size: 0.86em; color: var(--text); border: 1px solid var(--panel-border); }
 
   /* Nav */
   nav.topnav {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 22px 0; position: relative; z-index: 5;
+    padding: 28px 0; border-bottom: 1px solid var(--panel-border-soft); margin-bottom: 0;
   }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--text); }
-  .brand-mark {
-    width: 26px; height: 26px; border-radius: 8px; background: var(--gradient);
-    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
-    box-shadow: 0 4px 14px rgba(124,108,246,0.35);
-  }
-  .brand-mark svg { width: 15px; height: 15px; }
-  .nav-links { display: none; gap: 28px; align-items: center; font-size: 0.92rem; color: var(--muted); }
-  .nav-links a { color: var(--muted); }
-  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .brand { font-weight: 700; font-size: 1rem; letter-spacing: -0.01em; color: var(--text); }
+  .nav-links { display: none; gap: 32px; align-items: center; font-size: 0.88rem; }
+  .nav-links a { color: var(--muted); text-decoration: none; }
+  .nav-links a:hover { color: var(--text); }
   @media (min-width: 720px) { .nav-links { display: flex; } }
   .nav-cta {
-    background: var(--gradient); color: white; border: none; padding: 9px 18px; border-radius: 8px;
-    font-size: 0.88rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+    background: var(--text); color: var(--bg); border: none; padding: 8px 16px; border-radius: 6px;
+    font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit;
   }
+  .nav-cta:hover { background: #d8dae0; }
 
   /* Hero */
-  header.hero { padding: 64px 0 56px; text-align: center; position: relative; }
-  .eyebrow {
-    display: inline-flex; align-items: center; gap: 7px; font-size: 0.76rem; letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--accent-text); background: rgba(124,108,246,0.12); border: 1px solid rgba(124,108,246,0.32);
-    padding: 6px 14px; border-radius: 999px; margin-bottom: 24px; font-weight: 600;
-  }
+  header.hero { padding: 96px 0 88px; }
   header.hero h1 {
-    font-size: clamp(2rem, 4.4vw, 3.1rem); margin: 0 0 20px; letter-spacing: -0.025em; font-weight: 800; line-height: 1.12;
+    font-size: clamp(2.4rem, 5.2vw, 3.6rem); margin: 0 0 24px; letter-spacing: -0.03em; font-weight: 800; line-height: 1.08;
+    max-width: 820px;
   }
-  header.hero h1 .grad { background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  header.hero p.sub { color: var(--muted); font-size: 1.1rem; max-width: 640px; margin: 0 auto 34px; }
-  .hero-ctas { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  header.hero p.sub { color: var(--muted); font-size: 1.15rem; max-width: 560px; margin: 0 0 36px; }
+  .hero-ctas { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
   .btn {
-    border: none; padding: 13px 24px; border-radius: 9px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
-    font-family: inherit; transition: transform 0.12s ease, box-shadow 0.12s ease;
+    border: none; padding: 14px 26px; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+    font-family: inherit; transition: opacity 0.12s ease, transform 0.12s ease;
   }
   .btn:active { transform: translateY(1px); }
-  .btn-primary { background: var(--gradient); color: white; box-shadow: 0 8px 24px rgba(124,108,246,0.32); }
-  .btn-primary:hover { box-shadow: 0 10px 30px rgba(124,108,246,0.44); }
-  .btn-ghost { background: var(--panel-2); color: var(--text); border: 1px solid var(--panel-border); }
-  .btn-ghost:hover { border-color: #363d52; }
-  .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; }
-  .trust-strip {
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; max-width: 720px; margin: 44px auto 0;
-  }
-  @media (min-width: 640px) { .trust-strip { grid-template-columns: repeat(4, 1fr); } }
-  .trust-item {
-    display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px;
-    color: var(--muted-2); font-size: 0.78rem;
-  }
-  .trust-item svg { width: 20px; height: 20px; color: var(--accent-text); opacity: 0.85; }
+  .btn-primary { background: var(--text); color: var(--bg); }
+  .btn-primary:hover { opacity: 0.86; }
+  .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--panel-border); }
+  .btn-ghost:hover { border-color: var(--muted); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+  .quiet-link { color: var(--muted); font-size: 0.9rem; text-decoration: underline; text-decoration-color: var(--panel-border); background: none; border: none; cursor: pointer; font-family: inherit; padding: 0; }
+  .quiet-link:hover { color: var(--text); }
 
   /* Sections */
-  section { padding: 64px 0; border-top: 1px solid var(--panel-border-soft); }
-  .section-head { text-align: center; max-width: 620px; margin: 0 auto 40px; }
-  .section-head .eyebrow-sm {
-    font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-text); font-weight: 700; margin-bottom: 10px; display: block;
-  }
-  h2 { font-size: 1.9rem; margin: 0 0 12px; letter-spacing: -0.02em; font-weight: 800; }
-  .section-head p { color: var(--muted); font-size: 1rem; margin: 0; }
+  section { padding: 72px 0; border-top: 1px solid var(--panel-border-soft); }
+  .section-label { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; margin-bottom: 14px; }
+  h2 { font-size: 1.7rem; margin: 0 0 14px; letter-spacing: -0.02em; font-weight: 800; max-width: 560px; }
+  .section-sub { color: var(--muted); font-size: 1rem; margin: 0 0 40px; max-width: 560px; }
 
-  .panel {
-    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px; padding: 26px;
-  }
+  .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 24px; }
 
-  /* Feature grid */
-  .feature-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-  @media (min-width: 640px) { .feature-grid { grid-template-columns: 1fr 1fr; } }
-  @media (min-width: 960px) { .feature-grid { grid-template-columns: repeat(4, 1fr); } }
-  .feature-card { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px; padding: 22px; }
-  .feature-icon {
-    width: 40px; height: 40px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--panel-border);
-    display: flex; align-items: center; justify-content: center; margin-bottom: 16px;
-  }
-  .feature-icon svg { width: 20px; height: 20px; color: var(--accent-text); }
-  .feature-card h3 { font-size: 1.02rem; margin: 0 0 8px; font-weight: 700; }
-  .feature-card p { color: var(--muted); font-size: 0.88rem; margin: 0; }
-  .feature-price { display: inline-block; margin-top: 14px; font-size: 0.76rem; color: var(--muted-2); font-family: "JetBrains Mono", monospace; }
+  /* Sample response panel */
+  .check-layout { display: grid; grid-template-columns: 1fr; gap: 40px; align-items: start; }
+  @media (min-width: 860px) { .check-layout { grid-template-columns: 0.9fr 1.1fr; } }
+  .check-list { list-style: none; padding: 0; margin: 0; }
+  .check-list li { padding: 18px 0; border-top: 1px solid var(--panel-border-soft); }
+  .check-list li:first-child { border-top: none; padding-top: 0; }
+  .check-list .check-name { font-weight: 700; font-size: 0.98rem; margin-bottom: 4px; }
+  .check-list .check-desc { color: var(--muted); font-size: 0.88rem; }
+  .check-list .check-meta { color: var(--muted-2); font-size: 0.78rem; margin-top: 6px; font-family: "JetBrains Mono", monospace; }
+  .code-window { background: var(--bg-2); border: 1px solid var(--panel-border); border-radius: 10px; overflow: hidden; }
+  .code-window-head { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-bottom: 1px solid var(--panel-border); }
+  .code-window-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--panel-border); }
+  .code-window-head .filename { color: var(--muted-2); font-size: 0.78rem; font-family: "JetBrains Mono", monospace; margin-left: 6px; }
+  .code-window pre { margin: 0; padding: 18px 16px; font-size: 0.8rem; line-height: 1.65; overflow-x: auto; color: #c3c9d6; }
+  .code-window .k { color: #8b9eff; }
+  .code-window .s { color: #7dd6a8; }
+  .code-window .n { color: #f0b86e; }
 
-  /* Free scan */
+  /* Demo (formerly "free scan") */
+  #demo { padding: 56px 0; }
+  #demo .panel { max-width: 640px; }
   form.scan-form { display: flex; gap: 10px; flex-wrap: wrap; }
   input[type=url], input[type=email] {
-    flex: 1 1 260px; background: var(--bg-2); border: 1px solid var(--panel-border); color: var(--text);
-    padding: 13px 15px; border-radius: 9px; font-size: 0.95rem; font-family: inherit;
+    flex: 1 1 220px; background: var(--bg-2); border: 1px solid var(--panel-border); color: var(--text);
+    padding: 11px 13px; border-radius: 7px; font-size: 0.9rem; font-family: inherit;
   }
-  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,108,246,0.18); }
-  #scan-result { margin-top: 18px; }
-  .result-line { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--panel-border); }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139,124,246,0.16); }
+  #scan-result { margin-top: 16px; }
+  .result-line { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--panel-border); font-size: 0.9rem; }
   .result-line:last-child { border-bottom: none; }
   .pass { color: var(--ok); font-weight: 700; }
   .fail { color: var(--bad); font-weight: 700; }
-  .issue { padding: 12px 0; border-bottom: 1px solid var(--panel-border); font-size: 0.9rem; }
+  .issue { padding: 10px 0; border-bottom: 1px solid var(--panel-border); font-size: 0.86rem; }
   .issue:last-child { border-bottom: none; }
-  .impact { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-2); font-weight: 600; }
-  .muted-note { color: var(--muted); font-size: 0.85rem; margin-top: 14px; }
-  .disclosure { color: var(--muted-2); font-size: 0.83rem; line-height: 1.6; }
+  .impact { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-2); font-weight: 600; }
+  .muted-note { color: var(--muted); font-size: 0.82rem; margin-top: 12px; }
+  .disclosure { color: var(--muted-2); font-size: 0.82rem; line-height: 1.65; }
 
   /* Pricing */
   .pricing-columns { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
   @media (min-width: 860px) { .pricing-columns { grid-template-columns: 1.15fr 0.85fr; } }
   .plan-card.featured {
-    background: linear-gradient(180deg, rgba(124,108,246,0.10), rgba(124,108,246,0.02)), var(--panel);
-    border: 1px solid rgba(124,108,246,0.45); border-radius: 16px; padding: 32px;
-    box-shadow: 0 0 0 1px rgba(124,108,246,0.08), 0 24px 60px -20px rgba(124,108,246,0.35);
-    position: relative;
+    background: var(--panel); border: 1px solid #3a3550; border-radius: 14px; padding: 34px;
   }
-  .featured-tag {
-    position: absolute; top: -12px; left: 28px; background: var(--gradient); color: white; font-size: 0.72rem;
-    font-weight: 700; letter-spacing: 0.03em; padding: 5px 12px; border-radius: 999px;
-  }
-  .plan-card h3 { font-size: 1.3rem; margin: 6px 0 6px; font-weight: 800; }
-  .plan-tagline { color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; }
-  .price { font-size: 2.6rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 22px; }
-  .price span { font-size: 0.95rem; color: var(--muted); font-weight: 500; }
-  ul.features { list-style: none; padding: 0; margin: 0 0 24px; color: var(--text); font-size: 0.92rem; }
-  ul.features li { padding: 7px 0; display: flex; align-items: flex-start; gap: 10px; }
-  ul.features li svg { width: 16px; height: 16px; color: var(--ok); flex-shrink: 0; margin-top: 3px; }
+  .plan-card h3 { font-size: 1.15rem; margin: 0 0 6px; font-weight: 700; }
+  .plan-tagline { color: var(--muted); font-size: 0.9rem; margin: 0 0 24px; }
+  .price { font-size: 2.8rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 26px; }
+  .price span { font-size: 0.92rem; color: var(--muted); font-weight: 500; }
+  ul.features { list-style: none; padding: 0; margin: 0 0 26px; color: var(--text); font-size: 0.9rem; }
+  ul.features li { padding: 8px 0; border-top: 1px solid var(--panel-border-soft); }
+  ul.features li:first-child { border-top: none; padding-top: 0; }
 
-  .plan-card.compact { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px; padding: 28px; }
-  .tier-badge {
-    display: inline-block; font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase;
-    color: var(--muted); background: var(--panel-2); border: 1px solid var(--panel-border);
-    padding: 4px 10px; border-radius: 999px; margin-bottom: 14px; font-weight: 600;
-  }
+  .plan-card.compact { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px; padding: 28px; }
+  .tier-label { font-size: 0.76rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-2); font-weight: 700; margin-bottom: 12px; }
   .rate-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 4px 0 18px; }
-  .rate-table td { padding: 9px 0; border-bottom: 1px solid var(--panel-border); color: var(--muted); }
-  .rate-table td:last-child { text-align: right; font-weight: 700; color: var(--text); white-space: nowrap; font-family: "JetBrains Mono", monospace; font-size: 0.85rem; }
+  .rate-table td { padding: 9px 0; border-bottom: 1px solid var(--panel-border-soft); color: var(--muted); }
+  .rate-table td:last-child { text-align: right; font-weight: 700; color: var(--text); white-space: nowrap; font-family: "JetBrains Mono", monospace; font-size: 0.84rem; }
   .rate-table tr:last-child td { border-bottom: none; }
   pre.curl-block {
-    background: var(--bg-2); border: 1px solid var(--panel-border); border-radius: 9px;
-    padding: 15px; font-size: 0.78rem; overflow-x: auto; margin: 4px 0 10px; color: #b8c4e0; line-height: 1.6;
+    background: var(--bg-2); border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 14px; font-size: 0.76rem; overflow-x: auto; margin: 4px 0 10px; color: #b8c4e0; line-height: 1.6;
   }
-  .copy-button { padding: 7px 14px; font-size: 0.8rem; }
+  .copy-button { padding: 6px 13px; font-size: 0.78rem; }
 
-  footer { padding: 48px 0 64px; color: var(--muted-2); font-size: 0.85rem; text-align: center; border-top: 1px solid var(--panel-border-soft); }
+  footer { padding: 44px 0 64px; color: var(--muted-2); font-size: 0.84rem; text-align: center; border-top: 1px solid var(--panel-border-soft); }
   footer a { color: var(--muted); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <nav class="topnav">
-    <span class="brand">
-      <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-      HubVibe
-    </span>
+    <span class="brand">HubVibe</span>
     <span class="nav-links">
       <a href="#what-we-check">What we check</a>
       <a href="#pricing">Pricing</a>
@@ -203,111 +166,81 @@
   </nav>
 
   <header class="hero">
-    <span class="eyebrow">Real checks · not AI guessing · not a legal certification</span>
-    <h1>Site compliance auditing for <span class="grad">humans and the AI agents</span> buying on their behalf.</h1>
+    <h1>Site compliance auditing for humans, and the AI agents buying on their behalf.</h1>
     <p class="sub">
-      Deterministic, rule-based audits — accessibility, SEO, security headers, and
-      performance — never an LLM guessing at quality. Subscribe once as a team,
-      or let an AI agent pay per call without a human setting up billing first.
+      Deterministic, rule-based audits — accessibility, SEO, security headers,
+      and performance. No LLM guessing at quality, no fabricated pass on error.
     </p>
     <div class="hero-ctas">
-      <button class="btn btn-primary" onclick="document.getElementById('pricing').scrollIntoView({behavior:'smooth'})">Start the Agency plan</button>
-      <button class="btn btn-ghost" onclick="document.getElementById('free-scan').scrollIntoView({behavior:'smooth'})">Try a free scan</button>
-    </div>
-    <div class="trust-strip">
-      <div class="trust-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-        axe-core rule engine
-      </div>
-      <div class="trust-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-        Live HTTP inspection
-      </div>
-      <div class="trust-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-        Real browser measurement
-      </div>
-      <div class="trust-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/></svg>
-        Fail-closed, never billed on error
-      </div>
+      <button class="btn btn-primary" onclick="document.getElementById('pricing').scrollIntoView({behavior:'smooth'})">Start the Agency plan — $49/mo</button>
+      <button class="quiet-link" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">or run a live demo scan ↓</button>
     </div>
   </header>
 
   <section id="what-we-check">
-    <div class="section-head">
-      <span class="eyebrow-sm">Four dimensions, one bundle</span>
-      <h2>What actually gets checked</h2>
-      <p>Every result is a deterministic pass/fail from a real rule engine or a real live request — nothing here is a model guessing at quality.</p>
-    </div>
-    <div class="feature-grid">
-      <div class="feature-card">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><path d="M12 7v6m0 0l-5 8m5-8l5 8M4 11h16"/></svg></div>
-        <h3>Accessibility</h3>
-        <p>WCAG 2.1 A/AA via axe-core, the same engine real accessibility tools use.</p>
-        <span class="feature-price">/audit/wcag · $0.03</span>
+    <div class="section-label">How it works</div>
+    <h2>Four real checks, one API</h2>
+    <p class="section-sub">Every result below comes from an actual rule engine or an actual HTTP/browser request — not a model's opinion.</p>
+    <div class="check-layout">
+      <ul class="check-list">
+        <li>
+          <div class="check-name">Accessibility</div>
+          <div class="check-desc">WCAG 2.1 A/AA via axe-core, the engine real accessibility tools use.</div>
+          <div class="check-meta">POST /audit/wcag · $0.03</div>
+        </li>
+        <li>
+          <div class="check-name">SEO</div>
+          <div class="check-desc">Title, meta description, H1 structure, canonical, OpenGraph, structured data.</div>
+          <div class="check-meta">POST /audit/seo · $0.03</div>
+        </li>
+        <li>
+          <div class="check-name">Security headers</div>
+          <div class="check-desc">HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking protection, CORS.</div>
+          <div class="check-meta">POST /audit/security · $0.03</div>
+        </li>
+        <li>
+          <div class="check-name">Performance</div>
+          <div class="check-desc">DOM node count, transferred bytes, request count from one real page load.</div>
+          <div class="check-meta">POST /audit/performance · $0.03</div>
+        </li>
+      </ul>
+      <div class="code-window">
+        <div class="code-window-head">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="filename">POST /audit/bundle — example response</span>
+        </div>
+        <pre>{
+  <span class="k">"status"</span>: <span class="s">"ok"</span>,
+  <span class="k">"pass"</span>: <span class="n">false</span>,
+  <span class="k">"wcag"</span>: { <span class="k">"pass"</span>: <span class="n">false</span>, <span class="k">"violations"</span>: [
+    { <span class="k">"id"</span>: <span class="s">"color-contrast"</span>, <span class="k">"impact"</span>: <span class="s">"serious"</span> }
+  ] },
+  <span class="k">"seo"</span>: { <span class="k">"pass"</span>: <span class="n">true</span>, <span class="k">"findings"</span>: [] },
+  <span class="k">"security"</span>: { <span class="k">"pass"</span>: <span class="n">true</span>, <span class="k">"findings"</span>: [] },
+  <span class="k">"performance"</span>: {
+    <span class="k">"pass"</span>: <span class="n">true</span>,
+    <span class="k">"metrics"</span>: { <span class="k">"dom_node_count"</span>: <span class="n">812</span> }
+  }
+}</pre>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
-        <h3>SEO</h3>
-        <p>Title, meta description, H1 structure, canonical, OpenGraph, structured data.</p>
-        <span class="feature-price">/audit/seo · $0.03</span>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
-        <h3>Security headers</h3>
-        <p>HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking protection, CORS.</p>
-        <span class="feature-price">/audit/security · $0.03</span>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg></div>
-        <h3>Performance</h3>
-        <p>DOM node count, transferred bytes, and request count from one real page load.</p>
-        <span class="feature-price">/audit/performance · $0.03</span>
-      </div>
-    </div>
-  </section>
-
-  <section id="free-scan">
-    <div class="section-head">
-      <span class="eyebrow-sm">Try it</span>
-      <h2>Free accessibility scan</h2>
-      <p>One quick, real WCAG check — no signup. Three per day, top 2 issues shown.</p>
-    </div>
-    <div class="panel">
-      <form class="scan-form" id="scan-form">
-        <input type="url" id="scan-url" placeholder="https://yoursite.com" required>
-        <input type="email" id="scan-email" placeholder="you@company.com (optional)">
-        <button type="submit" class="btn btn-primary" id="scan-button">Scan now</button>
-      </form>
-      <div id="scan-result"></div>
-      <p class="disclosure" style="margin-top:16px;">
-        This is a one-time snapshot, not certification of compliance — automated
-        tools catch a meaningful share of WCAG issues, not all of them. Every
-        other path on this page is a paid call; there's no unlimited or
-        unauthenticated tier for programmatic use, by design.
-      </p>
     </div>
   </section>
 
   <section id="pricing">
-    <div class="section-head">
-      <span class="eyebrow-sm">Pricing</span>
-      <h2>One plan for your team, one rate for your agents</h2>
-      <p>The Agency plan is the product. Machine pricing exists so an AI agent can pay for itself, not the other way around.</p>
-    </div>
+    <div class="section-label">Pricing</div>
+    <h2>One plan for your team, one rate for your agents</h2>
+    <p class="section-sub">The Agency plan is the product. Machine pricing exists so an AI agent can pay for itself, not the other way around.</p>
     <div class="pricing-columns">
       <div class="plan-card featured">
-        <span class="featured-tag">Recommended</span>
         <h3>Agency / Developer Plan</h3>
         <p class="plan-tagline">Everything a team needs to monitor a site continuously.</p>
         <div class="price">$49 <span>/ month</span></div>
         <ul class="features">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> 1,500 automated page scans/month included</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> All four audit types: accessibility, SEO, security, performance</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Overage beyond 1,500 falls back to per-call machine rates automatically</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> AI-drafted, plain-language remediation notes per issue</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Dated scan history, plus API access via <code>X-API-Key</code></li>
+          <li>1,500 automated page scans/month included</li>
+          <li>All four audit types: accessibility, SEO, security, performance</li>
+          <li>Overage beyond 1,500 falls back to per-call machine rates automatically</li>
+          <li>AI-drafted, plain-language remediation notes per issue</li>
+          <li>Dated scan history, plus API access via <code>X-API-Key</code></li>
         </ul>
         <form id="checkout-form">
           <input type="email" id="checkout-email" placeholder="you@company.com" required style="width:100%; margin-bottom: 12px;">
@@ -317,9 +250,9 @@
       </div>
 
       <div class="plan-card compact">
-        <span class="tier-badge">For AI agents &amp; CI/CD</span>
-        <h3 style="font-size:1.1rem; margin-bottom:6px;">Pay-per-call machine access</h3>
-        <p class="disclosure" style="margin:0 0 18px;">No signup, no subscription — an agent pays per call via x402 or MPP and gets the result back in the same request.</p>
+        <div class="tier-label">For AI agents &amp; CI/CD</div>
+        <h3 style="font-size:1.05rem;">Pay-per-call machine access</h3>
+        <p class="disclosure" style="margin:8px 0 20px;">No signup, no subscription — an agent pays per call via x402 or MPP and gets the result back in the same request.</p>
         <table class="rate-table">
           <tr><td>Any single audit</td><td>$0.03</td></tr>
           <tr><td>Full bundle (all four)</td><td>$0.10</td></tr>
@@ -337,6 +270,26 @@
           A subscriber's <code>X-API-Key</code> works here too.
         </p>
       </div>
+    </div>
+  </section>
+
+  <section id="demo">
+    <div class="section-label">Try before you subscribe</div>
+    <h2 style="font-size:1.3rem;">Live demo scan</h2>
+    <p class="section-sub" style="margin-bottom:28px;">One real WCAG check on your own site, no signup. Three per day, top 2 issues shown — a taste of the full report, not the full report.</p>
+    <div class="panel">
+      <form class="scan-form" id="scan-form">
+        <input type="url" id="scan-url" placeholder="https://yoursite.com" required>
+        <input type="email" id="scan-email" placeholder="you@company.com (optional)">
+        <button type="submit" class="btn btn-primary" id="scan-button">Run demo</button>
+      </form>
+      <div id="scan-result"></div>
+      <p class="disclosure" style="margin-top:16px;">
+        A one-time snapshot, not certification of compliance — automated tools
+        catch a meaningful share of WCAG issues, not all of them. Every other
+        path on this page is a paid call; there's no unlimited or
+        unauthenticated tier for programmatic use, by design.
+      </p>
     </div>
   </section>
 
@@ -373,7 +326,7 @@ document.getElementById("scan-form").addEventListener("submit", async (e) => {
   const { ok, data } = await postJSON("/scan/free", { url, email: email || null });
 
   button.disabled = false;
-  button.textContent = "Scan now";
+  button.textContent = "Run demo";
 
   if (!ok) {
     resultEl.innerHTML = `<p class="fail">${data.detail || "Scan failed. Try again in a moment."}</p>`;
