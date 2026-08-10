@@ -26,6 +26,7 @@ Requires, at deploy time:
 
 import asyncio
 import os
+import threading
 from typing import Optional
 
 from x402 import x402ResourceServer
@@ -41,7 +42,9 @@ _PRICE = os.environ.get("X402_PRICE", "$0.03")
 
 _server: Optional[x402ResourceServer] = None
 _requirements_cache: dict = {}
-_initialized = False
+
+# Reentrant because _get_requirements calls _get_server while holding it.
+_LOCK = threading.RLock()
 
 
 def is_configured() -> bool:
@@ -49,33 +52,47 @@ def is_configured() -> bool:
 
 
 def _get_server() -> x402ResourceServer:
+    """Build and initialize the resource server once, then reuse it.
+
+    `x402ResourceServer.initialize()` is a SYNCHRONOUS method (it performs
+    blocking HTTP calls to the facilitator to discover supported
+    scheme/network kinds). It must not be awaited: `await` on the None it
+    returns raises TypeError, and because verify_and_settle deliberately
+    catches every exception and fails closed, that TypeError would be
+    swallowed into a plain "payment invalid". The visible symptom is x402
+    being fully configured and yet rejecting 100% of payments with no
+    diagnostic anywhere -- which is exactly what this code did before.
+
+    The server is only cached after initialize() succeeds, so a facilitator
+    that is briefly unreachable results in a retry on the next request
+    rather than a permanently poisoned server object.
+    """
     global _server
-    if _server is None:
-        facilitator = HTTPFacilitatorClient(FacilitatorConfig(url=_FACILITATOR_URL))
-        server = x402ResourceServer(facilitator)
-        server.register(_NETWORK, ExactEvmServerScheme())
-        _server = server
-    return _server
+    with _LOCK:
+        if _server is None:
+            facilitator = HTTPFacilitatorClient(FacilitatorConfig(url=_FACILITATOR_URL))
+            server = x402ResourceServer(facilitator)
+            server.register(_NETWORK, ExactEvmServerScheme())
+            server.initialize()
+            _server = server
+        return _server
 
 
-async def _get_requirements(price: str):
+def _get_requirements(price: str):
     """Cached per price -- a $0.03 payment must never satisfy a $0.10
     challenge, so each price gets its own requirements object rather than
     sharing one global cache across every route."""
-    global _initialized
-    server = _get_server()
-    if not _initialized:
-        await server.initialize()
-        _initialized = True
-    if price not in _requirements_cache:
-        config = ResourceConfig(
-            scheme="exact",
-            network=_NETWORK,
-            pay_to=_PAY_TO_ADDRESS,
-            price=price,
-        )
-        _requirements_cache[price] = server.build_payment_requirements(config)
-    return _requirements_cache[price]
+    with _LOCK:
+        server = _get_server()
+        if price not in _requirements_cache:
+            config = ResourceConfig(
+                scheme="exact",
+                network=_NETWORK,
+                pay_to=_PAY_TO_ADDRESS,
+                price=price,
+            )
+            _requirements_cache[price] = server.build_payment_requirements(config)
+        return _requirements_cache[price]
 
 
 def payment_required_body(price: Optional[str] = None) -> dict:
@@ -133,7 +150,7 @@ async def verify_and_settle(payment_header: str, price: Optional[str] = None) ->
         return False
     try:
         payload = decode_payment_signature_header(payment_header)
-        requirements = await _get_requirements(price or _PRICE)
+        requirements = _get_requirements(price or _PRICE)
         server = _get_server()
 
         verify_result = await server.verify_payment(payload, requirements[0])
