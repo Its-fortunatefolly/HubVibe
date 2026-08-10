@@ -73,6 +73,14 @@ An unauthenticated POST to any paid route returns HTTP 402 carrying that
 challenge per method. That is the intended discovery path for an agent:
 call the endpoint, read the price and rails off the 402, pay, retry.
 
+## What you are charged for
+
+Only an audit that produced a result. An x402 payment is verified in order
+to grant access, but is not settled until the audit has actually delivered
+-- so an audit that fails to run (unreachable target, timeout) returns HTTP
+502 and costs nothing. A rate-limited request returns 429 and also costs
+nothing, because the limit is checked before any payment is touched.
+
 ## Integrations
 
 Source for these lives in the repo, not on this server -- they are

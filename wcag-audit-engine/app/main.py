@@ -238,17 +238,21 @@ class FreeScanRequest(BaseModel):
 
 
 class AuthContext:
-    __slots__ = ("stripe_billable", "customer_id", "payment_method")
+    __slots__ = ("stripe_billable", "customer_id", "payment_method", "pending_payment")
 
     def __init__(
         self,
         stripe_billable: bool,
         customer_id: Optional[str] = None,
         payment_method: str = "api_key",
+        pending_payment=None,
     ):
         self.stripe_billable = stripe_billable
         self.customer_id = customer_id
         self.payment_method = payment_method
+        # An x402 payment that is verified but deliberately not yet settled --
+        # see _bill. None for every other payment method.
+        self.pending_payment = pending_payment
 
 
 def _payment_required_response(host: Optional[str] = None, price_usd: float = 0.03) -> JSONResponse:
@@ -336,10 +340,15 @@ def _authenticate(
                     payment_method="stripe",
                 )
 
-    if x_payment and x402_payments.verify_and_settle_sync(x_payment, price=f"${price_usd:.2f}"):
-        # Payment already verified and settled on-chain by the facilitator
-        # -- nothing further to bill via Stripe.
-        return AuthContext(stripe_billable=False, payment_method="x402")
+    if x_payment:
+        # Verify only -- do NOT settle here. Settlement happens in _bill, after
+        # an audit has actually produced a result, so a caller whose audit
+        # fails to run is never charged for nothing.
+        pending = x402_payments.verify_only_sync(x_payment, price=f"${price_usd:.2f}")
+        if pending is not None:
+            return AuthContext(
+                stripe_billable=False, payment_method="x402", pending_payment=pending
+            )
 
     if authorization and authorization.startswith("Payment "):
         credential = authorization[len("Payment "):].strip()
@@ -388,12 +397,25 @@ def _authorize_and_rate_limit(
 
 
 def _bill(auth, units: int = 1) -> Optional[str]:
-    """Records usage for a Stripe-subscription caller after a real audit
-    ran; a no-op for internal/x402/MPP callers, who are unmetered or
-    already settled. Returns a warning string on failure (never raises --
-    the customer already got a real, correct audit result, so a billing
-    hiccup should never withhold or corrupt that), or None on success/no-op.
+    """Collect payment for an audit that actually produced a result.
+
+    Called only on the success path, which is the whole point: every route
+    returns 502 without reaching here when an audit fails to run, so a failed
+    audit is never charged for. That guarantee used to hold only for Stripe
+    subscribers -- x402 callers were settled during authentication, so they
+    paid for failed audits too. Settling here closes that gap.
+
+    Never raises: the caller already has a real, correct audit result in hand,
+    and a billing hiccup must not withhold or corrupt it. Returns a warning
+    string to surface on the response instead, or None on success/no-op.
     """
+    if auth.pending_payment is not None:
+        if not x402_payments.settle_sync(auth.pending_payment):
+            # We delivered without collecting. Deliberately the lesser evil
+            # versus charging for undelivered work, but it must be visible.
+            return "payment settlement failed after the audit ran; this call was not charged"
+        return None
+
     if not auth.stripe_billable:
         return None
     try:
@@ -718,9 +740,14 @@ def agent_manifest(request: Request):
             "docs": f"{base}/docs",
         },
         "guarantees": [
-            "A check that could not run returns HTTP 502 and is never billed "
-            "and never reported as a pass.",
-            "Rate-limited requests are rejected before any payment is settled.",
+            "You are charged only for an audit that produced a result. A check "
+            "that could not run returns HTTP 502, is never settled, and is "
+            "never reported as a pass -- x402 payments are verified to grant "
+            "access but only settled after the audit has actually delivered.",
+            "Rate-limited requests are rejected before any payment is settled, "
+            "so a 429 never costs you anything.",
+            "Results are deterministic rule-based checks against the live page, "
+            "never an LLM's opinion.",
         ],
         "endpoints": [
             {

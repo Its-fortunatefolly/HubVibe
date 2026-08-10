@@ -134,6 +134,73 @@ def accepts_entry(price: Optional[str] = None) -> Optional[dict]:
     }
 
 
+class PendingPayment:
+    """An x402 payment that has been verified but NOT yet settled.
+
+    x402 deliberately splits these: verification proves the payment is valid
+    and the funds are committed, settlement is what actually moves them. Doing
+    both up front means a caller whose audit then fails to run has paid for
+    nothing -- and audits do fail routinely at volume, because the sites being
+    audited go down and time out. Holding the verified payment until the audit
+    has actually produced a result is what makes "you are only charged for an
+    audit that ran" true for machine payers, not just for subscribers.
+    """
+
+    __slots__ = ("payload", "requirements", "price")
+
+    def __init__(self, payload, requirements, price: str):
+        self.payload = payload
+        self.requirements = requirements
+        self.price = price
+
+
+def verify_only_sync(payment_header: str, price: Optional[str] = None):
+    """Verify a payment without moving any money.
+
+    Returns a PendingPayment handle to settle later, or None if the payment is
+    invalid -- the same fail-closed contract as everything else here: any
+    exception, any facilitator rejection, any missing configuration all
+    resolve to None.
+    """
+    if not is_configured():
+        return None
+    resolved_price = price or _PRICE
+    try:
+        payload = decode_payment_signature_header(payment_header)
+        requirements = _get_requirements(resolved_price)
+        server = _get_server()
+
+        async def _run():
+            return await server.verify_payment(payload, requirements[0])
+
+        if not asyncio.run(_run()).is_valid:
+            return None
+        return PendingPayment(payload, requirements, resolved_price)
+    except Exception:
+        return None
+
+
+def settle_sync(pending) -> bool:
+    """Capture a previously verified payment. Call only after delivering.
+
+    A False here means we delivered an audit we were not paid for, which is
+    the deliberately-chosen lesser evil: the alternative ordering charges for
+    work that was never delivered. Callers should surface it rather than
+    swallow it, so the gap stays visible instead of silent.
+    """
+    if pending is None:
+        return False
+    try:
+        server = _get_server()
+
+        async def _run():
+            return await server.settle_payment(pending.payload, pending.requirements[0])
+
+        return bool(asyncio.run(_run()).success)
+    except Exception:
+        return False
+
+
 async def verify_and_settle(payment_header: str, price: Optional[str] = None) -> bool:
     """Verify a signed X-PAYMENT header and settle it via the facilitator.
 
