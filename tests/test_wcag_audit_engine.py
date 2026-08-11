@@ -31,13 +31,20 @@ def _load_main(monkeypatch, api_key="test-key"):
 
 
 def test_health_check(monkeypatch):
+    """Served at BOTH paths. Cloud Run's frontend reserves /healthz and
+    answers it with its own HTML 404 before the request reaches the
+    container -- confirmed against the live service -- so /health is the one
+    that actually works there, and it must not regress."""
     from fastapi.testclient import TestClient
 
     module = _load_main(monkeypatch)
     client = TestClient(module.app)
-    response = client.get("/healthz")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "wcag-audit-engine"}
+    expected = {"status": "ok", "service": "wcag-audit-engine"}
+
+    for path in ("/health", "/healthz"):
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} did not answer"
+        assert response.json() == expected
 
 
 def test_landing_page_served_at_root(monkeypatch):

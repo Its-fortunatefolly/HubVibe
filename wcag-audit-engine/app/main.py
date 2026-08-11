@@ -571,7 +571,16 @@ def sitemap_xml():
     return FileResponse(STATIC_DIR / "sitemap.xml", media_type="application/xml")
 
 
-@app.get("/healthz")
+# Registered at BOTH paths on purpose. Google Cloud Run's frontend
+# intercepts /healthz and answers it itself -- a request never reaches this
+# container, and the caller gets Google's own HTML 404 page rather than
+# anything FastAPI produced. Verified against the live service: the body is
+# Google's "Error 404 (Not Found)!!1" page, not FastAPI's
+# {"detail":"Not Found"}. No application code can serve /healthz on this
+# platform, so /health is the one that actually works here, while /healthz
+# is kept for any environment (local, other hosts) that does not reserve it.
+@app.get("/health", tags=["discovery"])
+@app.get("/healthz", tags=["discovery"])
 def health_check():
     return {"status": "ok", "service": "wcag-audit-engine"}
 

@@ -58,7 +58,9 @@ echo "HubVibe live verification: $BASE"
 echo
 
 echo "Service up"
-expect_status GET /healthz 200 "GET /healthz"
+# /health, not /healthz: Cloud Run's frontend reserves /healthz and answers
+# it with its own 404 before the request reaches the container.
+expect_status GET /health 200 "GET /health"
 expect_status GET / 200 "GET / (landing page)"
 
 echo
