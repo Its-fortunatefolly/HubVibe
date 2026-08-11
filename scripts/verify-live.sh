@@ -181,12 +181,26 @@ except Exception:
     print("  (no human_plans block -- deploy predates the pricing fix)")
     sys.exit(0)
 if not tiers:
-    print("  no tiers offered -- no Stripe plan Price IDs are set on this node,")
-    print("  so nothing is for sale to humans here")
+    print("  no tiers offered -- either no Stripe plan Price IDs are set on")
+    print("  this node, or STRIPE_SECRET_KEY is not a usable Stripe key.")
+    print("  Nothing is for sale to humans here.")
 else:
     for t in tiers:
         print("  offers %s: $%s/%s" % (t["id"], t["usd"], t["interval"]))
 ' 2>/dev/null || echo "  (could not parse pricing block)"
+
+# The three tiers and the stripe_api_key rail all come from the same Stripe
+# credential. A node that offers plans but omits the rail (or the reverse) has
+# a half-configured Stripe and will fail somewhere a customer can see.
+OFFERS_PLANS=$(printf '%s' "$PLANS" | grep -c '"interval"' || true)
+OFFERS_RAIL=$(printf '%s' "$PLANS" | grep -c 'stripe_api_key' || true)
+if [ "$OFFERS_PLANS" -gt 0 ] && [ "$OFFERS_RAIL" -eq 0 ]; then
+  fail "manifest offers human plans but not the stripe_api_key rail -- Stripe is half-configured"
+elif [ "$OFFERS_PLANS" -eq 0 ] && [ "$OFFERS_RAIL" -gt 0 ]; then
+  fail "manifest advertises the stripe_api_key rail but sells no plan -- Stripe is half-configured"
+else
+  pass "Stripe plans and the Stripe rail agree with each other"
+fi
 
 echo
 echo "Live payment rails advertised by the manifest"

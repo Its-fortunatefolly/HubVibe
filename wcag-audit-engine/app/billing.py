@@ -34,6 +34,32 @@ _WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 _METERED_PRICE_ID = os.environ.get("STRIPE_METERED_PRICE_ID")
 _METER_EVENT_NAME = os.environ.get("STRIPE_METER_EVENT_NAME", "wcag_audit_call")
 
+# Stripe secret keys are sk_/rk_ prefixed -- live, test, or restricted.
+# https://docs.stripe.com/keys
+_STRIPE_KEY_PREFIXES = ("sk_", "rk_")
+
+
+def stripe_key_looks_valid() -> bool:
+    """Whether STRIPE_SECRET_KEY is shaped like a Stripe secret key at all.
+
+    Truthiness is not enough. A live deployment had an EVM wallet address --
+    the x402 payout address -- sitting in STRIPE_SECRET_KEY. Every Stripe
+    call would have failed authentication, but the string was non-empty, so
+    is_configured() said yes and the manifest advertised all three plans and
+    the stripe_api_key rail to every agent that asked. Advertising a rail
+    that cannot settle is the one thing this service must never do, so a key
+    that cannot possibly work counts as no key.
+
+    Shape-only: this cannot tell a revoked key from a good one, and does not
+    call Stripe -- a network call at import time would make the container's
+    startup depend on Stripe being reachable. It catches the whole class of
+    "wrong value pasted into the wrong variable", which is what actually
+    happens.
+    """
+    key = stripe.api_key
+    return bool(key) and key.startswith(_STRIPE_KEY_PREFIXES)
+
+
 # RETIRED. The old single flat "Agency / Developer" subscription, replaced
 # by the per-site plans below. Read only so a deployment still configured
 # with it keeps working; nothing advertises it and no new checkout selects
@@ -118,11 +144,11 @@ HUMAN_PLANS = [
 
 
 def plan_available(plan: str) -> bool:
-    return bool(stripe.api_key and PLAN_PRICE_IDS.get(plan))
+    return bool(stripe_key_looks_valid() and PLAN_PRICE_IDS.get(plan))
 
 
 def oneoff_report_available() -> bool:
-    return bool(stripe.api_key and ONEOFF_REPORT_PRICE_ID)
+    return bool(stripe_key_looks_valid() and ONEOFF_REPORT_PRICE_ID)
 
 
 def human_plans_live() -> list:
@@ -166,7 +192,7 @@ def _any_sellable_price() -> bool:
 
 
 def is_configured() -> bool:
-    return bool(stripe.api_key and _WEBHOOK_SECRET and _any_sellable_price())
+    return bool(stripe_key_looks_valid() and _WEBHOOK_SECRET and _any_sellable_price())
 
 
 def _firestore():

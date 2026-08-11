@@ -985,6 +985,56 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
     assert not offenders, "retired pricing still shipped:\n" + "\n".join(offenders)
 
 
+def test_a_key_that_is_not_a_stripe_key_sells_nothing(monkeypatch, load_main_fresh):
+    """A non-empty STRIPE_SECRET_KEY is not the same as a usable one.
+
+    Found on the live service: an EVM wallet address -- the x402 payout
+    address -- was sitting in STRIPE_SECRET_KEY. Every Stripe call would
+    have failed authentication, but the string was non-empty, so
+    is_configured() said yes and the manifest advertised all three plans
+    plus the stripe_api_key rail to every agent that asked. A rail that
+    cannot settle must never be advertised, so a key that cannot possibly
+    work has to count as no key.
+    """
+    monkeypatch.setenv("AUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
+    monkeypatch.setenv("STRIPE_PRICE_AGENCY", "price_agency")
+    monkeypatch.setenv("STRIPE_PRICE_ONEOFF_REPORT", "price_report")
+    # The exact shape of value that was actually deployed.
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "0x32b08c5e927c69877d0fcab35618c265674922b")
+
+    module = load_main_fresh("wcag_audit_main_badkey")
+    assert module.billing.stripe_key_looks_valid() is False
+    assert module.billing.is_configured() is False
+    assert module.billing.human_plans_live() == []
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(module.app)
+    manifest = client.get("/.well-known/agent.json").json()
+    assert manifest["pricing"]["human_plans"]["tiers"] == [], (
+        "advertised plans nobody can buy with a broken Stripe key"
+    )
+    assert "stripe_api_key" not in manifest["payment"]["methods"], (
+        "advertised a Stripe rail that cannot authenticate"
+    )
+
+
+def test_a_real_looking_stripe_key_sells_normally(monkeypatch, load_main_fresh):
+    """The shape check must not reject the keys Stripe actually issues."""
+    monkeypatch.setenv("AUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
+
+    for prefix in ("sk_live_", "sk_test_", "rk_live_"):
+        monkeypatch.setenv("STRIPE_SECRET_KEY", prefix + "abc123")
+        module = load_main_fresh("wcag_audit_main_goodkey_" + prefix)
+        assert module.billing.stripe_key_looks_valid() is True, f"{prefix} rejected"
+        assert module.billing.is_configured() is True
+        assert module.billing.plan_available("pro") is True
+
+
 def test_manifest_points_at_reachable_discovery_documents(monkeypatch):
     """Every discovery URL the manifest advertises must actually resolve --
     a 404 here is an agent's dead end."""
