@@ -53,6 +53,12 @@ _PRICE = os.environ.get("X402_PRICE", "$0.03")
 # wanted no credentials at all.
 _FACILITATOR_AUTH_HEADERS = os.environ.get("X402_FACILITATOR_AUTH_HEADERS")
 
+# Coinbase CDP credentials. CDP takes precedence over the static headers
+# above when both are set, because it is the more specific configuration --
+# nobody sets a CDP key pair by accident.
+_CDP_API_KEY_ID = os.environ.get("CDP_API_KEY_ID")
+_CDP_API_KEY_SECRET = os.environ.get("CDP_API_KEY_SECRET")
+
 _server: Optional[x402ResourceServer] = None
 _requirements_cache: dict = {}
 
@@ -96,6 +102,69 @@ class _StaticAuthProvider:
         )
 
 
+# The paths the x402 client actually calls on a facilitator, and the methods
+# it uses, read from the library rather than assumed -- CDP signs each request
+# against its own method and path, so a wrong guess here authenticates nothing.
+_FACILITATOR_ENDPOINTS = {
+    "verify": ("POST", "/verify"),
+    "settle": ("POST", "/settle"),
+    "supported": ("GET", "/supported"),
+    "bazaar": ("GET", "/discovery/resources"),
+}
+
+
+class _CdpAuthProvider:
+    """Coinbase CDP auth: a fresh JWT per endpoint, signed from the API key.
+
+    CDP binds each token to the exact method, host and path being called, so
+    unlike a bearer token these headers cannot be computed once and reused
+    across endpoints. That is precisely why the x402 AuthProvider protocol
+    asks for verify / settle / supported / bazaar separately.
+
+    CDP is the facilitator worth having: it settles on mainnet, and it is
+    what gets a resource listed in the x402 Bazaar, which is how agents find
+    a service by capability instead of by URL.
+    """
+
+    __slots__ = ("_key_id", "_key_secret", "_host", "_base_path")
+
+    def __init__(self, key_id: str, key_secret: str, base_url: str):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(base_url)
+        if not parsed.netloc:
+            raise ValueError(f"X402_FACILITATOR_URL is not a valid URL: {base_url!r}")
+        self._key_id = key_id
+        self._key_secret = key_secret
+        self._host = parsed.netloc
+        # CDP's facilitator lives under a path prefix
+        # (/platform/v2/x402), and the JWT covers the FULL path, so the
+        # prefix has to be included or every call is rejected.
+        self._base_path = parsed.path.rstrip("/")
+
+    def _headers_for(self, method: str, path: str) -> dict:
+        from cdp.auth.utils.http import GetAuthHeadersOptions, get_auth_headers
+
+        return get_auth_headers(
+            GetAuthHeadersOptions(
+                api_key_id=self._key_id,
+                api_key_secret=self._key_secret,
+                request_method=method,
+                request_host=self._host,
+                request_path=self._base_path + path,
+            )
+        )
+
+    def get_auth_headers(self):
+        from x402.http.facilitator_client_base import AuthHeaders
+
+        signed = {
+            name: self._headers_for(method, path)
+            for name, (method, path) in _FACILITATOR_ENDPOINTS.items()
+        }
+        return AuthHeaders(**signed)
+
+
 def _auth_provider():
     """The facilitator auth provider for this deployment, or None.
 
@@ -104,6 +173,9 @@ def _auth_provider():
     payment rejected by the facilitator, which looks identical to "nobody is
     buying" and could go unnoticed indefinitely.
     """
+    if _CDP_API_KEY_ID and _CDP_API_KEY_SECRET:
+        return _CdpAuthProvider(_CDP_API_KEY_ID, _CDP_API_KEY_SECRET, _FACILITATOR_URL or "")
+
     if not _FACILITATOR_AUTH_HEADERS:
         return None
     headers = json.loads(_FACILITATOR_AUTH_HEADERS)
