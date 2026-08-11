@@ -330,7 +330,9 @@ def _authenticate(
             return AuthContext(stripe_billable=False, payment_method="internal")
         if billing.is_configured():
             record = billing.lookup_key(x_api_key)
-            if record is not None and billing.check_and_increment_quota(record["customer_id"]):
+            if record is not None and billing.check_and_increment_quota(
+                record["customer_id"], plan=record.get("plan")
+            ):
                 return AuthContext(
                     stripe_billable=True,
                     customer_id=record["customer_id"],
@@ -1031,17 +1033,32 @@ def _jsonrpc_error(request_id, code: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
 
-def _mcp_tool_error(request_id, message: str) -> dict:
+def _mcp_tool_error(request_id, message: str, details: Optional[dict] = None) -> dict:
     """A tool-level failure is a RESULT with isError, not a JSON-RPC error.
 
     JSON-RPC errors mean the protocol call itself was malformed; a payment
     requirement or an unreachable audit target is a normal outcome the model
     should see and can act on, so it belongs in the result.
+
+    When there is machine-readable detail -- above all the 402 challenge,
+    which carries the price and the rails that can settle it -- the text is
+    the JSON itself with the sentence inside it, not a sentence with JSON
+    stringified into the middle. An agent should be able to json.loads() the
+    content and read `price_usd` and `accepts`, rather than substring-scrape
+    a payment challenge out of prose. That prose-embedding is exactly what
+    made this endpoint's paywall unusable to the machine buyers it exists
+    for.
     """
+    if details is None:
+        text = message
+    else:
+        import json as _json
+
+        text = _json.dumps({"message": message, **details}, indent=2)
     return {
         "jsonrpc": "2.0",
         "id": request_id,
-        "result": {"content": [{"type": "text", "text": message}], "isError": True},
+        "result": {"content": [{"type": "text", "text": text}], "isError": True},
     }
 
 
@@ -1111,11 +1128,19 @@ def mcp_streamable_http(
             x_api_key, x_payment, authorization, request, price_usd=price
         )
         if err is not None:
-            detail = err.body.decode() if hasattr(err, "body") else ""
+            import json as _json
+
+            try:
+                challenge = _json.loads(err.body.decode())
+            except Exception:
+                # Never let a formatting problem turn a payment prompt into a
+                # crash: the caller still needs to know what it costs.
+                challenge = {"error": "payment_required", "price_usd": price}
             return _mcp_tool_error(
                 request_id,
-                f"Payment required (${price:.2f} for {name}). Attach X-API-Key, or pay via "
-                f"x402/MPP. Details: {detail}",
+                f"Payment required (${price:.2f} for {name}). Attach X-API-Key, "
+                f"or pay per call with a rail listed in `accepts`.",
+                details=challenge,
             )
 
         try:

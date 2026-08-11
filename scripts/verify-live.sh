@@ -142,6 +142,52 @@ else
   fail "MCP tools/list did not return the audit tools"
 fi
 
+# The MCP paywall has to be readable by a machine. It used to stringify the
+# 402 into the middle of an English sentence, so the price could only be
+# recovered by scraping prose -- useless to the agents that would pay it.
+MCP_PAY=$(curl -sS -m 30 -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"audit_bundle","arguments":{"url":"https://example.com"}}}' 2>/dev/null)
+if printf '%s' "$MCP_PAY" | python3 -c '
+import json, sys
+try:
+    body = json.load(sys.stdin)
+    text = body["result"]["content"][0]["text"]
+    challenge = json.loads(text)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if challenge.get("price_usd") == 0.10 else 1)
+' 2>/dev/null; then
+  pass "MCP paywall parses as JSON and quotes \$0.10 for the bundle"
+else
+  fail "MCP paywall is not machine-parseable -- an agent cannot read the price"
+fi
+
+echo
+echo "Human plans: the manifest must only offer what checkout can sell"
+PLANS=$(curl -sS -m 30 "$BASE/.well-known/agent.json" 2>/dev/null)
+if printf '%s' "$PLANS" | grep -q 'included_calls_per_month'; then
+  fail "manifest still advertises the retired included-calls plan"
+else
+  pass "manifest does not advertise the retired plan"
+fi
+# No f-strings here: the quoting needed to reach into a dict inside one is a
+# SyntaxError before Python 3.12, and this script has to run wherever it is
+# pasted, not only on the newest interpreter.
+printf '%s' "$PLANS" | python3 -c '
+import json, sys
+try:
+    tiers = json.load(sys.stdin)["pricing"]["human_plans"]["tiers"]
+except Exception:
+    print("  (no human_plans block -- deploy predates the pricing fix)")
+    sys.exit(0)
+if not tiers:
+    print("  no tiers offered -- no Stripe plan Price IDs are set on this node,")
+    print("  so nothing is for sale to humans here")
+else:
+    for t in tiers:
+        print("  offers %s: $%s/%s" % (t["id"], t["usd"], t["interval"]))
+' 2>/dev/null || echo "  (could not parse pricing block)"
+
 echo
 echo "Live payment rails advertised by the manifest"
 METHODS=$(curl -sS -m 30 "$BASE/.well-known/agent.json" 2>/dev/null \
