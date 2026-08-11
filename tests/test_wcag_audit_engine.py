@@ -633,6 +633,35 @@ def test_authenticate_succeeds_when_quota_available(monkeypatch):
     assert auth.customer_id == "cus_123"
 
 
+def test_auth_path_hands_the_plan_to_the_quota_check(monkeypatch):
+    """The per-plan cap only works if the plan reaches the quota check.
+
+    The cap is stored on the key document precisely so this lookup carries
+    it. Drop the kwarg here and every Agency subscriber silently reverts to
+    the 1,500 fallback -- the exact cut-off the per-plan caps exist to fix,
+    and invisible because the call still succeeds.
+    """
+    module = _load_main(monkeypatch, api_key=None)
+    seen = {}
+    monkeypatch.setattr(module.billing, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        module.billing,
+        "lookup_key",
+        lambda key: {"customer_id": "cus_agency", "plan": "agency"},
+    )
+
+    def _quota(customer_id, plan=None):
+        seen["customer_id"] = customer_id
+        seen["plan"] = plan
+        return True
+
+    monkeypatch.setattr(module.billing, "check_and_increment_quota", _quota)
+
+    auth = module._authenticate("agency-key", None, None)
+    assert isinstance(auth, module.AuthContext)
+    assert seen == {"customer_id": "cus_agency", "plan": "agency"}
+
+
 def test_internal_key_bypasses_quota_check(monkeypatch):
     module = _load_main(monkeypatch, api_key="test-key")
     calls = []
@@ -1526,6 +1555,42 @@ def test_mcp_tool_call_without_payment_is_an_error_result_not_a_crash(monkeypatc
     assert body["result"]["isError"] is True
     assert "Payment required" in body["result"]["content"][0]["text"]
     assert ran == [], "an unpaid MCP call must not run the audit"
+
+
+def test_mcp_paywall_is_machine_parseable_not_prose(monkeypatch):
+    """An agent must be able to read the price off the MCP paywall.
+
+    The challenge used to be stringified into the middle of an English
+    sentence, so the only way to find `price_usd` or `accepts` was to
+    substring-scrape JSON out of prose -- unusable to exactly the machine
+    buyers this endpoint exists to serve. The text must parse as JSON.
+    """
+    import json
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    client = TestClient(module.app)
+
+    response = client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "audit_bundle", "arguments": {"url": "https://example.com"}},
+        },
+    )
+    result = response.json()["result"]
+    assert result["isError"] is True
+
+    challenge = json.loads(result["content"][0]["text"])
+    assert challenge["error"] == "payment_required"
+    assert challenge["price_usd"] == 0.10, "MCP must quote the same price as the REST route"
+    assert isinstance(challenge["accepts"], list)
+    assert "docs" in challenge
+    # The human-readable line survives alongside the machine-readable fields.
+    assert "Payment required" in challenge["message"]
 
 
 def test_mcp_tool_call_with_internal_key_runs_and_returns_content(monkeypatch):
