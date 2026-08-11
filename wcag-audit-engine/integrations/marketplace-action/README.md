@@ -43,7 +43,12 @@ creating the release.
 | `passed`   | `"true"` or `"false"` -- the audit's overall result. |
 | `response` | Raw JSON response body from the audit call.  |
 
-Get an API key at https://hubvibe-831480473793.us-south1.run.app via
-`/billing/checkout` ($49/mo, 1,500 scans included), or pay per-call with
-x402/MPP directly against the REST endpoints if you'd rather not hold a
-subscription key in CI.
+For CI, paying per call is usually the right choice: $0.03 per check or
+$0.10 for the bundle over x402/MPP, straight against the REST endpoints,
+with no subscription key to store as a repository secret.
+
+If you'd rather hold a key, the human plans at
+https://hubvibe-831480473793.us-south1.run.app are priced per site watched
+($79/month for 5, $249/month for 50) rather than per scan — see
+`/.well-known/agent.json` for the live prices, which is the only place
+guaranteed to match what checkout actually charges.

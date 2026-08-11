@@ -34,26 +34,46 @@ _WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 _METERED_PRICE_ID = os.environ.get("STRIPE_METERED_PRICE_ID")
 _METER_EVENT_NAME = os.environ.get("STRIPE_METER_EVENT_NAME", "wcag_audit_call")
 
-# The human "Agency / Developer" plan: a flat recurring Price (NOT
-# usage_type=metered) -- e.g. $49/month, created separately in the Stripe
-# Dashboard. If this isn't set, checkout falls back to the pure metered
-# price above so nothing regresses -- but the landing page's "$49/month,
-# 1,500 scans included" framing is only actually true once this is set.
+# RETIRED. The old single flat "Agency / Developer" subscription, replaced
+# by the per-site plans below. Read only so a deployment still configured
+# with it keeps working; nothing advertises it and no new checkout selects
+# it. Delete once no live deployment sets it.
 _FLAT_SUBSCRIPTION_PRICE_ID = os.environ.get("STRIPE_FLAT_SUBSCRIPTION_PRICE_ID")
 
-# Included scans per calendar month on the subscription plan before a
-# caller falls back to paying per-call via x402/MPP instead of the API key
-# alone. The meter above still reports every call regardless -- this is a
-# separate, additive limit on top of metered billing, not a replacement
-# for it (Stripe is still the source of truth for what a subscriber owes).
+# Fallback included-scans cap for a subscriber whose plan we don't know
+# (legacy customers activated before the plan was recorded at checkout).
 SAAS_MONTHLY_QUOTA = int(os.environ.get("SAAS_MONTHLY_QUOTA", "1500"))
 
+# Per-plan monthly call caps.
+#
+# One global 1,500 cap for every subscriber was a plan-breaking bug. Agency
+# is sold as "50 sites, audited daily": 50 bundle calls a day is 1,550 in a
+# 31-day month, so the customer paying $249 got cut off before month end --
+# and if they audited per-dimension rather than bundling (4 calls per site
+# per day) they hit the wall around day 7 and started getting 402s on a plan
+# they had already paid for. Pro and Agency also shared the same ceiling, so
+# tripling the price bought no extra capacity at all.
+#
+# These are sized to the promise with real headroom, because the cap exists
+# to stop runaway abuse, not to meter value: marginal cost is ~$0.00007 per
+# audit, so even 10,000 audits is about $0.70 against $249 of revenue.
+# Under-sizing this costs a customer; over-sizing it costs pennies.
+PLAN_MONTHLY_QUOTA = {
+    "pro": int(os.environ.get("QUOTA_PRO", "2000")),  # 5 sites x 4 checks x 31d = 620
+    "agency": int(os.environ.get("QUOTA_AGENCY", "10000")),  # 50 x 4 x 31 = 6,200
+}
+
+
+def monthly_quota_for(plan: Optional[str]) -> int:
+    return PLAN_MONTHLY_QUOTA.get(plan or "", SAAS_MONTHLY_QUOTA)
+
+
 # Human-facing plans, priced per SITE MONITORED rather than per scan.
-# Denominating in scans invited the obvious arithmetic -- $49 for 1,500 scans
-# is $0.033 each, more than the $0.03 machine rate, so the plan was strictly
-# worse than just paying per call and nobody rational would buy it. Sites are
-# the unit a human actually cares about, and it isn't comparable to the
-# machine rate, so the two audiences stop competing with each other.
+# Denominating a plan in scans invites the obvious arithmetic against the
+# $0.03 machine rate; the old scan-denominated plan worked out dearer per
+# scan than paying per call, so nobody rational would buy it. Sites are the
+# unit a human actually cares about and aren't comparable to the machine
+# rate, so the two audiences stop competing with each other.
 #
 # Each is a Stripe Price you create in the Dashboard; a tier with no price ID
 # configured is simply not offered rather than half-working.
@@ -69,7 +89,7 @@ ONEOFF_REPORT_PRICE_ID = os.environ.get("STRIPE_PRICE_ONEOFF_REPORT")
 
 # What each plan costs and covers, kept here beside the price IDs rather than
 # retyped in the manifest and the landing page. The agent manifest went on
-# advertising a retired $49/month plan long after Stripe had stopped selling
+# advertising the retired subscription long after Stripe had stopped selling
 # it, because the number lived in a second place nobody thought to update --
 # a quoted price that no checkout will honour is worse than no price at all.
 HUMAN_PLANS = [
@@ -127,8 +147,26 @@ def human_plans_live() -> list:
 _db = None
 
 
+def _any_sellable_price() -> bool:
+    """True if Stripe has at least one Price this service can charge.
+
+    The current catalogue is the three per-site plans; the flat and metered
+    IDs are the retired ones, kept here only so a deployment still running on
+    them doesn't regress. Gating on the retired pair alone was a live bug: a
+    node configured with today's plans and nothing else reported
+    is_configured() == False, so /billing/checkout answered 501 while
+    /.well-known/agent.json cheerfully advertised all three tiers.
+    """
+    return bool(
+        _FLAT_SUBSCRIPTION_PRICE_ID
+        or _METERED_PRICE_ID
+        or ONEOFF_REPORT_PRICE_ID
+        or any(PLAN_PRICE_IDS.values())
+    )
+
+
 def is_configured() -> bool:
-    return bool(stripe.api_key and _WEBHOOK_SECRET and (_FLAT_SUBSCRIPTION_PRICE_ID or _METERED_PRICE_ID))
+    return bool(stripe.api_key and _WEBHOOK_SECRET and _any_sellable_price())
 
 
 def _firestore():
@@ -143,24 +181,35 @@ def _firestore():
 def create_checkout_session(
     email: str, success_url: str, cancel_url: str, plan: Optional[str] = None
 ) -> str:
-    """Start the subscription: the flat "Agency / Developer" price
-    (STRIPE_FLAT_SUBSCRIPTION_PRICE_ID) if configured, else the older pure
-    metered price -- so this keeps working even before the flat price is
-    set up. Either way, every real audit call still reports a Meter Event
-    (see billing.record_usage); the flat price just adds a base monthly
-    charge and an included-scans quota (see check_and_increment_quota) on
-    top of that.
+    """Start a subscription for one of the named per-site plans.
+
+    `plan` is what the landing page always sends and is the only supported
+    way to buy. The no-plan fallback to the retired flat/metered price is
+    kept solely for deployments still configured that way; where those IDs
+    are unset it raises rather than reaching Stripe with price=None, which
+    surfaced as an opaque 500 instead of telling the caller what to pick.
     """
-    price_id = _FLAT_SUBSCRIPTION_PRICE_ID or _METERED_PRICE_ID
     if plan:
-        tier_price = PLAN_PRICE_IDS.get(plan)
-        if not tier_price:
+        price_id = PLAN_PRICE_IDS.get(plan)
+        if not price_id:
             raise ValueError(f"Plan {plan!r} is not configured on this deployment")
-        price_id = tier_price
+    else:
+        price_id = _FLAT_SUBSCRIPTION_PRICE_ID or _METERED_PRICE_ID
+        if not price_id:
+            offered = sorted(p for p, pid in PLAN_PRICE_IDS.items() if pid)
+            raise ValueError(
+                "No plan specified and this deployment has no default price. "
+                f"Pass one of: {', '.join(offered) or '(none configured)'}"
+            )
     session = stripe.checkout.Session.create(
         mode="subscription",
         customer_email=email,
         line_items=[{"price": price_id}],
+        # Which plan was bought, so activate_customer can record it against
+        # the key and the monthly cap can match what the customer paid for.
+        # Reading it back off the Price ID would mean an extra expanded
+        # lookup on every webhook for something we already know here.
+        metadata={"plan": plan} if plan else {},
         success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=cancel_url,
     )
@@ -178,6 +227,7 @@ def activate_customer(checkout_session: dict) -> str:
     non-2xx responses) returns the existing key instead of minting a new one.
     """
     customer_id = checkout_session["customer"]
+    plan = (checkout_session.get("metadata") or {}).get("plan")
     db = _firestore()
 
     customer_ref = db.collection("customers").document(customer_id)
@@ -186,8 +236,12 @@ def activate_customer(checkout_session: dict) -> str:
         return existing.to_dict()["api_key"]
 
     api_key = secrets.token_urlsafe(32)
-    db.collection("api_keys").document(api_key).set({"customer_id": customer_id, "active": True})
-    customer_ref.set({"api_key": api_key})
+    # `plan` rides on the key document so the auth path gets it from the
+    # lookup it already does, rather than a second Firestore read per call.
+    db.collection("api_keys").document(api_key).set(
+        {"customer_id": customer_id, "active": True, "plan": plan}
+    )
+    customer_ref.set({"api_key": api_key, "plan": plan})
     return api_key
 
 
@@ -257,10 +311,14 @@ def record_usage(customer_id: str, units: int = 1) -> None:
         )
 
 
-def check_and_increment_quota(customer_id: str) -> bool:
+def check_and_increment_quota(customer_id: str, plan: Optional[str] = None) -> bool:
     """Returns True and increments the counter if this call is within the
     subscription's included monthly quota; returns False if the customer
     has already used their included scans for this calendar month.
+
+    The cap comes from the plan the customer actually bought
+    (monthly_quota_for). A subscriber activated before plans were recorded
+    has no plan on their key and falls back to SAAS_MONTHLY_QUOTA.
 
     Callers should treat False as "the API key alone is no longer
     sufficient" and require x402/MPP payment for this specific call,
@@ -288,7 +346,7 @@ def check_and_increment_quota(customer_id: str) -> bool:
         def _increment(transaction):
             snapshot = ref.get(transaction=transaction)
             count = snapshot.get("count") if snapshot.exists else 0
-            if count >= SAAS_MONTHLY_QUOTA:
+            if count >= monthly_quota_for(plan):
                 return False
             transaction.set(
                 ref,

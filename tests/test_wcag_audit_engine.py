@@ -614,7 +614,7 @@ def test_authenticate_falls_back_to_402_when_quota_exceeded(monkeypatch):
     module = _load_main(monkeypatch, api_key=None)
     monkeypatch.setattr(module.billing, "is_configured", lambda: True)
     monkeypatch.setattr(module.billing, "lookup_key", lambda key: {"customer_id": "cus_123"})
-    monkeypatch.setattr(module.billing, "check_and_increment_quota", lambda customer_id: False)
+    monkeypatch.setattr(module.billing, "check_and_increment_quota", lambda customer_id, plan=None: False)
 
     result = module._authenticate("real-stripe-key", None, None)
     assert isinstance(result, module.JSONResponse)
@@ -625,7 +625,7 @@ def test_authenticate_succeeds_when_quota_available(monkeypatch):
     module = _load_main(monkeypatch, api_key=None)
     monkeypatch.setattr(module.billing, "is_configured", lambda: True)
     monkeypatch.setattr(module.billing, "lookup_key", lambda key: {"customer_id": "cus_123"})
-    monkeypatch.setattr(module.billing, "check_and_increment_quota", lambda customer_id: True)
+    monkeypatch.setattr(module.billing, "check_and_increment_quota", lambda customer_id, plan=None: True)
 
     auth = module._authenticate("real-stripe-key", None, None)
     assert isinstance(auth, module.AuthContext)
@@ -637,7 +637,7 @@ def test_internal_key_bypasses_quota_check(monkeypatch):
     module = _load_main(monkeypatch, api_key="test-key")
     calls = []
     monkeypatch.setattr(
-        module.billing, "check_and_increment_quota", lambda customer_id: calls.append(1) or False
+        module.billing, "check_and_increment_quota", lambda customer_id, plan=None: calls.append(1) or False
     )
     auth = module._authenticate("test-key", None, None)
     assert isinstance(auth, module.AuthContext)
@@ -731,6 +731,229 @@ def test_manifest_plan_prices_match_the_landing_page(monkeypatch):
     manifest_text = client.get("/.well-known/agent.json").text
     assert "included_calls_per_month" not in manifest_text
     assert 49 not in [t["usd"] for t in tiers], "the retired $49 plan is back"
+
+
+_SIBLING_MODULES = ("billing", "x402_payments", "mpp_payments", "audits")
+
+
+def _drop_sibling_cache():
+    import sys
+
+    for name in _SIBLING_MODULES:
+        sys.modules.pop(f"wcag_audit_engine_{name}", None)
+
+
+@pytest.fixture
+def load_main_fresh():
+    """Load main.py with its sibling modules re-read from the environment.
+
+    main.py caches siblings in sys.modules under `wcag_audit_engine_<name>`
+    so audits.py and main.py share one browser_pool. That cache also means
+    billing.py's module-level os.environ.get calls run exactly once per
+    process -- so a test that sets Stripe env vars and reloads main would
+    otherwise still get the first billing module the process ever loaded,
+    and would pass while testing nothing.
+
+    Clears the cache on the way in and on the way out, so neither this test
+    nor the next one inherits the other's Stripe configuration.
+    """
+    import importlib.util
+
+    def _load(unique):
+        _drop_sibling_cache()
+        spec = importlib.util.spec_from_file_location(unique, MAIN_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    yield _load
+    _drop_sibling_cache()
+
+
+def test_advertised_tier_is_actually_buyable_on_a_current_deployment(monkeypatch, load_main_fresh):
+    """A node configured with only today's plans must be able to sell them.
+
+    is_configured() gated on the RETIRED flat/metered price IDs, so a
+    deployment that had correctly moved to the per-site plans advertised all
+    three tiers in the manifest while /billing/checkout answered 501 --
+    every human buyer bounced off a "billing is not configured" wall on a
+    service that was, in fact, configured.
+    """
+    for var in ("STRIPE_METERED_PRICE_ID", "STRIPE_FLAT_SUBSCRIPTION_PRICE_ID"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
+    monkeypatch.setenv("STRIPE_PRICE_AGENCY", "price_agency")
+    monkeypatch.setenv("STRIPE_PRICE_ONEOFF_REPORT", "price_report")
+    monkeypatch.setenv("AUDIT_API_KEY", "test-key")
+
+    module = load_main_fresh("wcag_audit_main_plans")
+
+    assert module.billing.is_configured(), (
+        "a node selling the current plans reports billing unconfigured"
+    )
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(module.app)
+    tiers = client.get("/.well-known/agent.json").json()["pricing"]["human_plans"]["tiers"]
+    assert {t["id"] for t in tiers} == {"report", "pro", "agency"}
+
+    # Every advertised subscription tier must get past the config gate and
+    # reach Stripe -- 501 here is the bug. Stripe itself is not reachable in
+    # CI, so a network/auth error from the SDK is the expected far end.
+    for tier in tiers:
+        if tier["id"] == "report":
+            continue
+        try:
+            module.billing.create_checkout_session(
+                "buyer@example.com", "https://x/s", "https://x/c", plan=tier["id"]
+            )
+        except ValueError as exc:  # our own "not configured" rejection
+            pytest.fail(f"advertised tier {tier['id']} is not sellable: {exc}")
+        except Exception:
+            pass  # reached Stripe; that is as far as CI can go
+
+
+def test_planless_checkout_fails_cleanly_rather_than_500ing(monkeypatch, load_main_fresh):
+    """With the retired defaults gone, a plan-less checkout used to build a
+    Stripe call with price=None and blow up as an opaque 500. It must say
+    what to pass instead."""
+    for var in ("STRIPE_METERED_PRICE_ID", "STRIPE_FLAT_SUBSCRIPTION_PRICE_ID"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
+    monkeypatch.setenv("AUDIT_API_KEY", "test-key")
+
+    module = load_main_fresh("wcag_audit_main_noplan")
+
+    with pytest.raises(ValueError) as excinfo:
+        module.billing.create_checkout_session("b@example.com", "https://x/s", "https://x/c")
+    assert "pro" in str(excinfo.value), "the error should name a plan the caller can actually pick"
+
+    # And the route turns that into a 400, not a 500.
+    from fastapi.testclient import TestClient
+
+    client = TestClient(module.app)
+    response = client.post("/billing/checkout", json={"email": "b@example.com"})
+    assert response.status_code == 400, f"got {response.status_code}: {response.text}"
+
+
+def test_each_plans_quota_covers_what_that_plan_promises(monkeypatch, load_main_fresh):
+    """The included-scans cap has to fit the plan's own advertised coverage.
+
+    One global 1,500 cap applied to every subscriber: Agency is sold as "50
+    sites, audited daily", which is 1,550 bundle calls in a 31-day month --
+    so the $249 customer got cut off before month end, and cut off around
+    day 7 if they audited per-dimension instead of bundling. Pro and Agency
+    also shared a ceiling, so paying 3x bought no extra capacity.
+    """
+    monkeypatch.setenv("AUDIT_API_KEY", "test-key")
+    module = load_main_fresh("wcag_audit_main_quota")
+    billing = module.billing
+
+    sites = {"pro": 5, "agency": 50}
+    for plan, site_count in sites.items():
+        quota = billing.monthly_quota_for(plan)
+        # Worst case a customer can legitimately drive: every site, every
+        # dimension, every day of the longest month.
+        worst_case = site_count * 4 * 31
+        assert quota >= worst_case, (
+            f"{plan} sells {site_count} sites audited daily "
+            f"({worst_case} calls in a 31-day month) but caps at {quota}"
+        )
+
+    assert billing.monthly_quota_for("agency") > billing.monthly_quota_for("pro"), (
+        "Agency costs 3x Pro and must not buy the same ceiling"
+    )
+    # An unrecognised or legacy key keeps the old behaviour rather than
+    # silently getting unlimited access.
+    assert billing.monthly_quota_for(None) == billing.SAAS_MONTHLY_QUOTA
+    assert billing.monthly_quota_for("nonsense") == billing.SAAS_MONTHLY_QUOTA
+
+
+def test_purchased_plan_is_recorded_so_the_quota_can_see_it(monkeypatch, load_main_fresh):
+    """The cap is per-plan, which only works if activation stores the plan."""
+    monkeypatch.setenv("AUDIT_API_KEY", "test-key")
+    module = load_main_fresh("wcag_audit_main_activate")
+    billing = module.billing
+
+    written = {}
+
+    class _Doc:
+        def __init__(self, key):
+            self.key = key
+
+        def get(self):
+            return type("S", (), {"exists": False})()
+
+        def set(self, data):
+            written[self.key] = data
+
+    class _Collection:
+        def __init__(self, name):
+            self.name = name
+
+        def document(self, doc_id):
+            return _Doc(f"{self.name}/{doc_id}")
+
+    monkeypatch.setattr(
+        billing, "_firestore", lambda: type("DB", (), {"collection": staticmethod(_Collection)})()
+    )
+
+    billing.activate_customer({"customer": "cus_123", "metadata": {"plan": "agency"}})
+
+    key_doc = next(v for k, v in written.items() if k.startswith("api_keys/"))
+    assert key_doc["plan"] == "agency", "the key must carry the plan the quota is sized from"
+    assert key_doc["customer_id"] == "cus_123"
+
+    # A checkout with no plan metadata (legacy) must still activate.
+    written.clear()
+    billing.activate_customer({"customer": "cus_456"})
+    legacy = next(v for k, v in written.items() if k.startswith("api_keys/"))
+    assert legacy["plan"] is None
+
+
+def test_no_shipped_surface_still_quotes_the_retired_plan():
+    """Retired pricing must not survive anywhere a buyer or an agent reads.
+
+    The $49/1,500 plan was removed from the manifest but lived on in two
+    READMEs for weeks, because the fix grepped one file. Anything quoting a
+    price that no Stripe Price ID backs is a broken sale, so check the whole
+    shipped surface rather than the file that happened to prompt the fix.
+    """
+    import re
+
+    retired = re.compile(r"\$49\b|1,?500 scans|1,?500 included|included_calls_per_month")
+
+    surfaces = []
+    for pattern in ("*.md", "*.html", "*.txt", "*.json", "*.yml", "*.py"):
+        for path in REPO_ROOT.rglob(pattern):
+            parts = path.parts
+            if any(p in parts for p in (".git", "node_modules", "venv", "venv_clean")):
+                continue
+            # Other services in this monorepo have their own pricing.
+            if any(p in parts for p in ("privacy-compliance-scanner", "dead-end-resolver")):
+                continue
+            if path.name == Path(__file__).name:  # this test names them on purpose
+                continue
+            surfaces.append(path)
+
+    assert surfaces, "found no files to check -- the glob is wrong"
+
+    offenders = []
+    for path in surfaces:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if retired.search(line):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()[:90]}")
+
+    assert not offenders, "retired pricing still shipped:\n" + "\n".join(offenders)
 
 
 def test_manifest_points_at_reachable_discovery_documents(monkeypatch):

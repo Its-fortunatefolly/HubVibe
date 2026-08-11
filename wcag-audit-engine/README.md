@@ -113,18 +113,31 @@ API key; machines pay per call over x402/MPP.
 
 ## Getting paid
 
-Two human/machine tiers, both real:
+Two audiences, priced in different units on purpose:
 
-- **Agency / Developer Plan** ($49/month, Stripe subscription Checkout):
-  1,500 scans/month included across all five routes; once a subscriber
-  exceeds that in a calendar month, their `X-API-Key` alone is no longer
-  sufficient (`billing.check_and_increment_quota`, Firestore-backed, reset
-  monthly) and the call falls through to x402/MPP per-call payment instead
-  -- same three-way auth check every route already does, so "overage"
-  isn't a special code path, just the existing fallback kicking in.
-- **Programmatic machine payments** ($0.03/call individual, $0.10/call
-  bundle): x402 or MPP, no subscription, no signup -- see the two sections
-  below.
+- **Machines, per call** ($0.03 individual, $0.10 bundle): x402 or MPP, no
+  subscription, no signup — see the two sections below. This is the product.
+- **Humans, per site watched** — three Stripe-backed plans:
+
+  | Plan | Price | Covers | Monthly call cap |
+  |---|---|---|---|
+  | Single report | $29.99 once | one site, all four checks, one report page | n/a (one purchase) |
+  | Pro | $79/month | 5 sites, audited daily, with history | 2,000 |
+  | Agency | $249/month | 50 sites, audited daily, client-ready reports | 10,000 |
+
+  Pricing per *site* rather than per *scan* is deliberate: denominating in
+  scans invited the obvious arithmetic against the $0.03 machine rate and
+  made the plan strictly worse than paying per call.
+
+  The caps are sized to each plan's own promise with headroom (Agency at 50
+  sites × 4 checks × 31 days is 6,200 calls), because the cap exists to stop
+  runaway abuse, not to meter value — marginal cost is ~$0.00007 per audit.
+  The plan is recorded on the API key at checkout, so
+  `billing.check_and_increment_quota` enforces the cap the customer actually
+  bought; a legacy key with no plan recorded falls back to
+  `SAAS_MONTHLY_QUOTA`. Past the cap the bare `X-API-Key` stops being
+  sufficient and the call falls through to x402/MPP — not a special code
+  path, just the existing three-way auth check.
 
 Every real call also still reports a Stripe Meter Event
 (`billing.record_usage`) regardless of which auth path was used to bill it
@@ -152,12 +165,12 @@ required to make it work):
 One-time setup in the Stripe Dashboard (not something this code can do for
 you — it needs your Stripe account):
 
-1. **Product catalog**: create a flat recurring Price (e.g. $49/month,
-   *not* `usage_type: metered`) for the Agency/Developer plan. Note the
-   Price ID -> `STRIPE_FLAT_SUBSCRIPTION_PRICE_ID`. If you skip this,
-   checkout falls back to the pure-metered price below so nothing breaks
-   -- but the "$49/month, 1,500 included" landing-page copy is only
-   actually true once this exists.
+1. **Product catalog**: create the three human plans as Prices, *not*
+   `usage_type: metered` — a recurring $79/month (-> `STRIPE_PRICE_PRO`), a
+   recurring $249/month (-> `STRIPE_PRICE_AGENCY`), and a one-time $29.99
+   (-> `STRIPE_PRICE_ONEOFF_REPORT`). A tier with no Price ID set is not
+   offered: it is omitted from `/.well-known/agent.json` and its checkout
+   refuses, rather than half-working.
 2. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`,
    aggregation = count).
 3. **Product catalog**: create a recurring Price with `usage_type: metered`
@@ -167,7 +180,9 @@ you — it needs your Stripe account):
    `https://<your-service>/billing/webhook` subscribed to
    `checkout.session.completed`. Note the signing secret.
 
-`SAAS_MONTHLY_QUOTA` (default `1500`) controls the included-scans cap.
+Call caps: `QUOTA_PRO` (default `2000`) and `QUOTA_AGENCY` (default
+`10000`). `SAAS_MONTHLY_QUOTA` (default `1500`) is only the fallback for a
+key activated before the plan was recorded at checkout.
 
 Then provision the secrets and deploy (see below). `AUDIT_API_KEY` remains
 available as an internal/testing key that bypasses Stripe entirely — leave

@@ -330,7 +330,9 @@ def _authenticate(
             return AuthContext(stripe_billable=False, payment_method="internal")
         if billing.is_configured():
             record = billing.lookup_key(x_api_key)
-            if record is not None and billing.check_and_increment_quota(record["customer_id"]):
+            if record is not None and billing.check_and_increment_quota(
+                record["customer_id"], plan=record.get("plan")
+            ):
                 return AuthContext(
                     stripe_billable=True,
                     customer_id=record["customer_id"],
