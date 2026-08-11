@@ -104,6 +104,26 @@ report rather than an integration — priced per site watched, not per scan.
 There is deliberately **no free scan**: an audit costs a real browser page
 load, so giving them away funds strangers' compute and invites abuse.
 
+## Publishing to the MCP registry
+
+`server.json` in this repo root registers the live `/mcp` endpoint as a
+**remote** server, so no package needs publishing anywhere.
+
+`mcp-publisher` is a Go binary from the registry's GitHub releases — it is
+**not** on npm (the `mcp-publisher` package on npm is an unrelated
+browser-automation tool):
+
+```bash
+curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" \
+  | tar xz mcp-publisher
+./mcp-publisher login github     # opens a browser; proves you own the namespace
+./mcp-publisher publish
+```
+
+The `name` field is `io.github.its-fortunatefolly/hubvibe`, which the GitHub
+login authenticates against. `server.json` is validated against the official
+schema (note: `description` is capped at 100 characters).
+
 ## Repository layout
 
 ```
