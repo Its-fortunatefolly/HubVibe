@@ -211,6 +211,37 @@ either way:
 - `X402_NETWORK` — CAIP-2 network id (default `eip155:8453`, Base mainnet).
 - `X402_PRICE` — default `$0.03`.
 
+Turning it on, without disturbing anything else on the service:
+
+```bash
+gcloud run services update hubvibe --region=us-south1 --update-env-vars=\
+X402_FACILITATOR_URL=https://your-facilitator.example,\
+X402_PAY_TO_ADDRESS=0xYourWallet
+```
+
+`--update-env-vars` merges; `--set-env-vars` would replace the whole block
+and silently unset every other payment variable.
+
+#### Why this is also the discovery switch
+
+x402 is not only a rail — it is how agents *find* this service. Facilitators
+catalog x402 resources by reading a
+[Bazaar](https://pypi.org/project/x402/) discovery extension off their 402
+responses, and agents shop that index by capability. Both the REST routes and
+each paid MCP tool emit that extension, describing their real input schema
+(the same one the MCP tools advertise, so the index can never disagree with
+what the route accepts) and, for tools, the tool name and transport.
+
+It is gated on the same `is_configured()` as everything else: with no
+facilitator there is nothing to be indexed *by*, and publishing discovery
+data for a resource that cannot take payment would advertise a sale this
+node cannot complete. So while x402 is off, agents can only reach this
+service through the MCP registry — by name, never by capability.
+
+Building the discovery data can never break a payment challenge: if it
+throws, the 402 still goes out with its price and rails intact. Losing the
+index is survivable; losing the sale is not.
+
 ### Getting paid without Stripe subscriptions: MPP
 
 `/audit` also accepts [MPP](https://docs.stripe.com/payments/machine/mpp)

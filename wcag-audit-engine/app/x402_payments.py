@@ -119,6 +119,73 @@ def payment_required_body(price: Optional[str] = None) -> dict:
     }
 
 
+def bazaar_extension_for_body(
+    input_example: dict,
+    input_schema: dict,
+    output_example: Optional[dict] = None,
+) -> dict:
+    """Bazaar discovery data for a JSON-body route, or {} when x402 is off.
+
+    The Bazaar is x402's discovery index: facilitators catalog resources by
+    reading this extension off their 402 responses, and agents shopping for a
+    capability search that index. Without it a paid endpoint is reachable only
+    by someone who already knows the URL, which is the opposite of the point.
+
+    Gated on is_configured() for the same reason every other x402 surface is:
+    the index is reached through a facilitator, so with no facilitator
+    configured there is nothing to be indexed by, and publishing discovery
+    data for an unpayable resource would list a service that cannot take the
+    payment it advertises.
+    """
+    if not is_configured():
+        return {}
+    try:
+        from x402.extensions.bazaar import OutputConfig, declare_discovery_extension
+
+        return declare_discovery_extension(
+            input=input_example,
+            input_schema=input_schema,
+            body_type="json",
+            output=OutputConfig(example=output_example) if output_example else None,
+        )
+    except Exception:
+        # Discovery is an enhancement. It must never be the reason a caller
+        # fails to receive a payment challenge it could otherwise act on.
+        return {}
+
+
+def bazaar_extension_for_mcp_tool(
+    tool_name: str,
+    description: str,
+    input_schema: dict,
+    example: Optional[dict] = None,
+) -> dict:
+    """Bazaar discovery data for a paid MCP tool, or {} when x402 is off.
+
+    Indexed under the Bazaar's "mcp" resource type, so an agent can find the
+    tool by capability rather than having to already know this server exists.
+    """
+    if not is_configured():
+        return {}
+    try:
+        from x402.extensions.bazaar import (
+            DeclareMcpDiscoveryConfig,
+            declare_mcp_discovery_extension,
+        )
+
+        return declare_mcp_discovery_extension(
+            DeclareMcpDiscoveryConfig(
+                tool_name=tool_name,
+                description=description,
+                input_schema=input_schema,
+                transport="streamable-http",
+                example=example,
+            )
+        )
+    except Exception:
+        return {}
+
+
 def accepts_entry(price: Optional[str] = None) -> Optional[dict]:
     """This method's entry for the 402's machine-readable `accepts` list, or
     None when x402 isn't configured."""
