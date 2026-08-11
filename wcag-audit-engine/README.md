@@ -314,19 +314,39 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
   --role="roles/datastore.user"
 ```
 
-Build and deploy:
+Build and deploy. The service name and region below are the ones the live
+node actually runs under — `gcloud run deploy` **creates** a service when the
+name doesn't match an existing one, so deploying as `wcag-audit-engine` in
+`us-central1` would quietly stand up a second, unreferenced copy rather than
+update production:
 
 ```bash
-gcloud run deploy wcag-audit-engine \
+gcloud run deploy hubvibe \
   --source=wcag-audit-engine \
-  --region=us-central1 \
+  --region=us-south1 \
   --memory=2Gi \
   --cpu=2 \
   --concurrency=4 \
   --min-instances=1 \
-  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,STRIPE_FLAT_SUBSCRIPTION_PRICE_ID=price_...,SAAS_MONTHLY_QUOTA=1500,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
+  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,STRIPE_PRICE_ONEOFF_REPORT=price_...,STRIPE_PRICE_PRO=price_...,STRIPE_PRICE_AGENCY=price_...,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
+
+`STRIPE_PRICE_ONEOFF_REPORT`, `STRIPE_PRICE_PRO` and `STRIPE_PRICE_AGENCY`
+are the three human plans. A tier with no Price ID set is not offered — it
+is omitted from `/.well-known/agent.json` and its checkout refuses, rather
+than half-working.
+
+**Redeploying code only:** leave every flag off.
+
+```bash
+gcloud run deploy hubvibe --source=wcag-audit-engine --region=us-south1
+```
+
+`--set-env-vars` and `--set-secrets` *replace* the service's configuration
+rather than adding to it, so passing a partial list on a routine code deploy
+silently unsets everything you left out — which, for the payment variables,
+takes the paid rails offline. Omitting them keeps the existing config.
 
 ### Why those sizing flags
 
