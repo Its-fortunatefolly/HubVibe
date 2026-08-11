@@ -29,8 +29,14 @@ from typing import Optional
 
 import stripe
 
-stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
-_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+# .strip() because a secret piped in with `echo` carries a trailing newline,
+# which is the single most common way a correct key arrives broken. Stripe
+# rejects the whitespace-padded value, and without stripping here the padding
+# would also defeat the prefix check below and silently pull every plan out of
+# the manifest. Empty after stripping is None, not "", so a blank secret reads
+# the same as an absent one.
+stripe.api_key = (os.environ.get("STRIPE_SECRET_KEY") or "").strip() or None
+_WEBHOOK_SECRET = (os.environ.get("STRIPE_WEBHOOK_SECRET") or "").strip() or None
 _METERED_PRICE_ID = os.environ.get("STRIPE_METERED_PRICE_ID")
 _METER_EVENT_NAME = os.environ.get("STRIPE_METER_EVENT_NAME", "wcag_audit_call")
 
@@ -42,19 +48,21 @@ _STRIPE_KEY_PREFIXES = ("sk_", "rk_")
 def stripe_key_looks_valid() -> bool:
     """Whether STRIPE_SECRET_KEY is shaped like a Stripe secret key at all.
 
-    Truthiness is not enough. A live deployment had an EVM wallet address --
-    the x402 payout address -- sitting in STRIPE_SECRET_KEY. Every Stripe
-    call would have failed authentication, but the string was non-empty, so
-    is_configured() said yes and the manifest advertised all three plans and
-    the stripe_api_key rail to every agent that asked. Advertising a rail
-    that cannot settle is the one thing this service must never do, so a key
-    that cannot possibly work counts as no key.
+    Truthiness is not enough to decide the Stripe rail is live. Any non-empty
+    string made is_configured() return True, so a variable holding the wrong
+    value -- an payout address, a price ID, a publishable pk_ key, a partly
+    pasted secret -- would have had the manifest advertise all three plans
+    and the stripe_api_key rail to every agent that asked, and sent buyers to
+    a checkout that could not authenticate. Advertising a rail that cannot
+    settle is the one thing this service must never do (it already omits x402
+    rather than publish payTo:null), so a key that cannot possibly work has
+    to count as no key.
 
-    Shape-only: this cannot tell a revoked key from a good one, and does not
-    call Stripe -- a network call at import time would make the container's
-    startup depend on Stripe being reachable. It catches the whole class of
-    "wrong value pasted into the wrong variable", which is what actually
-    happens.
+    Shape-only, deliberately: it cannot tell a revoked or wrong-account key
+    from a good one, and it does not call Stripe, because resolving this at
+    import time would tie container startup to Stripe being reachable. It
+    catches the class of failure that actually occurs -- the wrong value in
+    the right variable -- not authorization.
     """
     key = stripe.api_key
     return bool(key) and key.startswith(_STRIPE_KEY_PREFIXES)
