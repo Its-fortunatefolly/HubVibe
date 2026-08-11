@@ -203,6 +203,19 @@ else
 fi
 
 echo
+echo "Machine discovery: is this node findable by agents that would pay it?"
+DISC=$(curl -sS -m 30 -X POST "$BASE/audit/bundle" \
+  -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
+if printf '%s' "$DISC" | grep -q '"bazaar"'; then
+  pass "402 carries x402 Bazaar discovery data (indexable by facilitators)"
+else
+  echo "  NOTE  no Bazaar discovery on the 402 -- expected while x402 is off."
+  echo "        Set X402_FACILITATOR_URL and X402_PAY_TO_ADDRESS to turn on"
+  echo "        both the x402 rail and Bazaar indexing. Until then agents can"
+  echo "        only find this node via the MCP registry, not by capability."
+fi
+
+echo
 echo "Live payment rails advertised by the manifest"
 METHODS=$(curl -sS -m 30 "$BASE/.well-known/agent.json" 2>/dev/null \
   | tr ',' '\n' | sed -n '/"methods"/,/]/p' | tr -d ' "' | tr '\n' ' ')

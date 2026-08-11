@@ -1060,6 +1060,138 @@ def test_a_real_stripe_key_sells_normally(good_key, monkeypatch, load_main_fresh
     assert module.billing.stripe.api_key == good_key.strip()
 
 
+def _x402_env(monkeypatch):
+    monkeypatch.setenv("X402_FACILITATOR_URL", "https://facilitator.example")
+    monkeypatch.setenv("X402_PAY_TO_ADDRESS", "0x32b08c5e927c69877d0fcab35618c265674922b")
+    monkeypatch.delenv("AUDIT_API_KEY", raising=False)
+
+
+def test_requirements_pull_the_extras_bazaar_discovery_needs():
+    """Static check, because the runtime one cannot be trusted here.
+
+    x402.extensions.bazaar imports jsonschema and idna, which arrive via the
+    `extensions` extra -- not via `evm`. A developer machine almost always
+    has both transitively, so the feature appears to work locally while
+    being dead in the deployed container, and it fails closed and silent so
+    nothing announces it. Asserting on the requirements text is the only
+    check that a well-stocked environment cannot mask.
+    """
+    for path in (REPO_ROOT / "requirements.txt",
+                 REPO_ROOT / "wcag-audit-engine" / "requirements.txt"):
+        text = path.read_text()
+        x402_lines = [ln for ln in text.splitlines() if ln.strip().startswith("x402")]
+        assert x402_lines, f"{path.name} does not pin x402 at all"
+        assert any("extensions" in ln for ln in x402_lines), (
+            f"{path.name} pins {x402_lines} -- without the `extensions` extra, "
+            "Bazaar discovery silently returns {} in the deployed container"
+        )
+        # The starlette that `mcp` drags in is incompatible with the pinned
+        # FastAPI; it broke 49 tests once already. Never via an x402 extra.
+        assert not any("[all]" in ln or ",mcp" in ln or "[mcp" in ln for ln in x402_lines), (
+            f"{path.name} pulls the x402 mcp/all extra, which installs the `mcp` "
+            "package and a starlette that conflicts with the pinned FastAPI"
+        )
+
+
+def test_402_carries_bazaar_discovery_when_x402_is_live(monkeypatch, load_main_fresh):
+    """The Bazaar is how agents find a paid endpoint by capability.
+
+    Facilitators catalog x402 resources by reading this extension off their
+    402s. Without it the endpoint is reachable only by someone who already
+    knows the URL, which defeats the point of being a machine-payable
+    service -- being payable is worthless if nothing can find you.
+    """
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_audit_main_bazaar")
+
+    from fastapi.testclient import TestClient
+
+    body = TestClient(module.app).post(
+        "/audit/bundle", json={"url": "https://example.com"}
+    ).json()
+
+    info = body["extensions"]["bazaar"]["info"]
+    assert info["input"]["type"] == "http"
+    assert info["input"]["bodyType"] == "json"
+    # The advertised input must match what the route actually accepts, or the
+    # index sends agents into a 400.
+    assert "url" in info["input"]["body"]
+    assert body["extensions"]["bazaar"]["schema"], "discovery data must carry its schema"
+
+
+def test_no_bazaar_discovery_when_x402_cannot_settle(monkeypatch):
+    """Same rule as every other x402 surface: the index is reached through a
+    facilitator, so with none configured there is nothing to be indexed by,
+    and listing an unpayable resource advertises a sale we cannot complete."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    assert module.x402_payments.is_configured() is False
+
+    body = TestClient(module.app).post(
+        "/audit/bundle", json={"url": "https://example.com"}
+    ).json()
+    assert "extensions" not in body
+
+
+def test_mcp_paywall_declares_itself_as_an_mcp_resource(monkeypatch, load_main_fresh):
+    """An agent that finds the tool in the Bazaar calls it over MCP, so the
+    discovery record has to name the tool and its transport -- not describe
+    the HTTP route the shared 402 builder would have described."""
+    import json
+
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_audit_main_bazaar_mcp")
+
+    from fastapi.testclient import TestClient
+
+    response = TestClient(module.app).post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "audit_bundle", "arguments": {"url": "https://example.com"}},
+        },
+    )
+    challenge = json.loads(response.json()["result"]["content"][0]["text"])
+
+    info = challenge["extensions"]["bazaar"]["info"]["input"]
+    assert info["type"] == "mcp", "an MCP tool must not be indexed as an HTTP route"
+    assert info["toolName"] == "audit_bundle"
+    assert info["transport"] == "streamable-http"
+    assert info["inputSchema"] == next(
+        t["inputSchema"] for t in module._mcp_tools() if t["name"] == "audit_bundle"
+    ), "the indexed schema must be the one the tool actually advertises"
+
+
+def test_bazaar_failure_never_blocks_a_payment_challenge(monkeypatch, load_main_fresh):
+    """Discovery is an enhancement. If building it throws, the caller must
+    still get a 402 it can pay -- losing the index is survivable, losing the
+    sale is not."""
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_audit_main_bazaar_boom")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("bazaar library exploded")
+
+    monkeypatch.setattr(
+        module.x402_payments, "declare_discovery_extension", _boom, raising=False
+    )
+    import x402.extensions.bazaar as bz
+
+    monkeypatch.setattr(bz, "declare_discovery_extension", _boom)
+
+    from fastapi.testclient import TestClient
+
+    response = TestClient(module.app).post("/audit/bundle", json={"url": "https://example.com"})
+    assert response.status_code == 402
+    body = response.json()
+    assert body["price_usd"] == 0.10
+    assert any(e["protocol"] == "x402" for e in body["accepts"])
+    assert "extensions" not in body
+
+
 def test_manifest_points_at_reachable_discovery_documents(monkeypatch):
     """Every discovery URL the manifest advertises must actually resolve --
     a 404 here is an agent's dead end."""

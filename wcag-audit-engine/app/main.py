@@ -249,7 +249,34 @@ class AuthContext:
         self.pending_payment = pending_payment
 
 
-def _payment_required_response(host: Optional[str] = None, price_usd: float = 0.03) -> JSONResponse:
+def _bazaar_extension_for_path(path: Optional[str]) -> dict:
+    """Bazaar discovery data for the route this 402 is answering for.
+
+    Reuses the same JSON Schemas the MCP tools advertise rather than writing
+    a second copy: a discovery index that describes a different input shape
+    than the route accepts sends agents to a call that 400s.
+
+    Returns {} for an unknown path or when x402 is not configured, so this
+    can be spliced into any 402 unconditionally.
+    """
+    if not path:
+        return {}
+    entry = next((e for e in _CATALOG if e["path"] == path), None)
+    if entry is None:
+        return {}
+    schema = (
+        _MCP_URL_SCHEMA if entry["input"] is _URL_INPUT_SCHEMA else _MCP_HTML_OR_URL_SCHEMA
+    )
+    return x402_payments.bazaar_extension_for_body(
+        input_example={"url": "https://example.com"},
+        input_schema=schema,
+        output_example={"pass": True},
+    )
+
+
+def _payment_required_response(
+    host: Optional[str] = None, price_usd: float = 0.03, path: Optional[str] = None
+) -> JSONResponse:
     """The 402 shape a caller needs to pay via x402, MPP, or get a Stripe
     API key -- returned whenever none of those is attached and valid (or
     a subscriber is over their included monthly quota). This is the sole
@@ -294,6 +321,13 @@ def _payment_required_response(host: Optional[str] = None, price_usd: float = 0.
     # working unchanged.
     body.update(x402_payments.payment_required_body(price=price))
 
+    # Bazaar discovery. Facilitators catalog x402 resources by reading this
+    # off their 402s, and agents shop that index by capability -- without it
+    # this endpoint is findable only by someone who already has the URL.
+    bazaar = _bazaar_extension_for_path(path)
+    if bazaar:
+        body["extensions"] = bazaar
+
     response = JSONResponse(status_code=402, content=body)
     response.headers["Cache-Control"] = "no-store"
     for header_value in mpp_payments.www_authenticate_headers(realm=host, price_usd=price_usd):
@@ -307,6 +341,7 @@ def _authenticate(
     authorization: Optional[str],
     host: Optional[str] = None,
     price_usd: float = 0.03,
+    path: Optional[str] = None,
 ):
     """Returns an AuthContext on success, or a 402 JSONResponse on failure.
 
@@ -359,7 +394,7 @@ def _authenticate(
             # nothing further to pass here beyond the realm check.
             return AuthContext(stripe_billable=False, payment_method="mpp")
 
-    return _payment_required_response(host=host, price_usd=price_usd)
+    return _payment_required_response(host=host, price_usd=price_usd, path=path)
 
 
 def _authorize_and_rate_limit(
@@ -388,7 +423,14 @@ def _authorize_and_rate_limit(
     if not _audit_limiter.check(rate_limit_key):
         return None, _rate_limited_response()
 
-    auth = _authenticate(x_api_key, x_payment, authorization, host=_mpp_realm(request), price_usd=price_usd)
+    auth = _authenticate(
+        x_api_key,
+        x_payment,
+        authorization,
+        host=_mpp_realm(request),
+        price_usd=price_usd,
+        path=request.url.path,
+    )
     if isinstance(auth, JSONResponse):
         return None, auth
 
@@ -1136,6 +1178,22 @@ def mcp_streamable_http(
                 # Never let a formatting problem turn a payment prompt into a
                 # crash: the caller still needs to know what it costs.
                 challenge = {"error": "payment_required", "price_usd": price}
+
+            # Index this as an MCP resource in the Bazaar, not as the HTTP
+            # route the shared 402 builder described. An agent that finds the
+            # tool there calls it over MCP, so the discovery record has to
+            # name the tool and its transport.
+            tool = next((t for t in _mcp_tools() if t["name"] == name), None)
+            if tool is not None:
+                mcp_bazaar = x402_payments.bazaar_extension_for_mcp_tool(
+                    tool_name=name,
+                    description=tool["description"],
+                    input_schema=tool["inputSchema"],
+                    example={"url": "https://example.com"},
+                )
+                if mcp_bazaar:
+                    challenge["extensions"] = mcp_bazaar
+
             return _mcp_tool_error(
                 request_id,
                 f"Payment required (${price:.2f} for {name}). Attach X-API-Key, "
