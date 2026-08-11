@@ -408,14 +408,6 @@ def test_rate_limiter_hard_caps_table_under_key_flood(monkeypatch):
     assert len(limiter._log) < 400 or limiter._max_keys >= 400
 
 
-def test_free_scan_limit_rejects_after_threshold(monkeypatch):
-    module = _load_main(monkeypatch)
-    limiter = module._SlidingWindowLimiter(limit=2, window_seconds=86_400.0)
-    assert limiter.check("1.2.3.4") is True
-    assert limiter.check("1.2.3.4") is True
-    assert limiter.check("1.2.3.4") is False
-
-
 def test_rate_limit_is_enforced_before_any_payment_is_settled(monkeypatch):
     """Regression: the limiter used to run AFTER _authenticate, which is
     where x402/MPP payments actually settle. An over-limit caller therefore
@@ -967,3 +959,54 @@ class _FakePage:
 
 class _FakeAxeResult:
     response = {"violations": []}
+
+
+# --- The node sells audits; it does not give them away ---------------------
+
+
+def test_free_scan_endpoint_is_gone(monkeypatch):
+    """An audit costs a real browser page load. A free endpoint funds
+    strangers' compute and is an abuse vector, so it was removed rather than
+    merely hidden from the page."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    assert client.post("/scan/free", json={"url": "https://example.com"}).status_code == 404
+
+
+def test_manifest_advertises_no_unpaid_endpoint(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    manifest = client.get("/.well-known/agent.json").json()
+
+    unpaid = [e for e in manifest["endpoints"] if e.get("payment_required") is False]
+    assert unpaid == [], f"manifest advertises unpaid endpoints: {unpaid}"
+
+
+def test_landing_page_offers_no_free_scan(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    html = client.get("/").text.lower()
+
+    assert "/scan/free" not in html
+    for phrase in ("free scan", "free demo", "try it free", "scan for free"):
+        assert phrase not in html, f"landing page still offers something free: {phrase!r}"
+
+
+def test_landing_page_leads_with_per_call_not_subscription(monkeypatch):
+    """A2A is the product. The plan is a secondary path for humans who don't
+    want to build an integration -- it must not be the headline."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    html = client.get("/").text
+
+    assert html.index("$0.03") < html.index("$49"), "subscription appears before per-call pricing"
+    heading = html[html.index("<h1"):html.index("</h1>")]
+    assert "$49" not in heading and "subscription" not in heading.lower()

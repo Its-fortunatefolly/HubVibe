@@ -99,18 +99,17 @@ never billed.
 ## Growth surface
 
 `/` serves a landing page (`app/static/index.html`), not the health check
-(that moved to `/healthz`). The page offers:
+(that lives at `/health`; Cloud Run's frontend reserves `/healthz`).
 
-- **A free instant scan** (`POST /scan/free`, 3/day per IP): runs the real
-  axe-core audit but only returns the top 3 issues, clearly labeled as a
-  one-time snapshot, not a compliance certification. It's a lead magnet,
-  not a way to get the paid endpoint's full output for free.
-- **A "start monitoring" button** that kicks off Stripe Checkout via
-  `/billing/checkout`.
+The page exists for humans evaluating the service — buyers, partners, and
+anyone verifying the business is real — but the product itself is the
+machine API, and the page is written that way: it leads with per-call
+pricing and the 402 payment handshake, not with a subscription pitch.
 
-Every free scan (with or without an email left) is logged to a `leads`
-Firestore collection for manual follow-up — it only stores what the visitor
-submitted about their own site through the form, nothing scraped or bought.
+There is deliberately **no free scan**. An audit costs a real browser page
+load, so giving them away funds strangers' compute at our expense and
+invites abuse. The only human path is `/billing/checkout`, which issues an
+API key; machines pay per call over x402/MPP.
 
 ## Getting paid
 
