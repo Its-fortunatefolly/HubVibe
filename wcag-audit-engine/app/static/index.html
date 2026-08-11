@@ -193,14 +193,31 @@
   .secondary-card h3 { margin-bottom: 6px; }
   .secondary-card p { color: var(--muted); font-size: 14.5px; margin: 0 0 20px; }
 
+  .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .tier {
+    border: 1px solid var(--line); border-radius: 12px; padding: 26px;
+    background: var(--surface-2); display: flex; flex-direction: column;
+  }
+  .tier-name {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 14px;
+  }
+  .tier-price {
+    font-size: 34px; font-weight: 800; letter-spacing: -.02em; margin-bottom: 14px;
+  }
+  .tier-price span { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 5px; }
+  .tier p { color: var(--muted); font-size: 14px; margin: 0 0 20px; flex: 1; }
+  .tier form { flex-direction: column; }
+  .tier input { width: 100%; margin-bottom: 8px; }
+
   form { display: flex; gap: 10px; flex-wrap: wrap; }
-  input[type=email] {
+  input[type=email], input[type=url] {
     flex: 1; min-width: 220px; background: #000; border: 1px solid var(--line-bright);
     color: var(--text); border-radius: 8px; padding: 12px 14px;
     font-family: inherit; font-size: 15px;
   }
-  input[type=email]::placeholder { color: var(--dim); }
-  input[type=email]:focus { outline: none; border-color: var(--accent); }
+  input[type=email]::placeholder, input[type=url]::placeholder { color: var(--dim); }
+  input[type=email]:focus, input[type=url]:focus { outline: none; border-color: var(--accent); }
   .form-msg { color: var(--muted); font-size: 13.5px; margin: 12px 0 0; min-height: 18px; }
 
   /* ---- guarantees ---- */
@@ -228,7 +245,7 @@
   .footnote { color: var(--dim); font-size: 13px; margin-top: 14px; max-width: 68ch; }
 
   @media (max-width: 860px) {
-    .split, .audits, .endpoints { grid-template-columns: 1fr; }
+    .split, .audits, .endpoints, .tiers { grid-template-columns: 1fr; }
     .split { gap: 40px; }
     .nav-links { gap: 18px; }
     .nav-links a.hide-sm { display: none; }
@@ -368,20 +385,42 @@
       </ul>
     </div>
 
-    <div class="secondary-card">
-      <h3>Prefer to run scans without building an integration?</h3>
-      <p>
-        An access plan issues an API key for $49/month with 1,500 audits included;
-        past that, calls fall back to the per-call pricing above. Useful if you
-        want reports without wiring up machine payments — otherwise the API above
-        is cheaper and needs no subscription.
-      </p>
-      <form id="checkout-form">
-        <input type="email" id="checkout-email" placeholder="you@company.com" required aria-label="Email address">
-        <button type="submit" class="btn btn-primary" id="checkout-button">Get an API key</button>
-      </form>
-      <p class="form-msg" id="checkout-message"></p>
+    <h2 style="margin-top:52px">For people, not pipelines</h2>
+    <p class="section-lead">Priced per site watched — not per scan.</p>
+    <p style="color:var(--muted);font-size:15px;max-width:56ch;margin:0 0 30px;">
+      If you'd rather have a report than an integration, buy one. These are
+      billed by how many sites you want covered, because that's the thing
+      you actually care about.
+    </p>
+
+    <div class="tiers">
+      <div class="tier">
+        <div class="tier-name">Single report</div>
+        <div class="tier-price">$29<span>once</span></div>
+        <p>One site, all four checks, delivered as a shareable report page. No account, no subscription.</p>
+        <form id="report-form">
+          <input type="url" id="report-url" placeholder="https://yoursite.com" required aria-label="Site to audit">
+          <input type="email" id="report-email" placeholder="you@company.com" required aria-label="Email address">
+          <button type="submit" class="btn btn-primary" id="report-button" style="width:100%">Buy the report</button>
+        </form>
+        <p class="form-msg" id="report-message"></p>
+      </div>
+
+      <div class="tier">
+        <div class="tier-name">Pro</div>
+        <div class="tier-price">$79<span>/month</span></div>
+        <p>5 sites, audited daily across all four dimensions, with history so you can see what changed.</p>
+        <button class="btn btn-ghost plan-btn" data-plan="pro" style="width:100%">Start Pro</button>
+      </div>
+
+      <div class="tier">
+        <div class="tier-name">Agency</div>
+        <div class="tier-price">$249<span>/month</span></div>
+        <p>50 sites, audited daily, reports you can hand to your own clients. Built for people who bill for this.</p>
+        <button class="btn btn-ghost plan-btn" data-plan="agency" style="width:100%">Start Agency</button>
+      </div>
     </div>
+    <p class="form-msg" id="plan-message"></p>
   </section>
 
   <section id="guarantees">
@@ -453,25 +492,49 @@ async function postJSON(url, body) {
   return { ok: res.ok, status: res.status, data };
 }
 
-document.getElementById("checkout-form").addEventListener("submit", async (e) => {
+document.getElementById("report-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const button = document.getElementById("checkout-button");
-  const messageEl = document.getElementById("checkout-message");
-  const email = document.getElementById("checkout-email").value;
-
+  const button = document.getElementById("report-button");
+  const messageEl = document.getElementById("report-message");
   button.disabled = true;
   button.textContent = "Redirecting…";
   messageEl.textContent = "";
 
-  const { ok, data } = await postJSON("/billing/checkout", { email });
+  const { ok, data } = await postJSON("/billing/report", {
+    url: document.getElementById("report-url").value,
+    email: document.getElementById("report-email").value,
+  });
 
   if (!ok || !data.checkout_url) {
     button.disabled = false;
-    button.textContent = "Get an API key";
+    button.textContent = "Buy the report";
     messageEl.textContent = data.detail || "Checkout isn't available right now.";
     return;
   }
   window.location.href = data.checkout_url;
+});
+
+document.querySelectorAll(".plan-btn").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const messageEl = document.getElementById("plan-message");
+    const email = window.prompt("Email for your subscription and API key:");
+    if (!email) return;
+
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Redirecting…";
+    messageEl.textContent = "";
+
+    const { ok, data } = await postJSON("/billing/checkout", { email, plan: btn.dataset.plan });
+
+    if (!ok || !data.checkout_url) {
+      btn.disabled = false;
+      btn.textContent = original;
+      messageEl.textContent = data.detail || "That plan isn't available right now.";
+      return;
+    }
+    window.location.href = data.checkout_url;
+  });
 });
 
 document.getElementById("copy-curl-button").addEventListener("click", async () => {

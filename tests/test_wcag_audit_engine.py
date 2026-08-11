@@ -1007,6 +1007,165 @@ def test_landing_page_leads_with_per_call_not_subscription(monkeypatch):
     client = TestClient(module.app)
     html = client.get("/").text
 
-    assert html.index("$0.03") < html.index("$49"), "subscription appears before per-call pricing"
+    first_human_price = min(html.index(p) for p in ("$29", "$79", "$249"))
+    assert html.index("$0.03") < first_human_price, "human plans appear before per-call pricing"
+
     heading = html[html.index("<h1"):html.index("</h1>")]
-    assert "$49" not in heading and "subscription" not in heading.lower()
+    assert "subscription" not in heading.lower()
+    assert not any(p in heading for p in ("$29", "$79", "$249"))
+
+
+def test_human_plans_are_priced_per_site_not_per_scan(monkeypatch):
+    """Denominating human plans in scans invited the obvious arithmetic
+    against the $0.03 machine rate and made the plan look strictly worse.
+    Sites are the unit a human buys, and it isn't comparable."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    html = TestClient(module.app).get("/").text.lower()
+
+    assert "per site" in html or "sites" in html
+    assert "1,500 scans" not in html and "1500 scans" not in html
+
+
+# --- One-off paid report ---------------------------------------------------
+
+
+def _billing_on(monkeypatch, module):
+    monkeypatch.setattr(module.billing, "is_configured", lambda: True)
+
+
+def test_report_requires_a_genuinely_paid_session(monkeypatch):
+    """The report URL is the only thing between a stranger and a free audit,
+    so an unpaid or unknown session must produce nothing -- and must never
+    run the audit, which is the thing that actually costs us."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _billing_on(monkeypatch, module)
+    monkeypatch.setattr(module.billing, "paid_report_request", lambda sid: None)
+
+    ran = []
+    monkeypatch.setattr(module, "_run_axe_and_performance", lambda url: ran.append(url))
+
+    client = TestClient(module.app)
+    response = client.get("/report", params={"session_id": "cs_not_paid"})
+
+    assert response.status_code == 404
+    assert ran == [], "an audit was run for an unpaid session"
+
+
+def test_paid_report_runs_the_audit_and_renders(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _billing_on(monkeypatch, module)
+    monkeypatch.setattr(
+        module.billing, "paid_report_request", lambda sid: {"url": "https://example.com"}
+    )
+    monkeypatch.setattr(module.billing, "load_report", lambda sid: None)
+    saved = {}
+    monkeypatch.setattr(
+        module.billing, "save_report", lambda sid, url, result: saved.update(result=result)
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_axe_and_performance",
+        lambda url: ({"violations": []}, {"pass": True, "findings": [], "metrics": {}}),
+    )
+    monkeypatch.setattr(module.audits, "fetch_once", lambda url: object())
+    monkeypatch.setattr(
+        module.audits, "run_seo_audit", lambda h, u, response=None: {"pass": True, "findings": []}
+    )
+    monkeypatch.setattr(
+        module.audits, "run_security_audit", lambda u, response=None: {"pass": True, "findings": []}
+    )
+
+    client = TestClient(module.app)
+    response = client.get("/report", params={"session_id": "cs_paid"})
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "example.com" in response.text
+    assert saved.get("result"), "a successful report should be cached for re-viewing"
+
+
+def test_paid_report_is_not_rerun_when_already_cached(monkeypatch):
+    """A refresh must not re-run an audit the buyer paid for exactly once."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _billing_on(monkeypatch, module)
+    monkeypatch.setattr(
+        module.billing, "paid_report_request", lambda sid: {"url": "https://example.com"}
+    )
+    monkeypatch.setattr(
+        module.billing,
+        "load_report",
+        lambda sid: {"url": "https://example.com", "result": {"wcag": {"pass": True, "violations": []}}},
+    )
+    ran = []
+    monkeypatch.setattr(module, "_run_axe_and_performance", lambda url: ran.append(url))
+
+    client = TestClient(module.app)
+    response = client.get("/report", params={"session_id": "cs_paid"})
+
+    assert response.status_code == 200
+    assert ran == [], "cached report was re-audited"
+
+
+def test_failed_report_is_not_cached_and_says_purchase_stands(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _billing_on(monkeypatch, module)
+    monkeypatch.setattr(
+        module.billing, "paid_report_request", lambda sid: {"url": "https://down.example"}
+    )
+    monkeypatch.setattr(module.billing, "load_report", lambda sid: None)
+    saved = []
+    monkeypatch.setattr(
+        module.billing, "save_report", lambda *a, **k: saved.append(a)
+    )
+
+    def _boom(url):
+        raise RuntimeError("target unreachable")
+
+    monkeypatch.setattr(module, "_run_axe_and_performance", _boom)
+
+    client = TestClient(module.app)
+    response = client.get("/report", params={"session_id": "cs_paid"})
+
+    assert response.status_code == 502
+    assert saved == [], "a failed report must not be cached as the buyer's result"
+    assert "purchase still stands" in response.text
+
+
+def test_report_escapes_content_from_the_audited_site(monkeypatch):
+    """Findings carry text from a third-party page. Unescaped, an audited
+    site could write markup into a report its owner is about to read."""
+    module = _load_main(monkeypatch)
+    result = {
+        "wcag": {"pass": False, "violations": [
+            {"id": "<script>alert(1)</script>", "impact": "critical", "help": "x", "nodes_affected": 1}
+        ]},
+        "seo": {"pass": True, "findings": []},
+        "security": {"pass": True, "findings": []},
+        "performance": {"pass": True, "findings": [], "metrics": {}},
+    }
+    html = module._render_report("https://evil.example/<img src=x>", result)
+
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "<img src=x>" not in html
+
+
+def test_report_checkout_501s_when_not_configured(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    response = client.post(
+        "/billing/report", json={"email": "a@example.com", "url": "https://example.com"}
+    )
+    assert response.status_code == 501

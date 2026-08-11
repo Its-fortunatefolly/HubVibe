@@ -48,6 +48,34 @@ _FLAT_SUBSCRIPTION_PRICE_ID = os.environ.get("STRIPE_FLAT_SUBSCRIPTION_PRICE_ID"
 # for it (Stripe is still the source of truth for what a subscriber owes).
 SAAS_MONTHLY_QUOTA = int(os.environ.get("SAAS_MONTHLY_QUOTA", "1500"))
 
+# Human-facing plans, priced per SITE MONITORED rather than per scan.
+# Denominating in scans invited the obvious arithmetic -- $49 for 1,500 scans
+# is $0.033 each, more than the $0.03 machine rate, so the plan was strictly
+# worse than just paying per call and nobody rational would buy it. Sites are
+# the unit a human actually cares about, and it isn't comparable to the
+# machine rate, so the two audiences stop competing with each other.
+#
+# Each is a Stripe Price you create in the Dashboard; a tier with no price ID
+# configured is simply not offered rather than half-working.
+PLAN_PRICE_IDS = {
+    "pro": os.environ.get("STRIPE_PRICE_PRO"),
+    "agency": os.environ.get("STRIPE_PRICE_AGENCY"),
+}
+
+# One-time purchase (mode="payment", not a subscription): a single full
+# bundle report on one URL, for the visitor who will never subscribe. Pure
+# margin and it captures traffic that would otherwise bounce.
+ONEOFF_REPORT_PRICE_ID = os.environ.get("STRIPE_PRICE_ONEOFF_REPORT")
+
+
+def plan_available(plan: str) -> bool:
+    return bool(stripe.api_key and PLAN_PRICE_IDS.get(plan))
+
+
+def oneoff_report_available() -> bool:
+    return bool(stripe.api_key and ONEOFF_REPORT_PRICE_ID)
+
+
 _db = None
 
 
@@ -64,7 +92,9 @@ def _firestore():
     return _db
 
 
-def create_checkout_session(email: str, success_url: str, cancel_url: str) -> str:
+def create_checkout_session(
+    email: str, success_url: str, cancel_url: str, plan: Optional[str] = None
+) -> str:
     """Start the subscription: the flat "Agency / Developer" price
     (STRIPE_FLAT_SUBSCRIPTION_PRICE_ID) if configured, else the older pure
     metered price -- so this keeps working even before the flat price is
@@ -74,6 +104,11 @@ def create_checkout_session(email: str, success_url: str, cancel_url: str) -> st
     top of that.
     """
     price_id = _FLAT_SUBSCRIPTION_PRICE_ID or _METERED_PRICE_ID
+    if plan:
+        tier_price = PLAN_PRICE_IDS.get(plan)
+        if not tier_price:
+            raise ValueError(f"Plan {plan!r} is not configured on this deployment")
+        price_id = tier_price
     session = stripe.checkout.Session.create(
         mode="subscription",
         customer_email=email,
@@ -217,3 +252,68 @@ def check_and_increment_quota(customer_id: str) -> bool:
         return _increment(db.transaction())
     except Exception:
         return True
+
+
+def create_report_checkout(email: str, url: str, success_url: str, cancel_url: str) -> str:
+    """One-time Checkout for a single full-bundle report on one URL.
+
+    mode="payment", not "subscription": this buyer is explicitly not
+    subscribing. The audited URL rides along in session metadata so the
+    report can be produced after payment without asking for it twice.
+    """
+    if not ONEOFF_REPORT_PRICE_ID:
+        raise ValueError("One-off reports are not configured on this deployment")
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        customer_email=email,
+        line_items=[{"price": ONEOFF_REPORT_PRICE_ID, "quantity": 1}],
+        metadata={"audit_url": url, "kind": "oneoff_report"},
+        success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=cancel_url,
+    )
+    return session.url
+
+
+def paid_report_request(session_id: str) -> Optional[dict]:
+    """Return {"url": ...} if this session is a genuinely PAID one-off report.
+
+    Verified against Stripe on every call rather than trusting a webhook
+    having landed, so a report can never be produced for an unpaid session --
+    the report URL is the only thing standing between a stranger and a free
+    audit. Returns None for anything unpaid, unknown, or not a report order.
+    """
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except Exception:
+        return None
+    if session.get("payment_status") != "paid":
+        return None
+    metadata = session.get("metadata") or {}
+    if metadata.get("kind") != "oneoff_report":
+        return None
+    url = metadata.get("audit_url")
+    return {"url": url} if url else None
+
+
+def load_report(session_id: str) -> Optional[dict]:
+    """Previously generated report, if any -- so a refresh doesn't re-run
+    (and re-pay for) an audit the buyer already purchased."""
+    try:
+        doc = _firestore().collection("reports").document(session_id).get()
+    except Exception:
+        return None
+    return doc.to_dict() if doc.exists else None
+
+
+def save_report(session_id: str, url: str, result: dict) -> None:
+    import time
+
+    try:
+        _firestore().collection("reports").document(session_id).set(
+            {"url": url, "result": result, "created_at": time.time()}
+        )
+    except Exception:
+        # Storage is a convenience for re-viewing. The buyer already has
+        # their report rendered in the response; losing the cache must not
+        # fail the purchase they just completed.
+        pass

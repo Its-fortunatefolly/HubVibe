@@ -10,7 +10,7 @@ from typing import Optional
 from axe_playwright_python.sync_playwright import Axe
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 try:
@@ -223,6 +223,12 @@ class UrlAuditRequest(BaseModel):
 
 class CheckoutRequest(BaseModel):
     email: str
+    plan: Optional[str] = None
+
+
+class ReportCheckoutRequest(BaseModel):
+    email: str
+    url: str
 
 
 class AuthContext:
@@ -753,6 +759,134 @@ def agent_manifest(request: Request):
     }
 
 
+_REPORT_CSS = """
+body{margin:0;background:#000;color:#f4ede6;font-family:Inter,-apple-system,
+BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.6}
+.w{max-width:820px;margin:0 auto;padding:56px 28px 80px}
+h1{font-size:30px;letter-spacing:-.02em;margin:0 0 6px}
+.sub{color:#8d8d94;font-size:15px;margin:0 0 40px;word-break:break-all}
+h2{font-size:13px;font-family:ui-monospace,monospace;letter-spacing:.14em;
+text-transform:uppercase;color:#63636a;font-weight:500;margin:38px 0 14px}
+.card{border:1px solid #1e1e21;border-radius:10px;padding:22px;margin-bottom:14px}
+.verdict{display:flex;justify-content:space-between;align-items:center;gap:16px;
+font-weight:600;margin-bottom:14px}
+.ok{color:#4ade80}.bad{color:#ff8a2a}
+ul{list-style:none;padding:0;margin:0}
+li{padding:11px 0;border-top:1px solid #1e1e21;color:#8d8d94;font-size:14.5px}
+li b{color:#f4ede6;font-weight:600}
+.tag{font-family:ui-monospace,monospace;font-size:11px;color:#ff8a2a;
+text-transform:uppercase;letter-spacing:.08em}
+.metrics{display:flex;gap:28px;flex-wrap:wrap;color:#8d8d94;font-size:14px}
+.metrics b{display:block;color:#f4ede6;font-size:20px;font-weight:700}
+footer{margin-top:48px;padding-top:22px;border-top:1px solid #1e1e21;
+color:#63636a;font-size:13px}
+"""
+
+
+def _esc(value) -> str:
+    """Escape before interpolating into the report.
+
+    Everything in an audit finding originates from a third-party page we were
+    asked to audit -- element snippets, header values, URLs. Injecting that
+    into HTML unescaped would let an audited site write markup into a report
+    its owner is about to read.
+    """
+    import html as _html
+
+    return _html.escape(str(value), quote=True)
+
+
+def _verdict(passed: bool) -> str:
+    cls, label = ("ok", "PASS") if passed else ("bad", "ATTENTION NEEDED")
+    return f'<span class="{cls}">{label}</span>'
+
+
+def _findings_list(findings: list) -> str:
+    if not findings:
+        return '<ul><li>No issues found in this check.</li></ul>'
+    rows = "".join(
+        f'<li><span class="tag">{_esc(f.get("severity", "info"))}</span> '
+        f'<b>{_esc(f.get("id", "finding"))}</b><br>{_esc(f.get("detail", ""))}</li>'
+        for f in findings
+    )
+    return f"<ul>{rows}</ul>"
+
+
+def _render_report(url: str, result: dict) -> str:
+    wcag = result.get("wcag", {})
+    violations = wcag.get("violations", [])
+    wcag_rows = "".join(
+        f'<li><span class="tag">{_esc(v.get("impact") or "unknown")}</span> '
+        f'<b>{_esc(v.get("id", ""))}</b><br>{_esc(v.get("help", ""))} '
+        f'&middot; {_esc(v.get("nodes_affected", 0))} element(s)</li>'
+        for v in violations
+    ) or "<li>No accessibility violations found in this snapshot.</li>"
+
+    perf = result.get("performance", {})
+    m = perf.get("metrics", {})
+    seo = result.get("seo", {})
+    sec = result.get("security", {})
+
+    overall = all(
+        section.get("pass") for section in (wcag, seo, sec, perf) if isinstance(section, dict)
+    )
+
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compliance report — {_esc(url)}</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="robots" content="noindex">
+<style>{_REPORT_CSS}</style></head><body><div class="w">
+<h1>Site compliance report</h1>
+<p class="sub">{_esc(url)}</p>
+
+<div class="card"><div class="verdict"><span>Overall</span>{_verdict(overall)}</div>
+<p style="color:#8d8d94;margin:0;font-size:14.5px">Four independent checks run against
+the live page. Every result below is a deterministic rule, not an opinion.</p></div>
+
+<h2>Accessibility — WCAG 2.1 A/AA</h2>
+<div class="card"><div class="verdict"><span>axe-core</span>
+{_verdict(bool(wcag.get("pass")))}</div><ul>{wcag_rows}</ul></div>
+
+<h2>SEO</h2>
+<div class="card"><div class="verdict"><span>Structure &amp; metadata</span>
+{_verdict(bool(seo.get("pass")))}</div>{_findings_list(seo.get("findings", []))}</div>
+
+<h2>Security headers</h2>
+<div class="card"><div class="verdict"><span>Response headers</span>
+{_verdict(bool(sec.get("pass")))}</div>{_findings_list(sec.get("findings", []))}</div>
+
+<h2>Performance</h2>
+<div class="card"><div class="verdict"><span>Single page load</span>
+{_verdict(bool(perf.get("pass")))}</div>
+<div class="metrics">
+<div><b>{_esc(m.get("dom_node_count", "-"))}</b>DOM nodes</div>
+<div><b>{_esc(round(m.get("total_bytes_transferred", 0) / 1000))} KB</b>transferred</div>
+<div><b>{_esc(m.get("request_count", "-"))}</b>requests</div>
+</div>{_findings_list(perf.get("findings", []))}</div>
+
+<footer>Generated by HubVibe. These are narrow, automated checks — a meaningful
+share of issues, not all of them. Automated scanning is not a compliance
+certification and does not replace a manual accessibility audit.
+Bookmark this page to return to the report.</footer>
+</div></body></html>"""
+
+
+def _render_report_error(url: str, detail: str) -> str:
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Report could not be generated</title>
+<style>{_REPORT_CSS}</style></head><body><div class="w">
+<h1>We couldn't complete this report</h1>
+<p class="sub">{_esc(url)}</p>
+<div class="card"><p style="margin:0;color:#8d8d94">The audit could not run against
+that URL: {_esc(detail)}</p></div>
+<footer>Your purchase still stands and nothing partial was saved — reload this page
+to try again once the site is reachable. If it keeps failing, reply to your Stripe
+receipt and we'll sort it out.</footer>
+</div></body></html>"""
+
+
 @app.post("/billing/checkout")
 def start_checkout(payload: CheckoutRequest, request: Request):
     if not billing.is_configured():
@@ -763,8 +897,92 @@ def start_checkout(payload: CheckoutRequest, request: Request):
     base = str(request.base_url).rstrip("/")
     success_url = os.environ.get("CHECKOUT_SUCCESS_URL", f"{base}/billing/success")
     cancel_url = os.environ.get("CHECKOUT_CANCEL_URL", f"{base}/billing/cancel")
-    checkout_url = billing.create_checkout_session(payload.email, success_url, cancel_url)
+    try:
+        checkout_url = billing.create_checkout_session(
+            payload.email, success_url, cancel_url, plan=payload.plan
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"checkout_url": checkout_url}
+
+
+@app.post("/billing/report", tags=["billing"])
+def start_report_checkout(payload: ReportCheckoutRequest, request: Request):
+    """One-time purchase of a single full-bundle report on one URL."""
+    if not billing.oneoff_report_available():
+        raise HTTPException(
+            status_code=501, detail="One-off reports are not configured on this deployment"
+        )
+    base = str(request.base_url).rstrip("/")
+    success_url = os.environ.get("REPORT_SUCCESS_URL", f"{base}/report")
+    cancel_url = os.environ.get("CHECKOUT_CANCEL_URL", f"{base}/billing/cancel")
+    try:
+        checkout_url = billing.create_report_checkout(
+            payload.email, payload.url, success_url, cancel_url
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"checkout_url": checkout_url}
+
+
+@app.get("/report", response_class=HTMLResponse, tags=["billing"])
+def report_page(session_id: str):
+    """Render a purchased report.
+
+    Payment is re-verified against Stripe on every view rather than trusting
+    that a webhook landed, because this URL is the only thing between a
+    stranger and a free audit -- an unpaid or unknown session gets nothing.
+
+    The audit runs on first view and is then cached, so a refresh re-reads
+    the stored result instead of re-running (and re-costing) an audit the
+    buyer already paid for exactly once.
+    """
+    if not billing.is_configured():
+        raise HTTPException(status_code=501, detail="Billing is not configured on this deployment")
+
+    order = billing.paid_report_request(session_id)
+    if order is None:
+        # Deliberately identical for unpaid, unknown, and malformed sessions:
+        # no oracle for probing which session IDs exist.
+        raise HTTPException(status_code=404, detail="No paid report found for that session")
+
+    cached = billing.load_report(session_id)
+    if cached and cached.get("result"):
+        return HTMLResponse(_render_report(cached["url"], cached["result"]))
+
+    url = order["url"]
+    try:
+        wcag_raw, performance_result = _run_axe_and_performance(url)
+        wcag_violations = wcag_raw.get("violations", [])
+        shared_response = audits.fetch_once(url)
+        result = {
+            "wcag": {
+                "pass": len(wcag_violations) == 0,
+                "violations": [
+                    {
+                        "id": v["id"],
+                        "impact": v.get("impact"),
+                        "help": v.get("help"),
+                        "nodes_affected": len(v.get("nodes", [])),
+                    }
+                    for v in wcag_violations
+                ],
+            },
+            "seo": audits.run_seo_audit(None, url, response=shared_response),
+            "security": audits.run_security_audit(url, response=shared_response),
+            "performance": performance_result,
+        }
+    except Exception as exc:
+        # They paid and we could not deliver. Say so plainly and tell them
+        # the purchase still stands -- the report is cached only on success,
+        # so a retry re-runs rather than serving a broken result forever.
+        return HTMLResponse(
+            _render_report_error(url, str(exc)),
+            status_code=502,
+        )
+
+    billing.save_report(session_id, url, result)
+    return HTMLResponse(_render_report(url, result))
 
 
 @app.get("/billing/api-key")
