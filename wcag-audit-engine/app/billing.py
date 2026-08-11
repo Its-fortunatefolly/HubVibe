@@ -329,13 +329,19 @@ def record_usage(customer_id: str, units: int = 1) -> None:
     out before producing a result. Uses a fresh idempotency identifier per
     call so a retried request can't double-bill.
 
-    The underlying meter is a flat per-event ($0.03) count, so a
-    higher-priced route (e.g. the $0.10 /audit/bundle) reports `units`
-    separate events to approximate its price against that same meter,
-    rather than requiring a second Stripe meter/price to be provisioned
-    just for this. This is an approximation (3 units ~= $0.09, not exactly
-    $0.10) -- a dedicated bundle price would make it exact, and can be
-    added later without changing this function's signature.
+    A higher-priced route (the $0.10 /audit/bundle) reports `units` separate
+    events rather than requiring a second Stripe meter and price just for
+    it.
+
+    What these events are actually worth is NOT $0.03 each. The metered
+    Price on the account is $0.01 per unit, so a single audit meters $0.01
+    and a bundle $0.03 -- nowhere near the $0.03/$0.10 those routes charge.
+    That does not currently mis-bill anyone, because the human plans are
+    `licensed` flat prices with no metered item on the subscription, so
+    these events are recorded and never charged. It would start mis-billing
+    the moment that metered Price is attached to a subscription, so if
+    metered billing is ever revived, fix the Price first: reconcile it with
+    the real per-call rate rather than trusting this call count.
     """
     for _ in range(max(1, units)):
         stripe.billing.MeterEvent.create(
