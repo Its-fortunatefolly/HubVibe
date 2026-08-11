@@ -1066,6 +1066,33 @@ def _x402_env(monkeypatch):
     monkeypatch.delenv("AUDIT_API_KEY", raising=False)
 
 
+def test_requirements_pull_the_extras_bazaar_discovery_needs():
+    """Static check, because the runtime one cannot be trusted here.
+
+    x402.extensions.bazaar imports jsonschema and idna, which arrive via the
+    `extensions` extra -- not via `evm`. A developer machine almost always
+    has both transitively, so the feature appears to work locally while
+    being dead in the deployed container, and it fails closed and silent so
+    nothing announces it. Asserting on the requirements text is the only
+    check that a well-stocked environment cannot mask.
+    """
+    for path in (REPO_ROOT / "requirements.txt",
+                 REPO_ROOT / "wcag-audit-engine" / "requirements.txt"):
+        text = path.read_text()
+        x402_lines = [ln for ln in text.splitlines() if ln.strip().startswith("x402")]
+        assert x402_lines, f"{path.name} does not pin x402 at all"
+        assert any("extensions" in ln for ln in x402_lines), (
+            f"{path.name} pins {x402_lines} -- without the `extensions` extra, "
+            "Bazaar discovery silently returns {} in the deployed container"
+        )
+        # The starlette that `mcp` drags in is incompatible with the pinned
+        # FastAPI; it broke 49 tests once already. Never via an x402 extra.
+        assert not any("[all]" in ln or ",mcp" in ln or "[mcp" in ln for ln in x402_lines), (
+            f"{path.name} pulls the x402 mcp/all extra, which installs the `mcp` "
+            "package and a starlette that conflicts with the pinned FastAPI"
+        )
+
+
 def test_402_carries_bazaar_discovery_when_x402_is_live(monkeypatch, load_main_fresh):
     """The Bazaar is how agents find a paid endpoint by capability.
 

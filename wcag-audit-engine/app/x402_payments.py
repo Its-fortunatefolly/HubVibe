@@ -25,6 +25,7 @@ Requires, at deploy time:
 """
 
 import asyncio
+import logging
 import os
 import threading
 from typing import Optional
@@ -119,6 +120,38 @@ def payment_required_body(price: Optional[str] = None) -> dict:
     }
 
 
+_bazaar_warned = False
+
+
+def _warn_bazaar_unavailable(exc: Exception) -> None:
+    """Say so, once, when x402 is live but discovery can't be built.
+
+    The extras that back the Bazaar (jsonschema, idna, via
+    x402[evm,extensions]) are easy to lose from a requirements file, and the
+    handlers below swallow the resulting ImportError so that a payment
+    challenge still goes out. Keeping the sale is the right trade; making it
+    silent is not. Swallowed quietly, this feature can be dead in production
+    forever while every test on a developer machine passes, because dev
+    environments usually have those packages transitively. That is not
+    hypothetical -- it is how this shipped the first time, and only a clean
+    CI environment caught it.
+
+    Logged once rather than per request: a paid endpoint under load would
+    otherwise bury the logs.
+    """
+    global _bazaar_warned
+    if _bazaar_warned:
+        return
+    _bazaar_warned = True
+    logging.getLogger(__name__).warning(
+        "x402 is configured but Bazaar discovery could not be built (%s: %s). "
+        "Payments still work; this node will not be indexed by facilitators, "
+        "so agents cannot find it by capability. Install x402[evm,extensions].",
+        type(exc).__name__,
+        exc,
+    )
+
+
 def bazaar_extension_for_body(
     input_example: dict,
     input_schema: dict,
@@ -148,9 +181,11 @@ def bazaar_extension_for_body(
             body_type="json",
             output=OutputConfig(example=output_example) if output_example else None,
         )
-    except Exception:
+    except Exception as exc:
         # Discovery is an enhancement. It must never be the reason a caller
-        # fails to receive a payment challenge it could otherwise act on.
+        # fails to receive a payment challenge it could otherwise act on --
+        # but it must not vanish quietly either.
+        _warn_bazaar_unavailable(exc)
         return {}
 
 
@@ -182,7 +217,8 @@ def bazaar_extension_for_mcp_tool(
                 example=example,
             )
         )
-    except Exception:
+    except Exception as exc:
+        _warn_bazaar_unavailable(exc)
         return {}
 
 
