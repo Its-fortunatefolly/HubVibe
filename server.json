@@ -1,0 +1,26 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.its-fortunatefolly/hubvibe",
+  "title": "HubVibe Site Audits",
+  "description": "Rule-based site compliance audits: accessibility (axe-core), SEO, security headers, and performance. Deterministic checks against the live page, never an LLM's opinion. Metered per call.",
+  "version": "1.1.0",
+  "repository": {
+    "url": "https://github.com/Its-fortunatefolly/HubVibe",
+    "source": "github"
+  },
+  "websiteUrl": "https://hubvibe-831480473793.us-south1.run.app/",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://hubvibe-831480473793.us-south1.run.app/mcp",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "description": "HubVibe API key. Tool discovery is free; running an audit is billed per call. Get a key at /billing/checkout, or pay per call with x402/MPP.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

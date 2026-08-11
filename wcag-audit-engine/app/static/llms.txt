@@ -12,7 +12,9 @@ Machine-readable discovery:
 - /.well-known/agent.json -- full manifest: pricing, live payment rails,
   rate limits, per-endpoint examples
 - /openapi.json -- OpenAPI 3.1 spec for all routes
-- /mcp.json -- MCP tool definitions for all 5 tools with their httpEndpoint
+- /mcp -- live MCP endpoint (Streamable HTTP, JSON-RPC). Discovery via
+  initialize/tools/list is free; tools/call is billed per call.
+- /mcp.json -- static MCP tool definitions with their httpEndpoint
 - /docs -- interactive API reference
 
 Rate limit: 600 requests/minute per API key (or per IP for x402/MPP
@@ -54,9 +56,9 @@ costs a real browser page load, so every audit is paid for.
 Up to three rails, all fail-closed (no valid credential/payment means no
 audit runs, and nothing partially executes on a rejected payment):
 
-1. Stripe API key -- `X-API-Key` header. Subscribers on the $49/mo Agency
-   plan get 1,500 scans/month included; overage falls back to per-call
-   machine pricing above.
+1. Stripe API key -- `X-API-Key` header, issued with a human plan. Plans are
+   priced per site watched, not per scan; machine callers should use the
+   per-call rails below instead.
 2. x402 -- on-chain payment via the x402 protocol; verified and settled
    through a facilitator, never trusted client-side.
 3. MPP (Machine Payments Protocol) -- Stripe Shared Payment Tokens (fiat)
@@ -96,5 +98,9 @@ https://github.com/its-fortunatefolly/hubvibe/tree/main/wcag-audit-engine/integr
 
 ## Pricing
 
-Agency plan: $49/mo, 1,500 scans included, all 5 audit dimensions.
-Machine/per-call: $0.03 per single-dimension audit, $0.10 per bundle.
+Machine, per call (this is the product): $0.03 per single-dimension audit,
+$0.10 per bundle. No account, no minimum.
+
+Human plans, priced per site watched rather than per scan: $29.99 one-off
+report, $79/mo for 5 sites daily, $249/mo for 50 sites daily. See
+/.well-known/agent.json for the authoritative live pricing.

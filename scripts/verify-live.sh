@@ -119,6 +119,30 @@ else
 fi
 
 echo
+echo "MCP endpoint (what the official registry lists as a remote server)"
+MCP_INIT=$(curl -sS -m 30 -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' 2>/dev/null)
+if printf '%s' "$MCP_INIT" | grep -q '"serverInfo"'; then
+  pass "MCP initialize handshake responds"
+else
+  fail "MCP initialize did not respond with serverInfo"
+fi
+# 2026-07-28 is a modern-only version; returning it here makes every real
+# client refuse the connection, so assert we never do.
+if printf '%s' "$MCP_INIT" | grep -q '"protocolVersion": *"2026'; then
+  fail "MCP returned a non-handshake protocol version -- clients will refuse"
+else
+  pass "MCP returned a usable handshake protocol version"
+fi
+MCP_TOOLS=$(curl -sS -m 30 -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' 2>/dev/null)
+if printf '%s' "$MCP_TOOLS" | grep -q 'audit_bundle'; then
+  pass "MCP tools/list advertises the audit tools"
+else
+  fail "MCP tools/list did not return the audit tools"
+fi
+
+echo
 echo "Live payment rails advertised by the manifest"
 METHODS=$(curl -sS -m 30 "$BASE/.well-known/agent.json" 2>/dev/null \
   | tr ',' '\n' | sed -n '/"methods"/,/]/p' | tr -d ' "' | tr '\n' ' ')

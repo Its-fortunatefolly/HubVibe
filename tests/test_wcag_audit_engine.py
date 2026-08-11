@@ -697,6 +697,13 @@ def test_manifest_points_at_reachable_discovery_documents(monkeypatch):
 
     for name, url in manifest["discovery"].items():
         path = url.replace(manifest["base_url"], "")
+        if name == "mcp_endpoint":
+            # JSON-RPC: POST-only by protocol, so GET is correctly a 405.
+            r = client.post(path, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+            assert r.status_code == 200 and "tools" in r.json()["result"], (
+                f"{name} -> {path} does not speak MCP"
+            )
+            continue
         assert client.get(path).status_code == 200, f"{name} -> {path} is not reachable"
 
 
@@ -1169,3 +1176,180 @@ def test_report_checkout_501s_when_not_configured(monkeypatch):
         "/billing/report", json={"email": "a@example.com", "url": "https://example.com"}
     )
     assert response.status_code == 501
+
+
+# --- MCP Streamable HTTP endpoint ------------------------------------------
+
+
+def _rpc(client, method, params=None, request_id=1):
+    body = {"jsonrpc": "2.0", "id": request_id, "method": method}
+    if params is not None:
+        body["params"] = params
+    return client.post("/mcp", json=body)
+
+
+def test_mcp_initialize_negotiates_protocol_version(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    r = _rpc(client, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+    result = r.json()["result"]
+    assert r.json()["jsonrpc"] == "2.0"
+    # Echo a version we support...
+    assert result["protocolVersion"] == "2025-06-18"
+    assert result["capabilities"]["tools"] == {"listChanged": False}
+    assert result["serverInfo"]["name"] == "hubvibe-site-audit"
+
+    # ...but fall back to ours for one we don't.
+    r2 = _rpc(client, "initialize", {"protocolVersion": "1999-01-01", "capabilities": {}})
+    assert r2.json()["result"]["protocolVersion"] == module.MCP_PROTOCOL_VERSIONS[0]
+
+
+def test_mcp_notifications_get_no_body(monkeypatch):
+    """A JSON-RPC notification has no id and must not be answered with a
+    result, or a conforming client errors on the unexpected response."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    r = client.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+    assert r.status_code == 202
+    assert r.content in (b"", b"null")
+
+
+def test_mcp_tools_list_is_free_and_complete(monkeypatch):
+    """Discovery must not require payment: an agent has to see what this node
+    sells and what it costs before it can decide to buy."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    tools = _rpc(client, "tools/list").json()["result"]["tools"]
+    names = {t["name"] for t in tools}
+    assert names == {
+        "audit_wcag", "audit_seo", "audit_security", "audit_performance", "audit_bundle"
+    }
+    for t in tools:
+        assert t["inputSchema"]["type"] == "object"
+        assert "$" in t["description"], "tool description must state its price"
+
+
+def test_mcp_tool_call_without_payment_is_an_error_result_not_a_crash(monkeypatch):
+    """A payment requirement is a normal outcome the model should see, so it
+    belongs in the result as isError -- not a JSON-RPC protocol error."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    client = TestClient(module.app)
+
+    ran = []
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: ran.append(1))
+
+    body = _rpc(
+        client, "tools/call", {"name": "audit_wcag", "arguments": {"url": "https://example.com"}}
+    ).json()
+
+    assert "error" not in body
+    assert body["result"]["isError"] is True
+    assert "Payment required" in body["result"]["content"][0]["text"]
+    assert ran == [], "an unpaid MCP call must not run the audit"
+
+
+def test_mcp_tool_call_with_internal_key_runs_and_returns_content(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+    client = TestClient(module.app)
+
+    body = client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": "audit_wcag", "arguments": {"url": "https://example.com"}},
+        },
+        headers={"X-API-Key": "test-key"},
+    ).json()
+
+    assert body["id"] == 7
+    assert body["result"]["isError"] is False
+    import json as _json
+    payload = _json.loads(body["result"]["content"][0]["text"])
+    assert payload["pass"] is True
+
+
+def test_mcp_failed_audit_reports_error_and_is_not_billed(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key="test-key")
+
+    def _boom(*a, **k):
+        raise RuntimeError("target unreachable")
+
+    monkeypatch.setattr(module, "_run_axe", _boom)
+    billed = []
+    monkeypatch.setattr(module, "_bill", lambda auth, units=1: billed.append(units))
+    client = TestClient(module.app)
+
+    body = client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "audit_wcag", "arguments": {"url": "https://x.example"}},
+        },
+        headers={"X-API-Key": "test-key"},
+    ).json()
+
+    assert body["result"]["isError"] is True
+    assert billed == [], "a failed MCP audit must not be billed"
+
+
+def test_mcp_unknown_method_is_a_jsonrpc_error(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    body = _rpc(client, "resources/list").json()
+    assert body["error"]["code"] == -32601
+
+
+def test_mcp_tool_prices_match_the_rest_routes(monkeypatch):
+    """A tool that advertises a price the route won't charge makes an agent
+    build the wrong payment."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    for name, price in module._MCP_TOOL_PRICES.items():
+        route = "/audit/" + name.replace("audit_", "")
+        charged = client.post(route, json={"url": "https://example.com"}).json()["price_usd"]
+        assert charged == price, f"{name} advertises {price}, {route} charges {charged}"
+
+
+def test_mcp_initialize_only_returns_handshake_protocol_versions(monkeypatch):
+    """Regression: we first answered with 2026-07-28, the SDK's newest
+    constant. That is a 'modern' version negotiated out-of-band and is NOT
+    valid in an initialize result -- the official client checks the response
+    against HANDSHAKE_PROTOCOL_VERSIONS and hard-errors on anything else, so
+    every real MCP client refused to connect. Verified against the real SDK
+    after fixing; this guards the constant."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    handshake_versions = {"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
+    assert set(module.MCP_PROTOCOL_VERSIONS) <= handshake_versions, (
+        "MCP_PROTOCOL_VERSIONS contains a version that is invalid in an "
+        "initialize response; real clients will refuse to connect"
+    )
+
+    for requested in (None, "2025-06-18", "not-a-version"):
+        params = {"capabilities": {}}
+        if requested:
+            params["protocolVersion"] = requested
+        got = _rpc(client, "initialize", params).json()["result"]["protocolVersion"]
+        assert got in handshake_versions, f"initialize returned unusable version {got}"
