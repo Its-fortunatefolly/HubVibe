@@ -141,8 +141,6 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # optional; enables remediati
 # well above any legitimate caller's burst rate. 600/min = 10 req/s per key.
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "600"))
 
-FREE_SCAN_LIMIT_PER_DAY = int(os.environ.get("FREE_SCAN_LIMIT_PER_DAY", "3"))
-
 
 class _SlidingWindowLimiter:
     """Sliding-window rate limiter with bounded memory.
@@ -208,11 +206,6 @@ class _SlidingWindowLimiter:
 
 
 _audit_limiter = _SlidingWindowLimiter(RATE_LIMIT_PER_MINUTE, 60.0)
-# Free scans run the same real axe-core audit as the paid endpoint and cost
-# real compute, so this is capped harder and keyed by IP rather than an API
-# key -- it's a lead magnet, not a way to get unlimited paid-tier usage for
-# free.
-_free_scan_limiter = _SlidingWindowLimiter(FREE_SCAN_LIMIT_PER_DAY, 86_400.0)
 
 
 class AuditRequest(BaseModel):
@@ -230,11 +223,6 @@ class UrlAuditRequest(BaseModel):
 
 class CheckoutRequest(BaseModel):
     email: str
-
-
-class FreeScanRequest(BaseModel):
-    url: str
-    email: Optional[str] = None
 
 
 class AuthContext:
@@ -585,70 +573,6 @@ def health_check():
     return {"status": "ok", "service": "wcag-audit-engine"}
 
 
-@app.post("/scan/free")
-def free_scan(payload: FreeScanRequest, request: Request):
-    client_ip = request.client.host if request.client else "unknown"
-    if not _free_scan_limiter.check(client_ip):
-        raise HTTPException(
-            status_code=429,
-            detail="Free scan limit reached for today. Sign up for monitoring to scan more.",
-        )
-
-    try:
-        raw = _run_axe(None, payload.url)
-    except Exception as exc:
-        return JSONResponse(
-            status_code=502,
-            content={"status": "error", "detail": f"Scan could not complete: {exc}"},
-        )
-
-    violations = raw.get("violations", [])
-    impact_rank = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3}
-    FREE_SCAN_SHOWN_ISSUES = 2
-    top_issues = sorted(violations, key=lambda v: impact_rank.get(v.get("impact"), 4))[
-        :FREE_SCAN_SHOWN_ISSUES
-    ]
-    hidden_count = max(0, len(violations) - len(top_issues))
-
-    try:
-        billing.save_lead(payload.url, payload.email, len(violations))
-    except Exception:
-        # Lead capture is a bonus, not something that should break the free
-        # scan a visitor is waiting on -- e.g. Firestore isn't configured
-        # on this deployment yet.
-        pass
-
-    if violations:
-        note = (
-            f"Showing {len(top_issues)} of {len(violations)} issue(s) found. "
-            f"{hidden_count} more not shown here -- sign up for the full "
-            "list, exact locations, and continuous monitoring. Automated "
-            "scanning catches a meaningful share of WCAG issues, not all of "
-            "them -- this is not a compliance certification."
-            if hidden_count > 0
-            else "That's the only issue this scan found. Automated scanning "
-            "catches a meaningful share of WCAG issues, not all of them -- "
-            "this is not a compliance certification, so it's still worth a "
-            "full audit."
-        )
-    else:
-        note = (
-            "No issues found in this snapshot. Automated scanning catches a "
-            "meaningful share of WCAG issues, not all of them -- this is "
-            "not a compliance certification."
-        )
-
-    return {
-        "status": "ok",
-        "pass": len(violations) == 0,
-        "total_violations": len(violations),
-        "top_issues": [
-            {"id": v["id"], "impact": v.get("impact"), "help": v.get("help")} for v in top_issues
-        ],
-        "note": note,
-    }
-
-
 _AUTH_DESCRIPTION = (
     "One of: X-API-Key header (Stripe subscription billing, see "
     "/billing/checkout -- included scans/month, then falls back to "
@@ -824,17 +748,6 @@ def agent_manifest(request: Request):
                 "auth": _AUTH_DESCRIPTION,
                 "payment_methods": live_methods,
                 "note": "Alias of /audit/wcag, kept for backward compatibility.",
-            },
-            {
-                "path": "/scan/free",
-                "method": "POST",
-                "payment_required": False,
-                "rate_limit": f"{FREE_SCAN_LIMIT_PER_DAY}/day per IP",
-                "note": (
-                    "Human-facing demo only: WCAG, top-2 issues. Machine "
-                    "callers should use /audit/wcag -- this endpoint is "
-                    "hard-capped per IP and is not a free tier."
-                ),
             },
         ],
     }

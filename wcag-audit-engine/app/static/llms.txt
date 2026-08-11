@@ -23,8 +23,8 @@ nothing is billed -- the limit is checked before any payment is settled.
 
 All endpoints below are POST, priced per call, and accept a Stripe API
 key, an x402 on-chain payment, or an MPP (Machine Payments Protocol)
-payment -- no unauthenticated or free machine access. Humans get one
-free demo scan through the website UI only.
+payment. There is no free tier and no unauthenticated access: every audit
+costs a real browser page load, so every audit is paid for.
 
 - POST /audit/wcag -- $0.03 -- WCAG 2.1 A/AA accessibility audit via axe-core.
   Input: {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
