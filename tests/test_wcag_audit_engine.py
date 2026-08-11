@@ -686,6 +686,53 @@ def test_manifest_only_lists_payment_methods_that_can_settle(monkeypatch):
     assert "mpp-tempo" in refreshed["payment"]["methods"]
 
 
+def test_manifest_only_lists_human_plans_that_can_be_bought(monkeypatch):
+    """Fail-closed, same as the payment rails: a tier whose Stripe Price ID
+    isn't configured must not be advertised, because its checkout would
+    raise rather than take money."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    # Nothing configured in CI, so an honest manifest offers no plans.
+    manifest = client.get("/.well-known/agent.json").json()
+    assert manifest["pricing"]["human_plans"]["tiers"] == []
+
+    monkeypatch.setattr(module.billing, "plan_available", lambda plan: plan == "pro")
+    monkeypatch.setattr(module.billing, "oneoff_report_available", lambda: False)
+    refreshed = client.get("/.well-known/agent.json").json()
+    offered = {t["id"] for t in refreshed["pricing"]["human_plans"]["tiers"]}
+    assert offered == {"pro"}
+
+
+def test_manifest_plan_prices_match_the_landing_page(monkeypatch):
+    """The manifest advertised a $49/month plan with an included-scans quota
+    for weeks after Stripe had stopped selling it, because the number lived
+    in two places. An agent -- or a human's agent -- reading a price that no
+    checkout will honour is a broken sale, so pin the two together."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.billing, "plan_available", lambda plan: True)
+    monkeypatch.setattr(module.billing, "oneoff_report_available", lambda: True)
+    client = TestClient(module.app)
+
+    tiers = client.get("/.well-known/agent.json").json()["pricing"]["human_plans"]["tiers"]
+    assert {t["id"] for t in tiers} == {"report", "pro", "agency"}
+
+    page = (REPO_ROOT / "wcag-audit-engine" / "app" / "static" / "index.html").read_text()
+    for tier in tiers:
+        # $79.0 on the page reads as "$79"; compare the way a buyer sees it.
+        shown = f"{tier['usd']:.2f}".rstrip("0").rstrip(".")
+        assert f"${shown}" in page, f"{tier['id']} priced {tier['usd']} in the manifest but not on the page"
+
+    # And the retired framing must not come back anywhere an agent reads.
+    manifest_text = client.get("/.well-known/agent.json").text
+    assert "included_calls_per_month" not in manifest_text
+    assert 49 not in [t["usd"] for t in tiers], "the retired $49 plan is back"
+
+
 def test_manifest_points_at_reachable_discovery_documents(monkeypatch):
     """Every discovery URL the manifest advertises must actually resolve --
     a 404 here is an agent's dead end."""

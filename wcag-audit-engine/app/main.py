@@ -281,7 +281,10 @@ def _payment_required_response(host: Optional[str] = None, price_usd: float = 0.
         "accepts": accepts,
         "alternative": {
             "header": "X-API-Key",
-            "detail": "Stripe subscription key; included scans/month, then per-call payment above.",
+            "detail": (
+                "Key issued with a human plan, priced per site watched. "
+                "For machine volume, pay per call with a rail in `accepts`."
+            ),
             "get_one": f"{PUBLIC_BASE_URL}/billing/checkout",
         },
         "docs": f"{PUBLIC_BASE_URL}/.well-known/agent.json",
@@ -580,9 +583,9 @@ def health_check():
 
 
 _AUTH_DESCRIPTION = (
-    "One of: X-API-Key header (Stripe subscription billing, see "
-    "/billing/checkout -- included scans/month, then falls back to "
-    "per-call payment below); X-PAYMENT header (x402, see 402 response "
+    "One of: X-API-Key header (a key issued with a human plan; plans are "
+    "priced per site watched, so a machine caller wanting volume should use "
+    "a per-call rail below instead); X-PAYMENT header (x402, see 402 response "
     "body for price/network/payTo); or Authorization: Payment ... (MPP -- "
     "Stripe SPT for fiat or Tempo network for crypto, see the "
     "WWW-Authenticate response headers on a 402 for both challenges)"
@@ -685,11 +688,27 @@ def agent_manifest(request: Request):
             "currency": "USD",
             "single_audit_usd": 0.03,
             "bundle_usd": 0.10,
-            "subscription": {
-                "usd_per_month": 49,
-                "included_calls_per_month": billing.SAAS_MONTHLY_QUOTA,
-                "overage": "falls back to per-call payment at the prices above",
+            "note": (
+                "Per-call pricing is the product and is what a machine caller "
+                "should use -- no account, no minimum, no subscription."
+            ),
+            "human_plans": {
+                "billed_by": "sites watched, not scans",
+                "audience": (
+                    "People who want a recurring report rather than an "
+                    "integration. Not a cheaper way to buy calls."
+                ),
                 "checkout": f"{base}/billing/checkout",
+                "tiers": [
+                    {
+                        "id": plan["id"],
+                        "name": plan["name"],
+                        "usd": plan["usd"],
+                        "interval": plan["interval"],
+                        "covers": plan["covers"],
+                    }
+                    for plan in billing.human_plans_live()
+                ],
             },
         },
         "payment": {
