@@ -985,24 +985,31 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
     assert not offenders, "retired pricing still shipped:\n" + "\n".join(offenders)
 
 
-def test_a_key_that_is_not_a_stripe_key_sells_nothing(monkeypatch, load_main_fresh):
+@pytest.mark.parametrize(
+    "bad_key",
+    [
+        "0x32b08c5e927c69877d0fcab35618c265674922b",  # a payout address
+        "price_1U34LiDA21T9EAQB3LK5dS0I",  # a Price ID
+        "pk_live_abc123",  # the PUBLISHABLE key, not the secret
+        "whsec_abc123",  # the webhook secret
+        "changeme",
+    ],
+)
+def test_a_key_that_is_not_a_stripe_key_sells_nothing(bad_key, monkeypatch, load_main_fresh):
     """A non-empty STRIPE_SECRET_KEY is not the same as a usable one.
 
-    Found on the live service: an EVM wallet address -- the x402 payout
-    address -- was sitting in STRIPE_SECRET_KEY. Every Stripe call would
-    have failed authentication, but the string was non-empty, so
-    is_configured() said yes and the manifest advertised all three plans
-    plus the stripe_api_key rail to every agent that asked. A rail that
-    cannot settle must never be advertised, so a key that cannot possibly
-    work has to count as no key.
+    Any non-empty string used to satisfy is_configured(), so the wrong value
+    in the right variable would have had the manifest advertise all three
+    plans plus the stripe_api_key rail while every Stripe call failed
+    authentication. A rail that cannot settle must never be advertised, so a
+    key that cannot possibly work has to count as no key.
     """
     monkeypatch.setenv("AUDIT_API_KEY", "test-key")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
     monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
     monkeypatch.setenv("STRIPE_PRICE_AGENCY", "price_agency")
     monkeypatch.setenv("STRIPE_PRICE_ONEOFF_REPORT", "price_report")
-    # The exact shape of value that was actually deployed.
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "0x32b08c5e927c69877d0fcab35618c265674922b")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", bad_key)
 
     module = load_main_fresh("wcag_audit_main_badkey")
     assert module.billing.stripe_key_looks_valid() is False
@@ -1021,18 +1028,36 @@ def test_a_key_that_is_not_a_stripe_key_sells_nothing(monkeypatch, load_main_fre
     )
 
 
-def test_a_real_looking_stripe_key_sells_normally(monkeypatch, load_main_fresh):
-    """The shape check must not reject the keys Stripe actually issues."""
+@pytest.mark.parametrize(
+    "good_key",
+    [
+        "sk_live_abc123",
+        "sk_test_abc123",
+        "rk_live_abc123",
+        "rk_test_abc123",
+        # A secret piped in with `echo` keeps a trailing newline. The key is
+        # correct; the padding is not. Stripe rejects it and, unstripped, the
+        # prefix check would too -- quietly pulling every plan off a service
+        # whose credentials are actually fine.
+        "  sk_live_abc123\n",
+        "sk_live_abc123\n",
+    ],
+)
+def test_a_real_stripe_key_sells_normally(good_key, monkeypatch, load_main_fresh):
+    """The shape check must not reject keys Stripe actually issues, however
+    they arrived."""
     monkeypatch.setenv("AUDIT_API_KEY", "test-key")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
     monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", good_key)
 
-    for prefix in ("sk_live_", "sk_test_", "rk_live_"):
-        monkeypatch.setenv("STRIPE_SECRET_KEY", prefix + "abc123")
-        module = load_main_fresh("wcag_audit_main_goodkey_" + prefix)
-        assert module.billing.stripe_key_looks_valid() is True, f"{prefix} rejected"
-        assert module.billing.is_configured() is True
-        assert module.billing.plan_available("pro") is True
+    module = load_main_fresh("wcag_audit_main_goodkey")
+    assert module.billing.stripe_key_looks_valid() is True, f"rejected {good_key!r}"
+    assert module.billing.is_configured() is True
+    assert module.billing.plan_available("pro") is True
+    # The padding must be gone from what we hand to Stripe, not merely
+    # tolerated by the check.
+    assert module.billing.stripe.api_key == good_key.strip()
 
 
 def test_manifest_points_at_reachable_discovery_documents(monkeypatch):
