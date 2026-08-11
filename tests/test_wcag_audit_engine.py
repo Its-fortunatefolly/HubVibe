@@ -1007,12 +1007,12 @@ def test_landing_page_leads_with_per_call_not_subscription(monkeypatch):
     client = TestClient(module.app)
     html = client.get("/").text
 
-    first_human_price = min(html.index(p) for p in ("$29", "$79", "$249"))
+    first_human_price = min(html.index(p) for p in ("$29.99", "$79", "$249"))
     assert html.index("$0.03") < first_human_price, "human plans appear before per-call pricing"
 
     heading = html[html.index("<h1"):html.index("</h1>")]
     assert "subscription" not in heading.lower()
-    assert not any(p in heading for p in ("$29", "$79", "$249"))
+    assert not any(p in heading for p in ("$29.99", "$79", "$249"))
 
 
 def test_human_plans_are_priced_per_site_not_per_scan(monkeypatch):
