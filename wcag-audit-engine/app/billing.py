@@ -67,6 +67,35 @@ PLAN_PRICE_IDS = {
 # margin and it captures traffic that would otherwise bounce.
 ONEOFF_REPORT_PRICE_ID = os.environ.get("STRIPE_PRICE_ONEOFF_REPORT")
 
+# What each plan costs and covers, kept here beside the price IDs rather than
+# retyped in the manifest and the landing page. The agent manifest went on
+# advertising a retired $49/month plan long after Stripe had stopped selling
+# it, because the number lived in a second place nobody thought to update --
+# a quoted price that no checkout will honour is worse than no price at all.
+HUMAN_PLANS = [
+    {
+        "id": "report",
+        "name": "Single report",
+        "usd": 29.99,
+        "interval": "once",
+        "covers": "One site, all four checks, delivered as a shareable report page.",
+    },
+    {
+        "id": "pro",
+        "name": "Pro",
+        "usd": 79.0,
+        "interval": "month",
+        "covers": "5 sites, audited daily across all four dimensions, with history.",
+    },
+    {
+        "id": "agency",
+        "name": "Agency",
+        "usd": 249.0,
+        "interval": "month",
+        "covers": "50 sites, audited daily, with reports you can hand to clients.",
+    },
+]
+
 
 def plan_available(plan: str) -> bool:
     return bool(stripe.api_key and PLAN_PRICE_IDS.get(plan))
@@ -74,6 +103,25 @@ def plan_available(plan: str) -> bool:
 
 def oneoff_report_available() -> bool:
     return bool(stripe.api_key and ONEOFF_REPORT_PRICE_ID)
+
+
+def human_plans_live() -> list:
+    """The plans this deployment can actually take money for.
+
+    Same discipline as the payment-rail list: a plan whose Stripe Price ID
+    isn't configured is omitted rather than advertised, so nothing in the
+    manifest points at a checkout that would fail.
+    """
+    live = []
+    for plan in HUMAN_PLANS:
+        available = (
+            oneoff_report_available()
+            if plan["id"] == "report"
+            else plan_available(plan["id"])
+        )
+        if available:
+            live.append(plan)
+    return live
 
 
 _db = None
