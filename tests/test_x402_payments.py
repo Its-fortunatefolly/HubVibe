@@ -237,3 +237,103 @@ def test_malformed_auth_headers_raise_rather_than_silently_dropping(monkeypatch,
     module = _load_x402(monkeypatch, auth_headers=bad)
     with pytest.raises((ValueError, json.JSONDecodeError)):
         module._auth_provider()
+
+
+# --- Coinbase CDP facilitator --------------------------------------------
+#
+# CDP is the facilitator that matters commercially: it settles on mainnet and
+# it is what gets a resource listed in the x402 Bazaar. It signs a fresh JWT
+# per call, bound to that call's method, host and FULL path -- so unlike a
+# bearer token these headers cannot be computed once and reused, and a wrong
+# path means every request is rejected with a signature that looks valid.
+
+
+def _cdp_secret():
+    """A real Ed25519 keypair in CDP's base64(private||public) format, so the
+    SDK actually signs rather than being mocked into agreeing with us."""
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    priv = ed25519.Ed25519PrivateKey.generate()
+    raw = priv.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    pub = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
+    )
+    return base64.b64encode(raw + pub).decode()
+
+
+def _load_cdp(monkeypatch, url="https://api.cdp.coinbase.com/platform/v2/x402", **kw):
+    monkeypatch.setenv("CDP_API_KEY_ID", "11111111-2222-3333-4444-555555555555")
+    monkeypatch.setenv("CDP_API_KEY_SECRET", _cdp_secret())
+    return _load_x402(monkeypatch, facilitator=url, **kw)
+
+
+def _jwt_claims(header_value):
+    import base64
+
+    payload = header_value.split(" ", 1)[1].split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload))
+
+
+def test_cdp_signs_each_endpoint_with_its_own_method_and_full_path(monkeypatch):
+    """The signed `uris` claim must name the real method and the real path,
+    prefix included. CDP's facilitator lives under /platform/v2/x402, and a
+    JWT signed for the bare path authenticates nothing -- which would present
+    as x402 configured and every payment rejected."""
+    module = _load_cdp(monkeypatch)
+    headers = module._auth_provider().get_auth_headers()
+
+    expected = {
+        "verify": "POST api.cdp.coinbase.com/platform/v2/x402/verify",
+        "settle": "POST api.cdp.coinbase.com/platform/v2/x402/settle",
+        "supported": "GET api.cdp.coinbase.com/platform/v2/x402/supported",
+        "bazaar": "GET api.cdp.coinbase.com/platform/v2/x402/discovery/resources",
+    }
+    for endpoint, uri in expected.items():
+        claims = _jwt_claims(getattr(headers, endpoint)["Authorization"])
+        assert claims["uris"] == [uri], f"{endpoint} signed for the wrong request"
+
+
+def test_cdp_tokens_are_distinct_per_endpoint(monkeypatch):
+    """Reusing one token across endpoints is the obvious shortcut and it does
+    not work -- each is bound to its own method and path."""
+    module = _load_cdp(monkeypatch)
+    headers = module._auth_provider().get_auth_headers()
+    tokens = {
+        getattr(headers, e)["Authorization"]
+        for e in ("verify", "settle", "supported", "bazaar")
+    }
+    assert len(tokens) == 4
+
+
+def test_cdp_takes_precedence_over_static_headers(monkeypatch):
+    """Nobody sets a CDP key pair by accident; it is the more specific config."""
+    module = _load_cdp(
+        monkeypatch, auth_headers=json.dumps({"Authorization": "Bearer stale"})
+    )
+    provider = module._auth_provider()
+    assert type(provider).__name__ == "_CdpAuthProvider"
+    assert "stale" not in provider.get_auth_headers().verify["Authorization"]
+
+
+def test_cdp_rejects_a_facilitator_url_it_cannot_sign_for(monkeypatch):
+    """Without a host there is nothing to bind the JWT to, so fail loudly at
+    construction rather than emitting tokens no facilitator will accept."""
+    with pytest.raises(ValueError):
+        _load_cdp(monkeypatch, url="not-a-url")._auth_provider()
+
+
+def test_static_headers_still_used_when_no_cdp_credentials(monkeypatch):
+    monkeypatch.delenv("CDP_API_KEY_ID", raising=False)
+    monkeypatch.delenv("CDP_API_KEY_SECRET", raising=False)
+    module = _load_x402(
+        monkeypatch, auth_headers=json.dumps({"Authorization": "Bearer tok"})
+    )
+    assert type(module._auth_provider()).__name__ == "_StaticAuthProvider"

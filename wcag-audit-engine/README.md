@@ -228,17 +228,31 @@ either way:
 At $0.03 a call, a $0.001 settlement fee is ~3% — the margin survives it
 comfortably. See "Unit economics" above.
 
-**CDP needs one extra piece.** It authenticates with a short-lived JWT signed
-from an Ed25519 key, not a fixed header, so `X402_FACILITATOR_AUTH_HEADERS`
-cannot express it. The x402 library accepts a per-request generator via
-`CreateHeadersAuthProvider`, which wraps the CDP SDK's `create_headers`
-callable — so wiring CDP means adding `cdp-sdk` to `requirements.txt` and
-passing that provider in `x402_payments._auth_provider()`. A dry run confirms
-`cdp-sdk` resolves against the pinned FastAPI/pydantic without moving
-anything (22 new transitive packages). It is deliberately **not** added here:
-it is only worth the container weight once CDP is the facilitator you have
-chosen, and inventing the call shape without the package installed to test
-against is how a payment rail ends up rejecting everything silently.
+#### Turning on CDP
+
+CDP is supported directly — set two variables and nothing else:
+
+```bash
+gcloud run services update hubvibe --region=us-south1 --update-env-vars=\
+X402_FACILITATOR_URL=https://api.cdp.coinbase.com/platform/v2/x402,\
+X402_PAY_TO_ADDRESS=0xYourWallet
+gcloud run services update hubvibe --region=us-south1 \
+  --update-secrets=CDP_API_KEY_SECRET=cdp-api-key-secret:latest \
+  --update-env-vars=CDP_API_KEY_ID=your-key-id
+```
+
+`CDP_API_KEY_SECRET` is a private signing key — put it in Secret Manager, not
+in an env var.
+
+CDP does not use a fixed header. It signs a short-lived JWT per call, bound to
+that call's method, host and **full** path, so every endpoint gets its own
+token. `_CdpAuthProvider` builds all four (`/verify`, `/settle`, `/supported`,
+`/discovery/resources`), reading the paths and methods out of the x402 client
+rather than assuming them. The path prefix matters: CDP's facilitator lives
+under `/platform/v2/x402`, and a JWT signed for the bare path is a valid
+signature for the wrong request — which presents as x402 fully configured and
+every payment rejected. Tests decode the `uris` claim of each token and assert
+the exact method and full path.
 
 Turning it on, without disturbing anything else on the service:
 
