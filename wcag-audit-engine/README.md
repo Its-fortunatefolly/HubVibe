@@ -204,12 +204,41 @@ Until these are set, `x402_payments.is_configured()` is `False` and every
 `X-PAYMENT` header is rejected — the Stripe `X-API-Key` path is unaffected
 either way:
 
-- `X402_FACILITATOR_URL` — your facilitator's base URL (Stripe now offers a
-  native x402 facilitator on the same Stripe account used above; any
-  x402-compatible facilitator works).
+- `X402_FACILITATOR_URL` — the facilitator's base URL.
 - `X402_PAY_TO_ADDRESS` — the wallet address that receives payment.
 - `X402_NETWORK` — CAIP-2 network id (default `eip155:8453`, Base mainnet).
 - `X402_PRICE` — default `$0.03`.
+- `X402_FACILITATOR_AUTH_HEADERS` — JSON object of headers sent on every
+  facilitator call, e.g. `{"Authorization": "Bearer ..."}`. Optional, but in
+  practice required: the free public facilitator at `x402.org` is
+  **testnet-only** (Base Sepolia), and anything settling real money on
+  mainnet authenticates the resource server. A malformed value raises at
+  startup rather than being ignored, because silently dropping credentials
+  leaves x402 advertised while the facilitator rejects every payment —
+  indistinguishable from nobody buying.
+
+#### Choosing a facilitator
+
+| | |
+|---|---|
+| `https://x402.org/facilitator` | the library's default. Base Sepolia **testnet** only — fine for proving the path end to end, useless for revenue |
+| Coinbase **CDP** | mainnet, and the one that gets you into the Bazaar. First 1,000 on-chain settlements/month free, then ~$0.001 each; verification is always free |
+| others (x402.rs, xpay, …) | mainnet on Base/Solana/Polygon and more, generally bearer-token auth, which `X402_FACILITATOR_AUTH_HEADERS` covers directly |
+
+At $0.03 a call, a $0.001 settlement fee is ~3% — the margin survives it
+comfortably. See "Unit economics" above.
+
+**CDP needs one extra piece.** It authenticates with a short-lived JWT signed
+from an Ed25519 key, not a fixed header, so `X402_FACILITATOR_AUTH_HEADERS`
+cannot express it. The x402 library accepts a per-request generator via
+`CreateHeadersAuthProvider`, which wraps the CDP SDK's `create_headers`
+callable — so wiring CDP means adding `cdp-sdk` to `requirements.txt` and
+passing that provider in `x402_payments._auth_provider()`. A dry run confirms
+`cdp-sdk` resolves against the pinned FastAPI/pydantic without moving
+anything (22 new transitive packages). It is deliberately **not** added here:
+it is only worth the container weight once CDP is the facilitator you have
+chosen, and inventing the call shape without the package installed to test
+against is how a payment rail ends up rejecting everything silently.
 
 Turning it on, without disturbing anything else on the service:
 

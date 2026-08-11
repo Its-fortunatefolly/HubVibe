@@ -14,6 +14,7 @@ not to re-test the x402 library or reach the network.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -24,7 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 X402_PATH = REPO_ROOT / "wcag-audit-engine" / "app" / "x402_payments.py"
 
 
-def _load_x402(monkeypatch, *, facilitator="https://facilitator.example", pay_to="0xabc"):
+def _load_x402(monkeypatch, *, facilitator="https://facilitator.example", pay_to="0xabc",
+               auth_headers=None):
     if facilitator is None:
         monkeypatch.delenv("X402_FACILITATOR_URL", raising=False)
     else:
@@ -33,6 +35,10 @@ def _load_x402(monkeypatch, *, facilitator="https://facilitator.example", pay_to
         monkeypatch.delenv("X402_PAY_TO_ADDRESS", raising=False)
     else:
         monkeypatch.setenv("X402_PAY_TO_ADDRESS", pay_to)
+    if auth_headers is None:
+        monkeypatch.delenv("X402_FACILITATOR_AUTH_HEADERS", raising=False)
+    else:
+        monkeypatch.setenv("X402_FACILITATOR_AUTH_HEADERS", auth_headers)
 
     name = "hubvibe_x402_under_test"
     sys.modules.pop(name, None)
@@ -175,3 +181,59 @@ def test_malformed_payment_header_fails_closed(monkeypatch, bad_header):
 
     monkeypatch.setattr(module, "decode_payment_signature_header", _explode)
     assert module.verify_and_settle_sync(bad_header, price="$0.03") is False
+
+
+# --- Authenticated facilitators ------------------------------------------
+#
+# The free public facilitator at x402.org is testnet-only. Any facilitator
+# that settles real money on mainnet authenticates the resource server, so
+# without a way to send credentials, x402 could only ever have been switched
+# on against a facilitator that wanted none -- i.e. not a paying one.
+
+
+def test_no_auth_provider_when_no_credentials_are_configured(monkeypatch):
+    module = _load_x402(monkeypatch)
+    assert module._auth_provider() is None
+
+
+def test_auth_headers_are_sent_on_every_facilitator_endpoint(monkeypatch):
+    """verify, settle, supported and bazaar are separate calls. Credentials
+    missing from any one of them means that call fails while the others
+    succeed -- a partial outage that is far harder to diagnose than a clean
+    rejection."""
+    module = _load_x402(
+        monkeypatch, auth_headers=json.dumps({"Authorization": "Bearer tok123"})
+    )
+    headers = module._auth_provider().get_auth_headers()
+
+    for endpoint in ("verify", "settle", "supported", "bazaar"):
+        assert getattr(headers, endpoint) == {"Authorization": "Bearer tok123"}, (
+            f"{endpoint} would be called without credentials"
+        )
+
+
+def test_auth_provider_is_handed_to_the_facilitator_client(monkeypatch):
+    """Building the provider is useless if it never reaches the client."""
+    module = _load_x402(
+        monkeypatch, auth_headers=json.dumps({"Authorization": "Bearer tok123"})
+    )
+    _install_fake_server(monkeypatch, module)
+
+    module.verify_and_settle_sync("signed-payment", price="$0.03")
+
+    assert module.FacilitatorConfig.call_args is not None, "FacilitatorConfig was never built"
+    provider = module.FacilitatorConfig.call_args.kwargs.get("auth_provider")
+    assert provider is not None, "the facilitator client was configured without credentials"
+    assert provider.get_auth_headers().verify == {"Authorization": "Bearer tok123"}
+
+
+@pytest.mark.parametrize(
+    "bad", ['{"Authorization": 5}', '["not", "an", "object"]', "not json at all", '"a string"']
+)
+def test_malformed_auth_headers_raise_rather_than_silently_dropping(monkeypatch, bad):
+    """Silently ignoring bad credentials leaves x402 advertised while the
+    facilitator rejects every payment -- indistinguishable from nobody
+    buying, and invisible for as long as nobody looks."""
+    module = _load_x402(monkeypatch, auth_headers=bad)
+    with pytest.raises((ValueError, json.JSONDecodeError)):
+        module._auth_provider()

@@ -25,6 +25,7 @@ Requires, at deploy time:
 """
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -41,6 +42,17 @@ _PAY_TO_ADDRESS = os.environ.get("X402_PAY_TO_ADDRESS")
 _NETWORK = os.environ.get("X402_NETWORK", "eip155:8453")
 _PRICE = os.environ.get("X402_PRICE", "$0.03")
 
+# Headers sent with every facilitator call, as a JSON object, e.g.
+#   {"Authorization": "Bearer sk_live_..."}
+#
+# Most hosted facilitators authenticate the resource server rather than
+# serving anonymously -- the free public one at x402.org is testnet-only, and
+# a mainnet facilitator that settles real money necessarily knows who is
+# asking. Without this there was no way to point this service at any of them,
+# so x402 could only ever have been switched on against a facilitator that
+# wanted no credentials at all.
+_FACILITATOR_AUTH_HEADERS = os.environ.get("X402_FACILITATOR_AUTH_HEADERS")
+
 _server: Optional[x402ResourceServer] = None
 _requirements_cache: dict = {}
 
@@ -50,6 +62,59 @@ _LOCK = threading.RLock()
 
 def is_configured() -> bool:
     return bool(_FACILITATOR_URL and _PAY_TO_ADDRESS)
+
+
+class _StaticAuthProvider:
+    """Sends a fixed set of headers on every facilitator call.
+
+    Implements the x402 AuthProvider protocol. The library asks separately
+    for verify / settle / supported / bazaar headers; a bearer token or API
+    key is the same on all four, so the same dict is returned for each.
+
+    This deliberately does NOT cover facilitators that sign a fresh
+    credential per request (Coinbase CDP mints a short-lived JWT from an
+    Ed25519 key). Those need their own SDK's header generator, which the
+    library accepts via CreateHeadersAuthProvider -- see the README. Faking
+    it with a static header would produce a facilitator that rejects every
+    payment, which fails closed but silently, and that is the single worst
+    outcome for a payment rail.
+    """
+
+    __slots__ = ("_headers",)
+
+    def __init__(self, headers: dict):
+        self._headers = dict(headers)
+
+    def get_auth_headers(self):
+        from x402.http.facilitator_client_base import AuthHeaders
+
+        return AuthHeaders(
+            verify=dict(self._headers),
+            settle=dict(self._headers),
+            supported=dict(self._headers),
+            bazaar=dict(self._headers),
+        )
+
+
+def _auth_provider():
+    """The facilitator auth provider for this deployment, or None.
+
+    A malformed X402_FACILITATOR_AUTH_HEADERS is raised rather than ignored:
+    silently dropping credentials would leave x402 advertised and every
+    payment rejected by the facilitator, which looks identical to "nobody is
+    buying" and could go unnoticed indefinitely.
+    """
+    if not _FACILITATOR_AUTH_HEADERS:
+        return None
+    headers = json.loads(_FACILITATOR_AUTH_HEADERS)
+    if not isinstance(headers, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in headers.items()
+    ):
+        raise ValueError(
+            "X402_FACILITATOR_AUTH_HEADERS must be a JSON object of string headers, "
+            'e.g. {"Authorization": "Bearer ..."}'
+        )
+    return _StaticAuthProvider(headers)
 
 
 def _get_server() -> x402ResourceServer:
@@ -71,7 +136,9 @@ def _get_server() -> x402ResourceServer:
     global _server
     with _LOCK:
         if _server is None:
-            facilitator = HTTPFacilitatorClient(FacilitatorConfig(url=_FACILITATOR_URL))
+            facilitator = HTTPFacilitatorClient(
+                FacilitatorConfig(url=_FACILITATOR_URL, auth_provider=_auth_provider())
+            )
             server = x402ResourceServer(facilitator)
             server.register(_NETWORK, ExactEvmServerScheme())
             server.initialize()
