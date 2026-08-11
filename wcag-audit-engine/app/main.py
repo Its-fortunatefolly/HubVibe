@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Optional
 
 from axe_playwright_python.sync_playwright import Axe
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Body, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 try:
@@ -710,6 +710,7 @@ def agent_manifest(request: Request):
         },
         "discovery": {
             "openapi": f"{base}/openapi.json",
+            "mcp_endpoint": f"{base}/mcp",
             "mcp": f"{base}/mcp.json",
             "llms_txt": f"{base}/llms.txt",
             "docs": f"{base}/docs",
@@ -885,6 +886,241 @@ that URL: {_esc(detail)}</p></div>
 to try again once the site is reachable. If it keeps failing, reply to your Stripe
 receipt and we'll sort it out.</footer>
 </div></body></html>"""
+
+
+# --- MCP over Streamable HTTP ----------------------------------------------
+#
+# A real MCP endpoint, not the static /mcp.json manifest. The official MCP
+# registry accepts remote servers via `remotes: [{type: "streamable-http"}]`,
+# which needs a live endpoint at a public URL -- that is what this is, and it
+# is what makes this node listable there without publishing a package.
+#
+# Implemented directly rather than with the `mcp` SDK on purpose: that package
+# requires a newer Starlette than this service pins for FastAPI (which is why
+# integrations/mcp_server.py has to be a standalone script). A tools-only MCP
+# server over Streamable HTTP is just JSON-RPC 2.0 over POST, so hand-rolling
+# the five methods avoids dragging an incompatible dependency into the
+# deployed image.
+#
+# Shapes below were taken from the official SDK's own types rather than from
+# memory, and the endpoint was driven with the real SDK client to confirm it.
+#
+# These are specifically the HANDSHAKE versions. The SDK's newest constant is
+# 2026-07-28, but that is a "modern" version negotiated out-of-band and is NOT
+# valid to return from initialize -- a client checks the initialize result
+# against HANDSHAKE_PROTOCOL_VERSIONS and hard-errors on anything else. Echoing
+# the newest constant here made the real client refuse to connect at all, so
+# the list below is the handshake set, newest first.
+MCP_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+
+_MCP_URL_SCHEMA = {
+    "type": "object",
+    "properties": {"url": {"type": "string", "description": "Live URL to audit"}},
+    "required": ["url"],
+}
+_MCP_HTML_OR_URL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "url": {"type": "string", "description": "Live URL to audit"},
+        "html": {"type": "string", "description": "Raw HTML to audit instead of a URL"},
+    },
+}
+
+
+def _mcp_tools() -> list:
+    """Tool list, derived from the same catalog the REST routes and the agent
+    manifest use, so a tool can never advertise a price the route won't
+    charge."""
+    tools = []
+    for entry in _CATALOG:
+        name = "audit_" + entry["path"].rsplit("/", 1)[-1]
+        tools.append(
+            {
+                "name": name,
+                "description": (
+                    f"{entry['description']} ${entry['price_usd']:.2f} per call. "
+                    f"Returns: {entry['returns']}"
+                ),
+                "inputSchema": (
+                    _MCP_URL_SCHEMA
+                    if entry["input"] is _URL_INPUT_SCHEMA
+                    else _MCP_HTML_OR_URL_SCHEMA
+                ),
+            }
+        )
+    return tools
+
+
+_MCP_TOOL_PRICES = {
+    "audit_" + entry["path"].rsplit("/", 1)[-1]: entry["price_usd"] for entry in _CATALOG
+}
+
+
+def _mcp_run_tool(name: str, args: dict) -> dict:
+    """Execute one audit tool. Assumes payment has already been authorised."""
+    url = args.get("url")
+    html = args.get("html")
+
+    if name == "audit_wcag":
+        raw = _run_axe(html, url)
+        violations = raw.get("violations", [])
+        return {
+            "status": "ok",
+            "pass": len(violations) == 0,
+            "engine": "axe-core",
+            "violations": [
+                {
+                    "id": v["id"],
+                    "impact": v.get("impact"),
+                    "help": v.get("help"),
+                    "nodes_affected": len(v.get("nodes", [])),
+                }
+                for v in violations
+            ],
+        }
+    if name == "audit_seo":
+        return audits.run_seo_audit(html, url)
+    if name == "audit_security":
+        return audits.run_security_audit(url)
+    if name == "audit_performance":
+        return audits.run_performance_audit(url)
+    if name == "audit_bundle":
+        wcag_raw, performance = _run_axe_and_performance(url)
+        violations = wcag_raw.get("violations", [])
+        shared = audits.fetch_once(url)
+        wcag = {
+            "pass": len(violations) == 0,
+            "violations": [
+                {"id": v["id"], "impact": v.get("impact"), "help": v.get("help")}
+                for v in violations
+            ],
+        }
+        seo = audits.run_seo_audit(None, url, response=shared)
+        security = audits.run_security_audit(url, response=shared)
+        return {
+            "status": "ok",
+            "pass": all(r["pass"] for r in (wcag, seo, security, performance)),
+            "wcag": wcag,
+            "seo": seo,
+            "security": security,
+            "performance": performance,
+        }
+    raise KeyError(name)
+
+
+def _jsonrpc_error(request_id, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def _mcp_tool_error(request_id, message: str) -> dict:
+    """A tool-level failure is a RESULT with isError, not a JSON-RPC error.
+
+    JSON-RPC errors mean the protocol call itself was malformed; a payment
+    requirement or an unreachable audit target is a normal outcome the model
+    should see and can act on, so it belongs in the result.
+    """
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {"content": [{"type": "text", "text": message}], "isError": True},
+    }
+
+
+@app.post("/mcp", tags=["discovery"])
+def mcp_streamable_http(
+    payload: dict = Body(...),
+    request: Request = None,
+    x_api_key: Optional[str] = Header(None),
+    x_payment: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """MCP Streamable HTTP endpoint.
+
+    Discovery (initialize, tools/list) is free and unauthenticated -- an agent
+    must be able to find out what this node sells and what it costs before
+    deciding to buy. Execution (tools/call) goes through exactly the same
+    fail-closed authorisation as the REST routes, including verify-then-settle,
+    rather than a second copy of the payment logic that could drift from it.
+    """
+    method = payload.get("method")
+    request_id = payload.get("id")
+
+    # Notifications carry no id and must not be answered with a body.
+    if request_id is None and isinstance(method, str) and method.startswith("notifications/"):
+        return Response(status_code=202)
+
+    if method == "initialize":
+        client_version = (payload.get("params") or {}).get("protocolVersion")
+        version = (
+            client_version if client_version in MCP_PROTOCOL_VERSIONS else MCP_PROTOCOL_VERSIONS[0]
+        )
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "protocolVersion": version,
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": "hubvibe-site-audit", "version": "1.1.0"},
+                "instructions": (
+                    "Rule-based site compliance audits. Every tool costs money and "
+                    "returns a deterministic result, never an LLM's opinion. Calls "
+                    "need an X-API-Key header, or an x402/MPP payment -- see "
+                    f"{PUBLIC_BASE_URL}/.well-known/agent.json. A tool that cannot "
+                    "run reports an error and is not charged for."
+                ),
+            },
+        }
+
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": request_id, "result": {}}
+
+    if method == "tools/list":
+        return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": _mcp_tools()}}
+
+    if method == "tools/call":
+        params = payload.get("params") or {}
+        name = params.get("name")
+        args = params.get("arguments") or {}
+
+        price = _MCP_TOOL_PRICES.get(name)
+        if price is None:
+            return _mcp_tool_error(request_id, f"Unknown tool: {name}")
+        if not args.get("url") and not args.get("html"):
+            return _mcp_tool_error(request_id, "Provide 'url' (or 'html' for wcag/seo).")
+
+        auth, err = _authorize_and_rate_limit(
+            x_api_key, x_payment, authorization, request, price_usd=price
+        )
+        if err is not None:
+            detail = err.body.decode() if hasattr(err, "body") else ""
+            return _mcp_tool_error(
+                request_id,
+                f"Payment required (${price:.2f} for {name}). Attach X-API-Key, or pay via "
+                f"x402/MPP. Details: {detail}",
+            )
+
+        try:
+            result = _mcp_run_tool(name, args)
+        except Exception as exc:
+            # Not billed: _bill only runs on success, same as the REST routes.
+            return _mcp_tool_error(request_id, f"Audit could not complete: {exc}")
+
+        warning = _bill(auth, units=3 if name == "audit_bundle" else 1)
+        if warning:
+            result["billing_warning"] = warning
+
+        import json as _json
+
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "content": [{"type": "text", "text": _json.dumps(result, indent=2)}],
+                "isError": False,
+            },
+        }
+
+    return _jsonrpc_error(request_id, -32601, f"Method not found: {method}")
 
 
 @app.post("/billing/checkout")

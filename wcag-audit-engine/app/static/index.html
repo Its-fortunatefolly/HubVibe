@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HubVibe — machine-payable site audits for AI agents</title>
-<meta name="description" content="A metered API for site compliance audits. Accessibility, SEO, security headers, and performance — $0.03 per call, paid machine-to-machine over x402 and MPP. Deterministic checks, never an LLM guess.">
+<meta name="description" content="Metered API for site compliance audits: accessibility, SEO, security headers, performance. $0.03 per call, paid machine-to-machine via x402 and MPP.">
 <link rel="canonical" href="https://hubvibe-831480473793.us-south1.run.app/">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="theme-color" content="#000000">
@@ -21,6 +21,39 @@
 <meta name="twitter:title" content="HubVibe — machine-payable site audits for AI agents">
 <meta name="twitter:description" content="A metered API for site compliance audits. $0.03 per call, paid machine-to-machine over x402 and MPP.">
 <meta name="twitter:image" content="https://hubvibe-831480473793.us-south1.run.app/og-image.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "HubVibe",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Any",
+  "url": "https://hubvibe-831480473793.us-south1.run.app/",
+  "description": "Metered API for site compliance audits: accessibility (axe-core), SEO, security headers, and performance. Machine-payable per call over x402 and MPP.",
+  "featureList": [
+    "WCAG 2.1 A/AA accessibility audit via axe-core",
+    "SEO structure and metadata audit",
+    "Security response-header audit",
+    "Performance measurement from a real page load",
+    "HTTP 402 machine payments over x402 and MPP"
+  ],
+  "offers": {
+    "@type": "AggregateOffer",
+    "priceCurrency": "USD",
+    "lowPrice": "0.03",
+    "highPrice": "249.00",
+    "offerCount": "5",
+    "offers": [
+      {"@type": "Offer", "name": "Single audit (per call)", "price": "0.03", "priceCurrency": "USD"},
+      {"@type": "Offer", "name": "Full bundle (per call)", "price": "0.10", "priceCurrency": "USD"},
+      {"@type": "Offer", "name": "Single report", "price": "29.99", "priceCurrency": "USD"},
+      {"@type": "Offer", "name": "Pro", "price": "79.00", "priceCurrency": "USD"},
+      {"@type": "Offer", "name": "Agency", "price": "249.00", "priceCurrency": "USD"}
+    ]
+  },
+  "provider": {"@type": "Organization", "name": "HubVibe", "url": "https://hubvibe-831480473793.us-south1.run.app/"}
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -396,7 +429,7 @@
     <div class="tiers">
       <div class="tier">
         <div class="tier-name">Single report</div>
-        <div class="tier-price">$29<span>once</span></div>
+        <div class="tier-price">$29.99<span>once</span></div>
         <p>One site, all four checks, delivered as a shareable report page. No account, no subscription.</p>
         <form id="report-form">
           <input type="url" id="report-url" placeholder="https://yoursite.com" required aria-label="Site to audit">
