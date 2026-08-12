@@ -5,15 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HubVibe — Machine-Payable Site Audits</title>
 <meta name="description" content="HubVibe provides programmatic API services for automated website audits — WCAG accessibility, SEO, security, and performance verification — sold per call to software agents and as monitoring plans to businesses.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta property="og:type" content="website">
+<meta property="og:title" content="HubVibe — Machine-Payable Site Audits">
+<meta property="og:description" content="Automated website audits: WCAG accessibility, SEO, security headers, and performance. $0.03 per check, sold per call to software agents.">
+<meta property="og:url" content="https://its-fortunatefolly.github.io/HubVibe/">
+<meta property="og:image" content="https://hubvibe-831480473793.us-south1.run.app/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://hubvibe-831480473793.us-south1.run.app/og-image.png">
 <style>
   :root {
     color-scheme: dark;
-    --bg: #0b0b0d;
-    --panel: #161618;
+    --bg: #000000;
+    --panel: #121214;
     --border: #2a2a2e;
-    --text: #f2f0ec;
+    --text: #FDE4CE;
     --muted: #9a9a9f;
-    --accent: #e8c15a;
+    --accent: #FF8A2A;
   }
   * { box-sizing: border-box; }
   body {
@@ -23,33 +31,35 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     line-height: 1.6;
   }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 56px 24px 80px; }
-  header { margin-bottom: 40px; }
-  .mark {
-    display: inline-flex; align-items: center; gap: 10px;
-    font-weight: 700; font-size: 22px; letter-spacing: -0.01em;
+  .wrap { max-width: 760px; margin: 0 auto; padding: 48px 24px 80px; }
+  header { margin-bottom: 36px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand svg { display: block; }
+  .brand-name {
+    font-weight: 800; font-size: 21px; letter-spacing: 0.06em;
+    color: var(--text);
   }
-  .mark .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
-  p.lead { color: var(--muted); font-size: 17px; max-width: 60ch; }
+  p.lead { color: var(--muted); font-size: 17px; max-width: 62ch; }
   h2 {
     font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em;
-    color: var(--muted); margin: 48px 0 16px; font-weight: 600;
+    color: var(--muted); margin: 44px 0 16px; font-weight: 600;
   }
   .card {
     border: 1px solid var(--border); border-radius: 10px;
     background: var(--panel); padding: 20px 22px; margin-bottom: 14px;
   }
-  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; color: var(--text); }
   .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
   table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
   th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+  td code { color: var(--text); font-size: 13.5px; }
   .price { font-variant-numeric: tabular-nums; white-space: nowrap; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .links { display: flex; flex-wrap: wrap; gap: 10px 22px; }
   footer {
-    margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border);
+    margin-top: 52px; padding-top: 24px; border-top: 1px solid var(--border);
     color: var(--muted); font-size: 13px;
   }
 </style>
@@ -58,7 +68,25 @@
 <div class="wrap">
 
   <header>
-    <div class="mark"><span class="dot"></span> HubVibe</div>
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 100 100" aria-label="HubVibe logo" role="img">
+        <defs>
+          <filter id="g" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="3" result="b"/>
+            <feFlood flood-color="#FF8A2A" flood-opacity=".9"/>
+            <feComposite in2="b" operator="in" result="gc"/>
+            <feMerge><feMergeNode in="gc"/><feMergeNode in="gc"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <g fill="#FDE4CE" filter="url(#g)">
+          <rect x="9" y="22" width="10" height="56" rx="1"/>
+          <rect x="34" y="22" width="10" height="56" rx="1"/>
+          <rect x="9" y="45" width="35" height="10" rx="1"/>
+          <polygon points="50,22 61,22 70.5,57 80,22 91,22 77,78 64,78"/>
+        </g>
+      </svg>
+      <span class="brand-name">HUBVIBE</span>
+    </div>
   </header>
 
   <p class="lead">
@@ -72,11 +100,11 @@
   <h2>Machine API — per call</h2>
   <table>
     <tr><th>Endpoint</th><th>Checks</th><th class="price">Price</th></tr>
-    <tr><td>/audit/wcag</td><td>WCAG 2.1 A/AA accessibility (axe-core)</td><td class="price">$0.03</td></tr>
-    <tr><td>/audit/seo</td><td>Title, meta, OpenGraph, structured data</td><td class="price">$0.03</td></tr>
-    <tr><td>/audit/security</td><td>HTTPS, HSTS, CSP, headers, CORS</td><td class="price">$0.03</td></tr>
-    <tr><td>/audit/performance</td><td>DOM size, payload, request count</td><td class="price">$0.03</td></tr>
-    <tr><td>/audit/bundle</td><td>All four, one call</td><td class="price">$0.10</td></tr>
+    <tr><td><code>/audit/wcag</code></td><td>WCAG 2.1 A/AA accessibility (axe-core)</td><td class="price">$0.03</td></tr>
+    <tr><td><code>/audit/seo</code></td><td>Title, meta, OpenGraph, structured data</td><td class="price">$0.03</td></tr>
+    <tr><td><code>/audit/security</code></td><td>HTTPS, HSTS, CSP, headers, CORS</td><td class="price">$0.03</td></tr>
+    <tr><td><code>/audit/performance</code></td><td>DOM size, payload, request count</td><td class="price">$0.03</td></tr>
+    <tr><td><code>/audit/bundle</code></td><td>All four, one call</td><td class="price">$0.10</td></tr>
   </table>
 
   <h2>Human plans — per site watched</h2>
