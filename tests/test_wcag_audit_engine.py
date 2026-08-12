@@ -1511,21 +1511,61 @@ def test_landing_page_offers_no_free_scan(monkeypatch):
         assert phrase not in html, f"landing page still offers something free: {phrase!r}"
 
 
-def test_landing_page_leads_with_per_call_not_subscription(monkeypatch):
-    """A2A is the product. The plan is a secondary path for humans who don't
-    want to build an integration -- it must not be the headline."""
+def test_landing_page_never_prints_a_per_call_cent_price(monkeypatch):
+    """A human must not see $0.03 sitting a scroll above a $79 plan.
+
+    A2A is still the product and the machine section still leads -- that is
+    the test below. But printing the per-call rate on the same page as the
+    plans invites one subtraction and makes every plan look absurd, which is
+    the same trap that killed the old scan-denominated plan. Agents read the
+    exact rate from /.well-known/agent.json and from the 402 challenge; that
+    is authoritative and cannot drift from what the routes charge, which a
+    hand-written page can.
+    """
     from fastapi.testclient import TestClient
 
     module = _load_main(monkeypatch)
-    client = TestClient(module.app)
-    html = client.get("/").text
+    html = TestClient(module.app).get("/").text
+
+    for price in ("$0.03", "$0.10", '"0.03"', '"0.10"'):
+        assert price not in html, (
+            f"landing page prints the per-call rate {price} -- it undercuts the plans"
+        )
+    # The rate has to remain reachable, just not printed here.
+    assert "/.well-known/agent.json" in html
+
+
+def test_landing_page_leads_with_the_machine_api_not_the_plans(monkeypatch):
+    """A2A is the product; the plans are the secondary path for humans who
+    don't want to build an integration. Positioning is unchanged -- only the
+    cent figure is gone."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    html = TestClient(module.app).get("/").text
 
     first_human_price = min(html.index(p) for p in ("$29.99", "$79", "$249"))
-    assert html.index("$0.03") < first_human_price, "human plans appear before per-call pricing"
+    assert html.index("Metered") < first_human_price, "plans appear before the machine API"
 
     heading = html[html.index("<h1"):html.index("</h1>")]
     assert "subscription" not in heading.lower()
     assert not any(p in heading for p in ("$29.99", "$79", "$249"))
+
+
+def test_machine_surfaces_still_publish_the_exact_rate(monkeypatch):
+    """Removing the price from the page must not remove it from the places a
+    paying agent actually reads. If it did, nothing could price a call."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    assert "$0.03" in client.get("/llms.txt").text
+    manifest = client.get("/.well-known/agent.json").json()
+    assert manifest["pricing"]["single_audit_usd"] == 0.03
+    assert manifest["pricing"]["bundle_usd"] == 0.10
+    challenge = client.post("/audit/wcag", json={"url": "https://example.com"}).json()
+    assert challenge["price_usd"] == 0.03
 
 
 def test_human_plans_are_priced_per_site_not_per_scan(monkeypatch):
