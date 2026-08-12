@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HubVibe — machine-payable site audits for AI agents</title>
-<meta name="description" content="Metered API for site compliance audits: accessibility, SEO, security headers, performance. $0.03 per call, paid machine-to-machine via x402 and MPP.">
+<meta name="description" content="Metered API for site compliance audits: accessibility, SEO, security headers, performance. Paid machine-to-machine via x402 and MPP, or watched per site on a plan.">
 <link rel="canonical" href="https://hubvibe-831480473793.us-south1.run.app/">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HubVibe">
 <meta property="og:title" content="HubVibe — machine-payable site audits for AI agents">
-<meta property="og:description" content="A metered API for site compliance audits. $0.03 per call, paid machine-to-machine over x402 and MPP. Deterministic checks, never an LLM guess.">
+<meta property="og:description" content="A metered API for site compliance audits, paid machine-to-machine over x402 and MPP. Deterministic checks, never an LLM guess.">
 <meta property="og:url" content="https://hubvibe-831480473793.us-south1.run.app/">
 <meta property="og:image" content="https://hubvibe-831480473793.us-south1.run.app/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -19,7 +19,7 @@
 <meta property="og:image:alt" content="HubVibe — machine-payable site audits: accessibility, SEO, security, performance.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="HubVibe — machine-payable site audits for AI agents">
-<meta name="twitter:description" content="A metered API for site compliance audits. $0.03 per call, paid machine-to-machine over x402 and MPP.">
+<meta name="twitter:description" content="A metered API for site compliance audits, paid machine-to-machine over x402 and MPP.">
 <meta name="twitter:image" content="https://hubvibe-831480473793.us-south1.run.app/og-image.png">
 <script type="application/ld+json">
 {
@@ -40,12 +40,10 @@
   "offers": {
     "@type": "AggregateOffer",
     "priceCurrency": "USD",
-    "lowPrice": "0.03",
+    "lowPrice": "29.99",
     "highPrice": "249.00",
     "offerCount": "5",
     "offers": [
-      {"@type": "Offer", "name": "Single audit (per call)", "price": "0.03", "priceCurrency": "USD"},
-      {"@type": "Offer", "name": "Full bundle (per call)", "price": "0.10", "priceCurrency": "USD"},
       {"@type": "Offer", "name": "Single report", "price": "29.99", "priceCurrency": "USD"},
       {"@type": "Offer", "name": "Pro", "price": "79.00", "priceCurrency": "USD"},
       {"@type": "Offer", "name": "Agency", "price": "249.00", "priceCurrency": "USD"}
@@ -369,25 +367,21 @@
     <p class="section-lead">Four dimensions. Run one, or run all four in a single billed call.</p>
     <div class="audits">
       <div class="audit">
-        <div class="price">$0.03 / call</div>
         <h3>Accessibility</h3>
         <p>WCAG 2.1 A/AA via axe-core, executed against the rendered page in a real browser.</p>
         <div class="route">POST /audit/wcag</div>
       </div>
       <div class="audit">
-        <div class="price">$0.03 / call</div>
         <h3>SEO</h3>
         <p>Title, meta description, H1 structure, canonical, OpenGraph, structured data, lang attribute.</p>
         <div class="route">POST /audit/seo</div>
       </div>
       <div class="audit">
-        <div class="price">$0.03 / call</div>
         <h3>Security headers</h3>
         <p>HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking protection, Referrer-Policy, CORS.</p>
         <div class="route">POST /audit/security</div>
       </div>
       <div class="audit">
-        <div class="price">$0.03 / call</div>
         <h3>Performance</h3>
         <p>DOM node count, transferred bytes, and request count measured from one real page load.</p>
         <div class="route">POST /audit/performance</div>
@@ -404,16 +398,18 @@
     <h2>Pricing</h2>
     <div class="price-hero">
       <div class="price-tag">
-        <span class="price-num">$0.03</span>
-        <span class="price-unit">per audit · settled machine-to-machine</span>
+        <span class="price-num">Metered</span>
+        <span class="price-unit">per call · settled machine-to-machine</span>
       </div>
       <p class="lede" style="margin:0;font-size:16px;max-width:52ch;">
-        Metered per call. No minimum, no commitment, no account required —
-        an agent pays for exactly the audits it runs.
+        Agents pay for exactly the audits they run. No minimum, no
+        commitment, no account. The live rate for every route is published
+        in the agent manifest and quoted in the 402 challenge itself, so a
+        caller reads the price from the endpoint rather than from a page
+        that could drift.
       </p>
       <ul class="price-list">
-        <li><span>Single dimension — accessibility, SEO, security, or performance</span><span>$0.03</span></li>
-        <li><span>Full bundle — all four against one URL, billed once</span><span>$0.10</span></li>
+        <li><span>Rates</span><span><a href="/.well-known/agent.json">/.well-known/agent.json</a></span></li>
         <li><span>Payment rails</span><span>x402 · MPP</span></li>
       </ul>
     </div>
