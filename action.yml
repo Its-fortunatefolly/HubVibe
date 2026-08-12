@@ -22,6 +22,9 @@ name: "HubVibe Site Compliance Audit"
 description: "Real WCAG/SEO/security/performance audit of a live URL as a CI gate. Deterministic checks via axe-core, not an LLM guess."
 author: "HubVibe"
 
+name: "HubVibe Site Compliance Audit"
+description: Automated WCAG, SEO, security, and performance compliance audits for CI/CD pipelines.
+author: "HubVibe"
 branding:
   icon: "check-circle"
   color: "purple"
@@ -37,6 +40,11 @@ inputs:
       https://hubvibe-831480473793.us-south1.run.app/billing/checkout
     required: false
     default: ""
+    description: "The live URL to audit."
+    required: true
+  api-key:
+    description: "Your HubVibe API key (X-API-Key). Get one at https://hubvibe-831480473793.us-south1.run.app via /billing/checkout."
+    required: true
   endpoint:
     description: "Which audit to run: wcag, seo, security, performance, or bundle (all four, billed once)."
     required: false
@@ -65,6 +73,9 @@ inputs:
     description: "Override the service base URL (self-hosted or staging deployments)."
     required: false
     default: "https://hubvibe-831480473793.us-south1.run.app"
+    description: "If false, the action reports results but never fails the build even if the audit didn't pass."
+    required: false
+    default: "true"
 
 outputs:
   passed:
@@ -87,63 +98,20 @@ runs:
         TARGET_URL: ${{ inputs.url }}
         AUDIT_ENDPOINT: ${{ inputs.endpoint }}
         FAIL_ON_VIOLATION: ${{ inputs.fail-on-violation }}
-        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
-        TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
-        RETRIES: ${{ inputs.retries }}
-        BASE_URL: ${{ inputs.base-url }}
       run: |
-        set -uo pipefail
+        set -euo pipefail
 
-        case "$AUDIT_ENDPOINT" in
-          wcag|seo|security|performance|bundle) ;;
-          *)
-            echo "::error::Unknown endpoint '$AUDIT_ENDPOINT'. Use one of: wcag, seo, security, performance, bundle."
-            exit 1
-            ;;
-        esac
+        base="https://hubvibe-831480473793.us-south1.run.app"
+        http_code=$(curl -s -o response.json -w "%{http_code}" -X POST "$base/audit/$AUDIT_ENDPOINT" \
+          -H "X-API-Key: $HUBVIBE_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "{\"url\": \"$TARGET_URL\"}")
 
-        # Build the request body with a JSON encoder rather than string
-        # interpolation. A URL containing a quote or backslash would otherwise
-        # produce malformed JSON, which reads as a service fault rather than
-        # as the bad input it is.
-        python3 -c 'import json,os,sys; sys.stdout.write(json.dumps({"url": os.environ["TARGET_URL"]}))' > request.json
-
-        auth_args=()
-        if [ -n "$HUBVIBE_API_KEY" ]; then
-          auth_args=(-H "X-API-Key: $HUBVIBE_API_KEY")
-        fi
-
-        http_code="000"
-        attempt=0
-        while :; do
-          http_code=$(curl -sS -o response.json -w "%{http_code}" \
-            --max-time "$TIMEOUT_SECONDS" \
-            -X POST "$BASE_URL/audit/$AUDIT_ENDPOINT" \
-            "${auth_args[@]}" \
-            -H "Content-Type: application/json" \
-            --data-binary @request.json) || http_code="000"
-
-          # Retry only what a retry can fix. A 402/401/400 is a decision the
-          # service already made; repeating it just spends time and, on a
-          # metered endpoint, risks paying twice for the same answer.
-          case "$http_code" in
-            000|5*)
-              if [ "$attempt" -ge "$RETRIES" ]; then break; fi
-              sleep $(( 2 ** attempt ))
-              attempt=$(( attempt + 1 ))
-              continue
-              ;;
-            *) break ;;
-          esac
-        done
-
-        echo "http-status=$http_code" >> "$GITHUB_OUTPUT"
         echo "HTTP status: $http_code"
+        python3 -m json.tool response.json || cat response.json
 
-        response_body=""
-        if [ -s response.json ]; then
-          response_body=$(cat response.json)
-        fi
+        response_body=$(cat response.json)
+        # GITHUB_OUTPUT needs multi-line-safe delimiter handling for raw JSON.
         {
           echo "response<<HUBVIBE_EOF"
           echo "$response_body"
@@ -193,3 +161,23 @@ runs:
           exit 1
         fi
         echo "::warning::fail-on-violation is false -- continuing despite findings."
+        if [ "$http_code" != "200" ]; then
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          echo "::error::HubVibe audit request failed with HTTP $http_code (see response.json above)"
+          if [ "$FAIL_ON_VIOLATION" = "true" ]; then
+            exit 1
+          fi
+          exit 0
+        fi
+
+        passed=$(python3 -c "import json; print(json.load(open('response.json'))['pass'])")
+        if [ "$passed" = "True" ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+          echo "HubVibe audit passed."
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          echo "::error::HubVibe audit failed -- see findings above"
+          if [ "$FAIL_ON_VIOLATION" = "true" ]; then
+            exit 1
+          fi
+        fi
