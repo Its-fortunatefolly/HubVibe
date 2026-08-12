@@ -101,8 +101,39 @@ CDP_API_KEY_SECRET   = <Secret Manager — it is a private signing key>
 `_CdpAuthProvider` in `app/x402_payments.py` already signs the per-request
 JWTs correctly, verified against the real SDK.
 
-**2. Cosmetic:** the card statement descriptor reads `HUBEVIBE` (extra E).
+**2. Marketplace listing for the GitHub Action.** `action.yml` is now at the
+repo root, so `uses: Its-fortunatefolly/HubVibe@v1` already works. The
+*listing* still needs a separate repo — see the lesson below — via
+`bash scripts/publish-action-repo.sh /tmp/hubvibe-audit-action`.
+
+**3. Register with Glama.** `glama.json` is in place; the directory still has
+to be pointed at the repo once.
+
+**4. Cosmetic:** the card statement descriptor reads `HUBEVIBE` (extra E).
 Dashboard → Settings → Payments.
+
+## The growth math, stated plainly
+
+The build side of "more machine traffic" is now essentially done. What is not
+done, and what no amount of code closes, is demand.
+
+At $0.03–$0.10 a call, **$1M of revenue is 10–33M paid calls; a multi-million
+run rate is 100M+.** Spread over a year, 100M calls is ~3 paid calls every
+second, continuously, from a base that is currently approximately zero paying
+machine callers. And that is revenue, not profit: every audit is a real
+Playwright page load on Cloud Run, so the per-call compute cost has to come
+out of the $0.03 before anything is left. **Nobody has measured that number
+yet, and it is the single most important unknown in this business** — if a
+bundle costs $0.04 of CPU-seconds to produce and sells for $0.10, the model
+works; if it costs $0.09, volume makes things worse, not better. Measure it
+before optimizing for volume.
+
+The honest constraint: adoption is not something the code can force. A CI
+gate that costs money on every push is a line item someone has to approve,
+and the ones that get adopted are the ones that are trivially removable and
+never block a deploy on a third-party outage. That is why the action defaults
+to retrying transient failures and supports `fail-on-error: false`. Making it
+harder to remove would lower adoption, not raise it.
 
 ## Sandbox limits — know these before promising to check something
 
@@ -129,6 +160,17 @@ So: live-service verification must be run by the user with
   requirements text.
 - **Prove a test fails.** Every guard in this repo was verified by
   reintroducing the bug and watching the test go red, then restoring.
+- **A Marketplace action repo must contain NO workflow files.** Not "one
+  action at the root" — no workflows, at all. HubVibe has CI, so it can never
+  be listed itself, and moving `action.yml` around does not fix it. This was
+  correctly worked out in an earlier session, written down in a README, and
+  then that README was deleted along with the directory it lived in. It cost
+  a re-derivation. `scripts/publish-action-repo.sh` now encodes it, and
+  `tests/test_marketplace_action.py` fails if the assumption changes.
+- **Direct `uses:` and a Marketplace listing are different things.**
+  `uses: owner/repo@ref` resolves a root `action.yml` with no listing
+  involved. Marketplace is discoverability only. Conflating them makes the
+  listing look like a blocker for adoption when it is not.
 - **The user is often on mobile.** Long multi-line pasted commands land on a
   non-empty input line and run together into garbage (`1gcloud`, `%bash`).
   Keep commands to one short line; that is why `repair-and-deploy.sh` exists.

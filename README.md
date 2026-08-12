@@ -93,9 +93,28 @@ In [`wcag-audit-engine/integrations/`](wcag-audit-engine/integrations/):
   the official SDK. Standalone, with its own `mcp_requirements.txt`: the `mcp`
   package needs a newer Starlette than the deployed service pins for FastAPI,
   so it is deliberately kept out of the service's dependency tree.
-- **`langchain_tool.py`** — LangChain tool wrapper
-- **`github_action.yml`** — audit-on-push CI gate
-- **`marketplace-action/`** — the same as a publishable composite Action
+- **`langchain_tool.py`** — LangChain tool wrapper. Subscription key only; it
+  raises on a 402 rather than paying.
+- **`hubvibe_tollbooth.py`** — the client for agents running unattended. Same
+  audits, but it settles the 402 itself from an EVM wallet via x402, so no
+  human has to go get a key. Enforces a per-call cap **and** a
+  process-lifetime budget, both before anything is signed — an autonomous
+  loop with an unbounded wallet is a drained wallet. Exposes LangChain/CrewAI
+  tools via `hubvibe_tools()`.
+- **`github_action.yml`** — a copyable workflow, for repos that would rather
+  paste a job than depend on a published action.
+
+At the repo root:
+
+- **`action.yml`** — the composite GitHub Action, and the single copy of it.
+  It retries transient failures but never a 4xx (repeating a 402 on a metered
+  endpoint risks paying twice for one answer), renders findings into the job
+  summary via `scripts/render_audit_summary.py`, and can be adopted with
+  `fail-on-error: false` so an outage in this service cannot block someone
+  else's deploys.
+- **`scripts/publish-action-repo.sh`** — generates the standalone repo the
+  Marketplace listing needs (see below).
+- **`glama.json`** — listing metadata for the Glama MCP directory.
 
 ## For people, not pipelines
 
@@ -103,6 +122,34 @@ The machine API is the product. There is also a website for humans who want a
 report rather than an integration — priced per site watched, not per scan.
 There is deliberately **no free scan**: an audit costs a real browser page
 load, so giving them away funds strangers' compute and invites abuse.
+
+## Publishing the GitHub Action
+
+Two separate things, with different rules:
+
+**Direct use works today.** An `action.yml` at a public repo's root is usable
+as-is, no Marketplace involved:
+
+```yaml
+- uses: Its-fortunatefolly/HubVibe@v1
+  with:
+    url: https://your-site.example.com
+    api-key: ${{ secrets.HUBVIBE_API_KEY }}
+```
+
+**A Marketplace listing needs a different repo.** GitHub requires an action
+repository to contain a single root `action.yml` *and no workflow files at
+all*. This repo has `.github/workflows/`, so it can never be listed itself —
+moving `action.yml` around does not help. Generate the clean standalone repo
+instead:
+
+```bash
+bash scripts/publish-action-repo.sh /tmp/hubvibe-audit-action
+```
+
+It copies `action.yml` and the summary renderer verbatim (so the published
+action cannot drift from the one in this repo), writes a listing README, and
+prints the exact push/tag/publish steps.
 
 ## Publishing to the MCP registry
 

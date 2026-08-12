@@ -1,0 +1,195 @@
+# The single source of truth for the HubVibe GitHub Action. Two separate
+# things depend on it, and they have different rules:
+#
+#   * Direct use -- `uses: Its-fortunatefolly/HubVibe@v1` works off this file
+#     today, because an action.yml at a public repo's root is directly usable.
+#   * Marketplace listing -- requires a repo with a single root action.yml AND
+#     NO WORKFLOW FILES. This repo has .github/workflows/, so it can never be
+#     listed itself. `scripts/publish-action-repo.sh` generates the clean
+#     standalone repo from this file. Do not "fix" that by moving this file.
+#
+# An earlier draft under wcag-audit-engine/integrations/marketplace-action/
+# was deleted rather than kept alongside this one: two copies of a published
+# action drift, and the one that drifts is always the one people are running.
+#
+# Design note on adoption: a paid third-party call in someone else's CI is
+# adopted only if it is predictable. So this action never charges for a run it
+# cannot complete, never hard-fails a build over a transient network blip
+# (retries first), and prints the price it is about to spend before spending it.
+# Those constraints are what make it installable in an enterprise pipeline, not
+# a tax on one.
+name: "HubVibe Site Compliance Audit"
+description: "Real WCAG/SEO/security/performance audit of a live URL as a CI gate. Deterministic checks via axe-core, not an LLM guess."
+author: "HubVibe"
+
+branding:
+  icon: "check-circle"
+  color: "purple"
+
+inputs:
+  url:
+    description: "The live URL to audit (a deployed preview, staging, or production URL)."
+    required: true
+  api-key:
+    description: >-
+      HubVibe API key, passed as X-API-Key. Optional: without it the run stops on
+      the service's HTTP 402 payment challenge and prints how to pay. Get a key at
+      https://hubvibe-831480473793.us-south1.run.app/billing/checkout
+    required: false
+    default: ""
+  endpoint:
+    description: "Which audit to run: wcag, seo, security, performance, or bundle (all four, billed once)."
+    required: false
+    default: "bundle"
+  fail-on-violation:
+    description: "If false, findings are reported to the job summary but never fail the build."
+    required: false
+    default: "true"
+  fail-on-error:
+    description: >-
+      If false, an infrastructure failure (network, 402, 5xx) reports a warning
+      instead of failing the build. Findings are still governed by
+      fail-on-violation. Set false to adopt the audit without letting an outage
+      in a third-party service block your deploys.
+    required: false
+    default: "true"
+  timeout-seconds:
+    description: "Per-attempt HTTP timeout."
+    required: false
+    default: "90"
+  retries:
+    description: "Retries on network error or 5xx, with exponential backoff. Does not retry 4xx."
+    required: false
+    default: "2"
+  base-url:
+    description: "Override the service base URL (self-hosted or staging deployments)."
+    required: false
+    default: "https://hubvibe-831480473793.us-south1.run.app"
+
+outputs:
+  passed:
+    description: "true or false -- whether the audit's overall `pass` field was true."
+    value: ${{ steps.audit.outputs.passed }}
+  response:
+    description: "The raw JSON response body from the audit call."
+    value: ${{ steps.audit.outputs.response }}
+  http-status:
+    description: "HTTP status of the final attempt, or 000 if the request never completed."
+    value: ${{ steps.audit.outputs.http-status }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: audit
+      shell: bash
+      env:
+        HUBVIBE_API_KEY: ${{ inputs.api-key }}
+        TARGET_URL: ${{ inputs.url }}
+        AUDIT_ENDPOINT: ${{ inputs.endpoint }}
+        FAIL_ON_VIOLATION: ${{ inputs.fail-on-violation }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        RETRIES: ${{ inputs.retries }}
+        BASE_URL: ${{ inputs.base-url }}
+      run: |
+        set -uo pipefail
+
+        case "$AUDIT_ENDPOINT" in
+          wcag|seo|security|performance|bundle) ;;
+          *)
+            echo "::error::Unknown endpoint '$AUDIT_ENDPOINT'. Use one of: wcag, seo, security, performance, bundle."
+            exit 1
+            ;;
+        esac
+
+        # Build the request body with a JSON encoder rather than string
+        # interpolation. A URL containing a quote or backslash would otherwise
+        # produce malformed JSON, which reads as a service fault rather than
+        # as the bad input it is.
+        python3 -c 'import json,os,sys; sys.stdout.write(json.dumps({"url": os.environ["TARGET_URL"]}))' > request.json
+
+        auth_args=()
+        if [ -n "$HUBVIBE_API_KEY" ]; then
+          auth_args=(-H "X-API-Key: $HUBVIBE_API_KEY")
+        fi
+
+        http_code="000"
+        attempt=0
+        while :; do
+          http_code=$(curl -sS -o response.json -w "%{http_code}" \
+            --max-time "$TIMEOUT_SECONDS" \
+            -X POST "$BASE_URL/audit/$AUDIT_ENDPOINT" \
+            "${auth_args[@]}" \
+            -H "Content-Type: application/json" \
+            --data-binary @request.json) || http_code="000"
+
+          # Retry only what a retry can fix. A 402/401/400 is a decision the
+          # service already made; repeating it just spends time and, on a
+          # metered endpoint, risks paying twice for the same answer.
+          case "$http_code" in
+            000|5*)
+              if [ "$attempt" -ge "$RETRIES" ]; then break; fi
+              sleep $(( 2 ** attempt ))
+              attempt=$(( attempt + 1 ))
+              continue
+              ;;
+            *) break ;;
+          esac
+        done
+
+        echo "http-status=$http_code" >> "$GITHUB_OUTPUT"
+        echo "HTTP status: $http_code"
+
+        response_body=""
+        if [ -s response.json ]; then
+          response_body=$(cat response.json)
+        fi
+        {
+          echo "response<<HUBVIBE_EOF"
+          echo "$response_body"
+          echo "HUBVIBE_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        # Render the human-readable report into the job summary. This is the
+        # only place a reviewer actually looks, so findings go here rather than
+        # being buried in raw log output.
+        python3 "$GITHUB_ACTION_PATH/scripts/render_audit_summary.py" \
+          --response response.json \
+          --status "$http_code" \
+          --endpoint "$AUDIT_ENDPOINT" \
+          --url "$TARGET_URL" \
+          >> "$GITHUB_STEP_SUMMARY" || true
+
+        if [ "$http_code" != "200" ]; then
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          if [ "$http_code" = "402" ]; then
+            echo "::error::HubVibe audit was not paid for (HTTP 402). Set the api-key input, or pay per call with x402/MPP -- the challenge is in the response body above."
+          else
+            echo "::error::HubVibe audit request failed with HTTP $http_code (see response.json above)"
+          fi
+          if [ "$FAIL_ON_ERROR" = "true" ]; then
+            exit 1
+          fi
+          echo "::warning::fail-on-error is false -- continuing despite the failed audit request."
+          exit 0
+        fi
+
+        passed=$(python3 -c 'import json,sys; d=json.load(open("response.json")); print("true" if d.get("pass") is True else "false")') || passed="error"
+        if [ "$passed" = "error" ]; then
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          echo "::error::HubVibe returned HTTP 200 with a body this action could not parse."
+          if [ "$FAIL_ON_ERROR" = "true" ]; then exit 1; fi
+          exit 0
+        fi
+
+        echo "passed=$passed" >> "$GITHUB_OUTPUT"
+        if [ "$passed" = "true" ]; then
+          echo "HubVibe audit passed."
+          exit 0
+        fi
+
+        echo "::error::HubVibe audit found violations -- see the job summary for details"
+        if [ "$FAIL_ON_VIOLATION" = "true" ]; then
+          exit 1
+        fi
+        echo "::warning::fail-on-violation is false -- continuing despite findings."
