@@ -1,5 +1,5 @@
 name: "HubVibe Site Compliance Audit"
-description: "Run a real WCAG/SEO/security/performance audit against a live URL and fail the build if it doesn't pass. Powered by axe-core, not an LLM guess."
+description: Automated WCAG, SEO, security, and performance compliance audits for CI/CD pipelines.
 author: "HubVibe"
 branding:
   icon: "check-circle"
