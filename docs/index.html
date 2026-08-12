@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HubVibe — Machine-Payable Site Audits</title>
-<meta name="description" content="HubVibe provides programmatic API services for automated website audits — WCAG accessibility, SEO, security, and performance verification — sold per call to software agents and as monitoring plans to businesses.">
+<title>HubVibe — Automated Website Audits</title>
+<meta name="description" content="HubVibe provides programmatic API services for automated website audits — WCAG accessibility, SEO, security, and performance verification for developers and automated workflows.">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <meta property="og:type" content="website">
-<meta property="og:title" content="HubVibe — Machine-Payable Site Audits">
-<meta property="og:description" content="Automated website audits: WCAG accessibility, SEO, security headers, and performance. $0.03 per check, sold per call to software agents.">
+<meta property="og:title" content="HubVibe — Automated Website Audits">
+<meta property="og:description" content="Automated website audits: WCAG 2.1 accessibility, SEO, security headers, and performance. Deterministic checks against the live page.">
 <meta property="og:url" content="https://its-fortunatefolly.github.io/HubVibe/">
 <meta property="og:image" content="https://hubvibe-831480473793.us-south1.run.app/og-image.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -35,26 +35,27 @@
   header { margin-bottom: 36px; }
   .brand { display: flex; align-items: center; gap: 12px; }
   .brand svg { display: block; }
-  .brand-name {
-    font-weight: 800; font-size: 21px; letter-spacing: 0.06em;
-    color: var(--text);
-  }
+  .brand-name { font-weight: 800; font-size: 21px; letter-spacing: 0.06em; color: var(--text); }
   p.lead { color: var(--muted); font-size: 17px; max-width: 62ch; }
   h2 {
     font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em;
     color: var(--muted); margin: 44px 0 16px; font-weight: 600;
   }
-  .card {
+  .tier {
     border: 1px solid var(--border); border-radius: 10px;
     background: var(--panel); padding: 20px 22px; margin-bottom: 14px;
   }
-  .card h3 { margin: 0 0 6px; font-size: 16px; color: var(--text); }
-  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .tier .amount { font-size: 26px; font-weight: 700; color: var(--text); }
+  .tier .amount span { font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .tier h3 {
+    margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .tier p { margin: 8px 0 0; color: var(--muted); font-size: 14.5px; }
   table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
   th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; }
   td code { color: var(--text); font-size: 13.5px; }
-  .price { font-variant-numeric: tabular-nums; white-space: nowrap; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .links { display: flex; flex-wrap: wrap; gap: 10px 22px; }
@@ -92,46 +93,61 @@
   <p class="lead">
     HubVibe provides programmatic API services for automated website audits —
     WCAG 2.1 accessibility, SEO, security-header, and performance verification —
-    for developers and automated workflows. Every check is a deterministic
-    rule run against the live page; results are sold per call to software
-    agents, and as monitoring plans to businesses.
+    for developers and automated workflows. Every check is a deterministic rule
+    run against the live page, never a language model's opinion, and a check
+    that could not run is reported as an error rather than a pass.
   </p>
 
-  <h2>Machine API — per call</h2>
+  <h2>Plans — priced per site watched</h2>
+
+  <div class="tier">
+    <h3>Single report</h3>
+    <div class="amount">$29.99<span>once</span></div>
+    <p>One site, all four checks, delivered as a shareable report page. No account, no subscription.</p>
+  </div>
+
+  <div class="tier">
+    <h3>Pro</h3>
+    <div class="amount">$79<span>/month</span></div>
+    <p>5 sites, audited daily across all four dimensions, with history so you can see what changed.</p>
+  </div>
+
+  <div class="tier">
+    <h3>Agency</h3>
+    <div class="amount">$249<span>/month</span></div>
+    <p>50 sites, audited daily, with client-ready reports. Built for people who bill for this work.</p>
+  </div>
+
+  <h2>What every audit checks</h2>
   <table>
-    <tr><th>Endpoint</th><th>Checks</th><th class="price">Price</th></tr>
-    <tr><td><code>/audit/wcag</code></td><td>WCAG 2.1 A/AA accessibility (axe-core)</td><td class="price">$0.03</td></tr>
-    <tr><td><code>/audit/seo</code></td><td>Title, meta, OpenGraph, structured data</td><td class="price">$0.03</td></tr>
-    <tr><td><code>/audit/security</code></td><td>HTTPS, HSTS, CSP, headers, CORS</td><td class="price">$0.03</td></tr>
-    <tr><td><code>/audit/performance</code></td><td>DOM size, payload, request count</td><td class="price">$0.03</td></tr>
-    <tr><td><code>/audit/bundle</code></td><td>All four, one call</td><td class="price">$0.10</td></tr>
+    <tr><th>Dimension</th><th>Checks</th></tr>
+    <tr><td>Accessibility</td><td>WCAG 2.1 A/AA via axe-core, against the rendered page</td></tr>
+    <tr><td>SEO</td><td>Title, meta description, H1s, canonical, OpenGraph, structured data</td></tr>
+    <tr><td>Security</td><td>HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking, CORS</td></tr>
+    <tr><td>Performance</td><td>DOM node count, transferred bytes, request count from a real load</td></tr>
   </table>
 
-  <h2>Human plans — per site watched</h2>
-  <div class="card">
-    <h3>Single report — $29.99 once</h3>
-    <p>One site, all four checks, delivered as a shareable report page.</p>
-  </div>
-  <div class="card">
-    <h3>Pro — $79/month</h3>
-    <p>5 sites, audited daily across all four dimensions, with history.</p>
-  </div>
-  <div class="card">
-    <h3>Agency — $249/month</h3>
-    <p>50 sites, audited daily, with reports you can hand to clients.</p>
-  </div>
+  <h2>For developers and automated workflows</h2>
+  <p class="lead" style="font-size:15.5px">
+    The same checks are available as a metered HTTP API that software can call
+    and pay for directly, with no account and no signup. Rates for each route
+    are published in the
+    <a href="https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json">agent manifest</a>
+    and quoted in the payment challenge itself, so an integration reads the
+    price from the endpoint rather than from a page.
+  </p>
 
   <h2>Links</h2>
   <div class="links">
     <a href="https://hubvibe-831480473793.us-south1.run.app/">Live service</a>
-    <a href="https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json">Agent manifest</a>
     <a href="https://hubvibe-831480473793.us-south1.run.app/docs">API reference</a>
+    <a href="https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json">Agent manifest</a>
     <a href="https://github.com/Its-fortunatefolly/HubVibe">Source (GitHub)</a>
     <a href="https://github.com/Its-fortunatefolly/HubVibe/issues">Support</a>
   </div>
 
   <footer>
-    HubVibe · automated site auditing, sold by the call.
+    HubVibe · automated website auditing for developers and automated workflows.
   </footer>
 
 </div>
