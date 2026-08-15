@@ -120,13 +120,24 @@ done, and what no amount of code closes, is demand.
 At $0.03–$0.10 a call, **$1M of revenue is 10–33M paid calls; a multi-million
 run rate is 100M+.** Spread over a year, 100M calls is ~3 paid calls every
 second, continuously, from a base that is currently approximately zero paying
-machine callers. And that is revenue, not profit: every audit is a real
-Playwright page load on Cloud Run, so the per-call compute cost has to come
-out of the $0.03 before anything is left. **Nobody has measured that number
-yet, and it is the single most important unknown in this business** — if a
-bundle costs $0.04 of CPU-seconds to produce and sells for $0.10, the model
-works; if it costs $0.09, volume makes things worse, not better. Measure it
-before optimizing for volume.
+machine callers.
+
+**Per-call compute is not the risk.** An earlier session flagged it as the
+biggest unknown; that was wrong, and worth correcting so nobody re-opens it.
+Run `bash scripts/measure-call-cost.sh` for the real figure, but the ceiling
+is easy to bound: even at a pessimistic 4 vCPU / 4 GiB and 12 seconds per
+audit, one call costs roughly **$0.0016** — about 1.6% of the $0.10 bundle.
+Compute would have to be ~60x worse than that before the margin is in danger.
+Gross margin per call is ~98%.
+
+Two things actually threaten the economics, and neither is CPU time:
+
+1. **Idle billing at low volume.** `min-instances=1` on a browser-sized
+   container is on the order of **$275/month before a single call arrives**.
+   Against near-zero paid traffic that is the entire cost structure, and it is
+   pure loss. Check it first; the measure script warns when min-instances > 0.
+2. **Demand.** ~98% margin on zero calls is zero. The constraint was never the
+   cost side.
 
 The honest constraint: adoption is not something the code can force. A CI
 gate that costs money on every push is a line item someone has to approve,
