@@ -237,16 +237,31 @@ echo "The paid path: can a caller who CAN pay actually get an audit?"
 # This check costs real money ($0.03), which is why it is opt-in rather than
 # always-on. But a skipped check must be loud: silence is exactly what let the
 # outage live.
-if [ -z "${HUBVIBE_API_KEY:-}" ]; then
-  echo "  SKIP  no HUBVIBE_API_KEY set, so the paid path is NOT verified."
-  echo "        This is the check that matters most -- everything above only"
-  echo "        proves unauthenticated calls are refused. Re-run with:"
-  echo "          HUBVIBE_API_KEY=<real key> bash scripts/verify-live.sh"
+# Resolve a key rather than demanding one. This check used to SKIP on every
+# run, because it needed an export that a fresh shell drops -- so the one
+# check that answers "can this service take money" was, in practice, never
+# run. See scripts/lib-api-key.sh.
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib-api-key.sh
+[ -f "$_LIB_DIR/lib-api-key.sh" ] && . "$_LIB_DIR/lib-api-key.sh"
+
+PAID_KEY=""
+if declare -f hv_resolve_api_key >/dev/null 2>&1; then
+  hv_resolve_api_key && PAID_KEY="$HV_API_KEY"""
+fi
+
+if [ -z "$PAID_KEY" ]; then
+  echo "  SKIP  the paid path is NOT verified -- no usable API key."
+  echo "        ${HV_KEY_PROBLEM:-no key could be resolved}"
+  echo "        This is the check that matters most: everything above only"
+  echo "        proves unauthenticated calls are refused. Override with:"
+  echo "          HUBVIBE_API_KEY=your_key bash scripts/verify-live.sh"
 else
+  echo "  using $HV_KEY_SOURCE"
   PAID_BODY=$(mktemp)
   PAID_CODE=$(curl -sS -m 90 -o "$PAID_BODY" -w '%{http_code}' \
     -X POST "$BASE/audit/wcag" \
-    -H "X-API-Key: $HUBVIBE_API_KEY" \
+    -H "X-API-Key: $PAID_KEY" \
     -H 'Content-Type: application/json' \
     -d '{"url":"https://example.com"}' 2>/dev/null) || PAID_CODE="000"
 
