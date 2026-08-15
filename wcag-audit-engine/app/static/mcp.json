@@ -4,8 +4,7 @@
   "description": "Rule-based, verifiable site compliance audits -- accessibility (axe-core), SEO, security headers, and performance. Every result is a deterministic check against the actual page, never an LLM guess, and a check that couldn't run is never reported as a false pass.",
   "note": "This service is a plain HTTP/REST API, not a live MCP stdio/SSE server. Each tool's `httpEndpoint` (a non-standard extension field) maps it onto the actual route; wrap these with an MCP-to-HTTP adapter, or call the endpoints directly (see /.well-known/agent.json for the same schema served live).",
   "auth": {
-    "description": "Every tool below requires one of: X-API-Key (Stripe subscription), X-PAYMENT (x402), or Authorization: Payment ... (MPP). An unauthenticated call returns HTTP 402 with the price and payment challenge, not an error.",
-    "methods": ["stripe_api_key", "x402", "mpp"]
+    "note": "Populated at serve time from this deployment's live configuration. GET /mcp.json for the authoritative list -- it contains only rails that can genuinely settle here. This file cannot know that, so it does not guess. See also /.well-known/agent.json."
   },
   "tools": [
     {
@@ -14,11 +13,21 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "html": {"type": "string", "description": "Raw HTML source to audit"},
-          "url": {"type": "string", "description": "Live URL to audit instead of raw HTML"}
+          "html": {
+            "type": "string",
+            "description": "Raw HTML source to audit"
+          },
+          "url": {
+            "type": "string",
+            "description": "Live URL to audit instead of raw HTML"
+          }
         }
       },
-      "httpEndpoint": {"method": "POST", "path": "/audit/wcag", "price_usd": 0.03}
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/audit/wcag",
+        "price_usd": 0.03
+      }
     },
     {
       "name": "audit_seo",
@@ -26,11 +35,21 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "html": {"type": "string", "description": "Raw HTML source to audit"},
-          "url": {"type": "string", "description": "Live URL to audit instead of raw HTML"}
+          "html": {
+            "type": "string",
+            "description": "Raw HTML source to audit"
+          },
+          "url": {
+            "type": "string",
+            "description": "Live URL to audit instead of raw HTML"
+          }
         }
       },
-      "httpEndpoint": {"method": "POST", "path": "/audit/seo", "price_usd": 0.03}
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/audit/seo",
+        "price_usd": 0.03
+      }
     },
     {
       "name": "audit_security",
@@ -38,11 +57,20 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "url": {"type": "string", "description": "Live URL to audit"}
+          "url": {
+            "type": "string",
+            "description": "Live URL to audit"
+          }
         },
-        "required": ["url"]
+        "required": [
+          "url"
+        ]
       },
-      "httpEndpoint": {"method": "POST", "path": "/audit/security", "price_usd": 0.03}
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/audit/security",
+        "price_usd": 0.03
+      }
     },
     {
       "name": "audit_performance",
@@ -50,11 +78,20 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "url": {"type": "string", "description": "Live URL to audit"}
+          "url": {
+            "type": "string",
+            "description": "Live URL to audit"
+          }
         },
-        "required": ["url"]
+        "required": [
+          "url"
+        ]
       },
-      "httpEndpoint": {"method": "POST", "path": "/audit/performance", "price_usd": 0.03}
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/audit/performance",
+        "price_usd": 0.03
+      }
     },
     {
       "name": "audit_bundle",
@@ -62,11 +99,20 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "url": {"type": "string", "description": "Live URL to audit"}
+          "url": {
+            "type": "string",
+            "description": "Live URL to audit"
+          }
         },
-        "required": ["url"]
+        "required": [
+          "url"
+        ]
       },
-      "httpEndpoint": {"method": "POST", "path": "/audit/bundle", "price_usd": 0.10}
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/audit/bundle",
+        "price_usd": 0.1
+      }
     }
   ]
 }

@@ -16,7 +16,7 @@
       "headers": [
         {
           "name": "X-API-Key",
-          "description": "HubVibe API key. Tool discovery is free; running an audit is billed per call. Get a key at /billing/checkout, or pay per call with x402/MPP.",
+          "description": "HubVibe API key. Tool discovery is free; running an audit is billed per call. Get a key at /billing/checkout, or pay per call over HTTP 402 -- see /.well-known/agent.json for the rails this deployment can settle.",
           "isRequired": false,
           "isSecret": true
         }
