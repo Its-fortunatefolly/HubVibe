@@ -1,3 +1,4 @@
+import json
 import os
 import secrets
 import threading
@@ -584,9 +585,49 @@ def llms_txt():
     return FileResponse(STATIC_DIR / "llms.txt", media_type="text/plain")
 
 
-@app.get("/mcp.json", response_class=FileResponse)
+@app.get("/mcp.json", tags=["discovery"])
 def mcp_manifest():
-    return FileResponse(STATIC_DIR / "mcp.json", media_type="application/json")
+    """The MCP tool manifest, with prices and rails taken from live config.
+
+    The tool names, descriptions and input schemas come from the static file
+    -- they are documentation and change with the product, not with the
+    deployment. Two things do NOT come from it, because they are deployment
+    state and the file cannot know them:
+
+    `auth.methods`, because the static file asserted x402 unconditionally. It
+    went on asserting it after x402 was switched off, so an agent reading this
+    manifest -- which is what the MCP registry points at -- would construct a
+    payment for a rail this deployment cannot settle. That is the one thing
+    this codebase refuses to do everywhere else: /.well-known/agent.json and
+    every 402 already omit rails that cannot settle. This route was the hole
+    in that rule.
+
+    Per-tool prices, because _CATALOG exists precisely so the manifest, the
+    price an agent reads, and the price the route actually charges cannot
+    drift apart -- and a second hand-maintained copy of the numbers defeats
+    that by construction.
+    """
+    with open(STATIC_DIR / "mcp.json", encoding="utf-8") as handle:
+        manifest = json.load(handle)
+
+    live_methods = _payment_methods_live()
+    prices = {entry["path"]: entry["price_usd"] for entry in _CATALOG}
+
+    manifest["auth"]["methods"] = live_methods
+    manifest["auth"]["description"] = (
+        "Every tool below requires one of the methods in `methods`, which "
+        "lists only the rails this deployment can actually settle. An "
+        "unauthenticated call returns HTTP 402 with the price and payment "
+        "challenge, not an error."
+    )
+
+    for tool in manifest.get("tools", []):
+        endpoint = tool.get("httpEndpoint") or {}
+        path = endpoint.get("path")
+        if path in prices:
+            endpoint["price_usd"] = prices[path]
+
+    return JSONResponse(content=manifest, media_type="application/json")
 
 
 @app.get("/favicon.svg", response_class=FileResponse, tags=["discovery"])

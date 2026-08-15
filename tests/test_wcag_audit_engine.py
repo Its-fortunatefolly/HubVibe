@@ -103,6 +103,79 @@ def test_mcp_json_served_and_matches_repo_manifest(monkeypatch):
     assert tool_names == {"audit_wcag", "audit_seo", "audit_security", "audit_performance", "audit_bundle"}
 
 
+def test_mcp_json_never_advertises_a_rail_that_cannot_settle(monkeypatch):
+    """The hole in this codebase's central rule.
+
+    /.well-known/agent.json and every 402 already omit rails that are not
+    configured. /mcp.json did not: it was a static file asserting
+    `["stripe_api_key", "x402", "mpp"]` unconditionally, and it went on
+    asserting x402 after x402 was switched off on the live service. The MCP
+    registry points agents at this manifest, so an agent would have built a
+    payment for a rail this deployment cannot settle -- and a failed payment
+    is indistinguishable, from our side, from nobody buying.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.x402_payments, "is_configured", lambda: False)
+    monkeypatch.setattr(module.mpp_payments, "stripe_configured", lambda: False)
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: False)
+
+    body = TestClient(module.app).get("/mcp.json").json()
+    assert body["auth"]["methods"] == []
+    assert "x402" not in body["auth"]["methods"]
+
+
+def test_mcp_json_lists_a_rail_once_it_can_settle(monkeypatch):
+    """The other half: a configured rail must actually show up, or agents
+    that could pay are turned away."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.x402_payments, "is_configured", lambda: True)
+    monkeypatch.setattr(module.mpp_payments, "stripe_configured", lambda: False)
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: False)
+
+    body = TestClient(module.app).get("/mcp.json").json()
+    assert body["auth"]["methods"] == ["x402"]
+
+
+def test_mcp_json_prices_come_from_the_catalog(monkeypatch):
+    """_CATALOG exists so the manifest, the price an agent reads, and the
+    price the route charges cannot drift apart. A second hand-maintained copy
+    of the numbers in a static file defeats that by construction."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    body = TestClient(module.app).get("/mcp.json").json()
+
+    catalog = {entry["path"]: entry["price_usd"] for entry in module._CATALOG}
+    served = {
+        tool["httpEndpoint"]["path"]: tool["httpEndpoint"]["price_usd"]
+        for tool in body["tools"]
+    }
+    assert served == catalog
+
+
+def test_mcp_json_prices_follow_a_catalog_change(monkeypatch):
+    """Proves the price is actually read from _CATALOG rather than merely
+    happening to match the static file today."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    patched = [dict(entry) for entry in module._CATALOG]
+    for entry in patched:
+        if entry["path"] == "/audit/bundle":
+            entry["price_usd"] = 0.25
+    monkeypatch.setattr(module, "_CATALOG", patched)
+
+    body = TestClient(module.app).get("/mcp.json").json()
+    bundle = [t for t in body["tools"] if t["httpEndpoint"]["path"] == "/audit/bundle"][0]
+    assert bundle["httpEndpoint"]["price_usd"] == 0.25
+
+
 def test_agent_manifest_advertises_payment(monkeypatch):
     from fastapi.testclient import TestClient
 
