@@ -615,7 +615,8 @@ def test_authenticate_returns_402_not_500_when_the_key_store_is_unreachable(monk
     as HTTP 500: a machine caller could not pay, could not usefully retry,
     and could not tell a broken backend from a rejected key. The whole paid
     path was dead and nothing caught it, because verify-live.sh only ever
-    exercises the UNauthenticated 402.
+    exercised the UNauthenticated 402 -- it now has a paid-path check too,
+    guarded by tests/test_verify_live.py.
 
     Falling through to the payment challenge is still fail-closed -- nobody
     gets in without paying -- it just answers with something actionable.
