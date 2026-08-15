@@ -60,6 +60,7 @@ J
   *minScale*) echo "{min_scale}" ;;
   *"run services describe"*)
     printf 'name:  STRIPE_SECRET_KEY\\n  secretKeyRef.name:  SECRET_STRIPE_KEY\\n' ;;
+  *"run services update"*) echo "UPDATE_INVOKED" ;;
   *"run deploy"*) echo "DEPLOY_INVOKED" ;;
   *) exit 0 ;;
 esac
@@ -133,12 +134,40 @@ def test_x402_being_absent_is_stated_not_silent(tmp_path):
     assert "DEPLOY_INVOKED" in result.stdout
 
 
-def test_the_pay_to_check_never_greps_flattened_output():
-    """The first version grepped `flattened` output, where gcloud pads names
-    with alignment spaces, so it matched nothing and silently skipped."""
+def test_nothing_parses_config_out_of_flattened_output():
+    """gcloud's `flattened` format pads names with alignment spaces, so any
+    `grep 'name: X'` pattern silently matches nothing. That bug shipped twice
+    here -- once in the pay-to check (which then reported nothing at all) and
+    once in the Stripe secret lookup (which minted a revision on every run).
+    Both now read JSON; nothing should go back to grepping the padded form."""
     text = SCRIPT.read_text()
-    assert "grep -A1 'name: X402_PAY_TO_ADDRESS'" not in text
-    assert "hv_preflight_svc.json" in text
+    assert "flattened(" not in text
+    assert "grep -A1 'name:" not in text
+    assert "grep -A5 'name:" not in text
+    assert "--format=json" in text
+
+
+def test_a_correctly_configured_service_is_not_repaired_again(tmp_path):
+    """The churn bug: CURRENT_SECRET came back empty every run, so the script
+    concluded the repair was always needed and created a revision each time.
+    The service reached revision 62 that way, while the docstring promised
+    re-running "does not create pointless revisions"."""
+    env = [
+        {"name": "STRIPE_SECRET_KEY",
+         "valueFrom": {"secretKeyRef": {"name": "SECRET_STRIPE_KEY", "key": "latest"}}},
+    ]
+    result = _run(tmp_path, env=env)
+    assert "already points at SECRET_STRIPE_KEY" in result.stdout
+    assert "nothing to repair" in result.stdout
+    assert "UPDATE_INVOKED" not in result.stdout
+
+
+def test_a_plain_value_is_still_repointed_at_the_secret(tmp_path):
+    """The fix must not make the script stop repairing what genuinely needs it."""
+    env = [{"name": "STRIPE_SECRET_KEY", "value": "sk_live_plainvalue"}]
+    result = _run(tmp_path, env=env)
+    assert "will repoint" in result.stdout
+    assert "UPDATE_INVOKED" in result.stdout
 
 
 def test_min_instances_is_reported_but_does_not_block(tmp_path):

@@ -50,13 +50,37 @@ else
 fi
 
 step "Reading the service's current configuration"
-SPEC=$(gcloud run services describe "$SERVICE" --region="$REGION" \
-  --format="flattened(spec.template.spec.containers[0].env)" 2>/dev/null)
-[ -n "$SPEC" ] || die "could not read service $SERVICE in $REGION"
+# Read once as JSON and reuse it. `flattened` pads names with alignment
+# spaces, so `grep 'name: STRIPE_SECRET_KEY'` never matched -- CURRENT_SECRET
+# came back empty on every run, the script concluded the repair was always
+# needed, and each invocation minted a pointless revision. The service reached
+# revision 62 this way, and the docstring's promise that re-running "does not
+# create pointless revisions" was quietly false.
+SVC_JSON=/tmp/hv_svc.json
+gcloud run services describe "$SERVICE" --region="$REGION" \
+  --format=json > "$SVC_JSON" 2>/dev/null
+[ -s "$SVC_JSON" ] || die "could not read service $SERVICE in $REGION"
 
-CURRENT_SECRET=$(printf '%s\n' "$SPEC" \
-  | grep -A5 'name: STRIPE_SECRET_KEY' \
-  | grep 'secretKeyRef.name:' | head -1 | awk '{print $2}')
+# env_secret <ENV_VAR> -> the secret backing it, or empty.
+env_secret() {
+  python3 -c '
+import json, sys
+try:
+    svc = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit()
+spec = svc.get("spec", {}).get("template", {}).get("spec", {})
+container = (spec.get("containers") or [{}])[0]
+for entry in container.get("env") or []:
+    if entry.get("name") == sys.argv[2]:
+        ref = (entry.get("valueFrom") or {}).get("secretKeyRef") or {}
+        if ref.get("name"):
+            print(ref["name"])
+        break
+' "$SVC_JSON" "$1" 2>/dev/null
+}
+
+CURRENT_SECRET=$(env_secret STRIPE_SECRET_KEY)
 
 if [ -n "$CURRENT_SECRET" ]; then
   echo "  STRIPE_SECRET_KEY currently references: $CURRENT_SECRET"
@@ -76,7 +100,7 @@ fi
 
 STALE_VARS=""
 for host in $PLACEHOLDER_HOSTS; do
-  if printf '%s\n' "$SPEC" | grep -q "$host"; then
+  if grep -q "$host" "$SVC_JSON"; then
     STALE_VARS="X402_FACILITATOR_URL,X402_PAY_TO_ADDRESS"
     warn "found placeholder $host -- will remove the x402 variables"
   fi
@@ -88,6 +112,9 @@ if [ ${#UPDATE_ARGS[@]} -gt 0 ]; then
   gcloud run services update "$SERVICE" --region="$REGION" "${UPDATE_ARGS[@]}" \
     || die "config repair failed -- nothing was deployed, the running revision is untouched"
   ok "configuration repaired"
+  # The service just changed; the cached JSON is stale for preflight.
+  gcloud run services describe "$SERVICE" --region="$REGION" \
+    --format=json > "$SVC_JSON" 2>/dev/null
 else
   step "Configuration is already correct -- nothing to repair"
 fi
@@ -152,13 +179,10 @@ fi
 #    format pads names with alignment spaces, so a `grep 'name: X'` pattern
 #    matches nothing and the check silently skips -- which is worse than not
 #    having the check at all, because the output then looks like it passed.
-gcloud run services describe "$SERVICE" --region="$REGION" \
-  --format=json > /tmp/hv_preflight_svc.json 2>/dev/null
-
 PAY_TO=$(python3 -c '
 import json, sys
 try:
-    svc = json.load(open("/tmp/hv_preflight_svc.json"))
+    svc = json.load(open("/tmp/hv_svc.json"))
 except Exception:
     sys.exit()
 spec = svc.get("spec", {}).get("template", {}).get("spec", {})
@@ -171,7 +195,7 @@ for entry in container.get("env") or []:
         break
 ' 2>/dev/null)
 
-if grep -q 'X402_FACILITATOR_URL' /tmp/hv_preflight_svc.json 2>/dev/null; then
+if grep -q 'X402_FACILITATOR_URL' /tmp/hv_svc.json 2>/dev/null; then
   HAS_FACILITATOR=1
 else
   HAS_FACILITATOR=0
