@@ -48,73 +48,117 @@ cp "$REPO_ROOT/scripts/render_audit_summary.py" "$TARGET/scripts/render_audit_su
 cat > "$TARGET/README.md" <<'MARKDOWN'
 # HubVibe Site Compliance Audit
 
-Runs a real, deterministic site audit against a live URL and fails the build
-if it doesn't pass: WCAG 2.1 A/AA accessibility (axe-core), SEO, security
-headers, and performance.
+**Catch accessibility, SEO, security-header and performance regressions in the pull request that caused them — not in an audit six months later.**
 
-Every check runs against the actual page — axe-core for accessibility, a real
-HTTP response for security headers, a real browser page load for performance.
-Nothing here is an LLM guessing at quality, and a check that couldn't run is
-never reported as a pass.
-
-## Usage
-
-```yaml
-- name: HubVibe compliance audit
-  uses: Its-fortunatefolly/hubvibe-audit-action@v1
-  with:
-    url: https://your-site.example.com
-    api-key: ${{ secrets.HUBVIBE_API_KEY }}
-```
-
-Adopting it without letting a third-party outage block your deploys:
+Runs against your deployed preview or staging URL and fails the build if it regresses. Every check is a deterministic rule against the real rendered page. No LLM decides whether your site is compliant.
 
 ```yaml
 - uses: Its-fortunatefolly/hubvibe-audit-action@v1
   with:
     url: https://staging.example.com
     api-key: ${{ secrets.HUBVIBE_API_KEY }}
-    fail-on-error: false      # network/402/5xx warns instead of failing
-    fail-on-violation: true   # real findings still gate the build
 ```
 
-Findings are written to the job summary, so reviewers see the table in the
-Checks tab rather than digging through raw logs.
+That's the whole integration.
+
+## What it checks
+
+| | |
+|---|---|
+| **Accessibility** | WCAG 2.1 A/AA via axe-core, against the rendered DOM — constrained to exactly those rule tags, so a pass means what it says |
+| **SEO** | title, meta description, H1 structure, canonical, OpenGraph, structured data, `lang` |
+| **Security headers** | HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking, Referrer-Policy, CORS |
+| **Performance** | DOM node count, transferred bytes, request count from one real page load |
+
+## Findings land in the job summary
+
+Not buried in log output. A reviewer opens the Checks tab and sees the rule, its impact, how many nodes it hit, and a link to the fix:
+
+| Rule | Impact | Nodes | Help |
+|---|---|---|---|
+| `color-contrast` | serious | 4 | [Elements must have sufficient contrast](https://dequeuniversity.com/rules/axe/color-contrast) |
+| `image-alt` | critical | 2 | [Images must have alternate text](https://dequeuniversity.com/rules/axe/image-alt) |
+
+## Three things it will not do to you
+
+**It won't lie about a check that didn't run.** If a dimension fails to execute, the call fails and reports an error. It is never counted as a pass. A green build means the checks actually ran.
+
+**It won't block your deploy when our service has a bad day.** Set `fail-on-error: false` and infrastructure failures — network, timeout, our outage — become a warning. Real findings still gate the build:
+
+```yaml
+- uses: Its-fortunatefolly/hubvibe-audit-action@v1
+  with:
+    url: https://staging.example.com
+    api-key: ${{ secrets.HUBVIBE_API_KEY }}
+    fail-on-error: false      # our outage never blocks your release
+    fail-on-violation: true   # your regressions still do
+```
+
+**It won't guess.** axe-core for accessibility, a real HTTP response for headers, a real browser page load for performance. Deterministic rules, same input same output, no model in the loop deciding whether your site "looks compliant."
+
+## What it costs
+
+**$0.03** per single audit. **$0.10** for all four as one bundle.
+
+Concretely: a repo merging 100 pull requests a month, running the full bundle on each, spends **$10/month**. Running only the accessibility check, **$3/month**. No subscription, no seat licence, no minimum — you are billed for calls you make.
+
+You can also pay per call over HTTP 402 with no account at all, which is what the API is really built for. See [`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json) — it lists live prices and the payment rails that can actually settle right now, and it is generated from the same catalog the routes charge from, so it cannot drift from what you are billed.
+
+## Try it before wiring it up
+
+An unauthenticated call tells you the price and how to pay — no signup:
+
+```bash
+curl -i -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com"}'
+```
 
 ## Inputs
 
-| Input | Required | Default | Description |
+| Input | Required | Default | |
 |---|---|---|---|
 | `url` | yes | — | The live URL to audit. |
-| `api-key` | no | — | HubVibe API key (`X-API-Key`). Without it the run reports the service's 402 challenge and how to pay. |
+| `api-key` | no | — | Your key. Without it the run reports the service's 402 and how to pay. |
 | `endpoint` | no | `bundle` | `wcag`, `seo`, `security`, `performance`, or `bundle`. |
-| `fail-on-violation` | no | `true` | Set `false` to report findings without failing the build. |
-| `fail-on-error` | no | `true` | Set `false` so infrastructure failures warn instead of failing. |
+| `fail-on-violation` | no | `true` | `false` reports findings without failing the build. |
+| `fail-on-error` | no | `true` | `false` makes infrastructure failures a warning. |
 | `timeout-seconds` | no | `90` | Per-attempt HTTP timeout. |
-| `retries` | no | `2` | Retries on network error or 5xx. 4xx is never retried. |
-| `base-url` | no | the hosted service | Override for self-hosted deployments. |
+| `retries` | no | `2` | Retries on network error or 5xx. A 4xx is never retried. |
+| `base-url` | no | hosted | Override for self-hosted deployments. |
 
 ## Outputs
 
-| Output | Description |
+| Output | |
 |---|---|
-| `passed` | `"true"` or `"false"` — the audit's overall result. |
+| `passed` | `"true"` / `"false"` — the overall result. |
 | `response` | Raw JSON response body. |
-| `http-status` | HTTP status of the final attempt (`000` if it never completed). |
+| `http-status` | Status of the final attempt (`000` if it never completed). |
 
-## Pricing
+## Gate a deploy on it
 
-$0.03 per single audit, $0.10 for the bundle. For CI, paying per call over
-x402/MPP directly against the REST endpoints is usually the better fit — no
-subscription key to store as a repository secret. See
-[`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json),
-which is the only place guaranteed to match what checkout actually charges.
+```yaml
+- name: Audit staging
+  id: audit
+  uses: Its-fortunatefolly/hubvibe-audit-action@v1
+  with:
+    url: https://staging.example.com
+    api-key: ${{ secrets.HUBVIBE_API_KEY }}
+
+- name: Promote to production
+  if: steps.audit.outputs.passed == 'true'
+  run: ./deploy-production.sh
+```
+
+## Getting a key
+
+Keys come from [the service](https://hubvibe-831480473793.us-south1.run.app). Store it as a repository secret named `HUBVIBE_API_KEY`.
+
+If you would rather not hold a key at all, the endpoints accept per-call machine payment over HTTP 402 — nothing to store, nothing to rotate.
 
 ## Source
 
-Developed in the [HubVibe monorepo](https://github.com/Its-fortunatefolly/HubVibe).
-This repository is generated from it, because Marketplace requires an action
-repository to contain no workflow files.
+Developed in the [HubVibe monorepo](https://github.com/Its-fortunatefolly/HubVibe). This repository is generated from it, because GitHub requires an action repository to contain no workflow files.
 MARKDOWN
 
 # Guard the one rule that silently disqualifies the listing.

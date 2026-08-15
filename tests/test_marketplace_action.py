@@ -94,6 +94,72 @@ def test_the_generated_action_is_byte_identical_to_the_source(tmp_path):
     )
 
 
+def test_the_listing_documents_every_input_and_output(tmp_path):
+    """The listing is the only thing a browsing developer reads before
+    deciding. An input it omits is a feature nobody knows exists; one it
+    invents is a broken first impression."""
+    target = tmp_path / "generated"
+    subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "publish-action-repo.sh"), str(target)],
+        check=True, capture_output=True, text=True,
+    )
+    action = yaml.safe_load((target / "action.yml").read_text())
+    readme = (target / "README.md").read_text()
+
+    for name in action["inputs"]:
+        assert f"`{name}`" in readme, f"input {name} is undocumented"
+    for name in action["outputs"]:
+        assert f"`{name}`" in readme, f"output {name} is undocumented"
+
+
+def test_the_listing_quotes_the_real_defaults(tmp_path):
+    """A listing promising `retries: 3` while the action does 2 is a support
+    ticket. Only the URL default is prose ('hosted'), deliberately."""
+    target = tmp_path / "generated"
+    subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "publish-action-repo.sh"), str(target)],
+        check=True, capture_output=True, text=True,
+    )
+    action = yaml.safe_load((target / "action.yml").read_text())
+    readme = (target / "README.md").read_text()
+
+    for name, spec in action["inputs"].items():
+        default = spec.get("default", "")
+        if not default or default.startswith("http"):
+            continue
+        row = [ln for ln in readme.splitlines() if ln.startswith(f"| `{name}` |")]
+        assert row, f"{name} has no table row"
+        assert f"`{default}`" in row[0], (
+            f"listing shows a different default for {name} than the action does"
+        )
+
+
+def test_the_listing_states_the_price(tmp_path):
+    """It is a paid action. Burying that wastes the reader's time and ours --
+    they find out at the first 402 and leave annoyed."""
+    target = tmp_path / "generated"
+    subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "publish-action-repo.sh"), str(target)],
+        check=True, capture_output=True, text=True,
+    )
+    readme = (target / "README.md").read_text()
+    assert "$0.03" in readme
+    assert "$0.10" in readme
+
+
+def test_the_listing_does_not_assert_a_payment_rail(tmp_path):
+    """Same rule as every other shipped surface: it cannot know which rails a
+    deployment settles, so it links agent.json instead of naming one."""
+    target = tmp_path / "generated"
+    subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "publish-action-repo.sh"), str(target)],
+        check=True, capture_output=True, text=True,
+    )
+    readme = (target / "README.md").read_text().lower()
+    assert "x402" not in readme
+    assert "agent.json" in readme
+
+
 def test_publish_script_refuses_to_overwrite_a_non_empty_directory(tmp_path):
     target = tmp_path / "existing"
     target.mkdir()
