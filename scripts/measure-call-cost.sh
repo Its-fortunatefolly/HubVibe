@@ -76,25 +76,46 @@ command -v gcloud >/dev/null || { echo "error: gcloud not found. Run this in Clo
 command -v python3 >/dev/null || { echo "error: python3 not found." >&2; exit 64; }
 
 echo "== service configuration =="
-CONFIG=$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" \
-  --format='value[delimiter=","](
-    spec.template.spec.containers[0].resources.limits.cpu,
-    spec.template.spec.containers[0].resources.limits.memory,
-    spec.template.spec.containerConcurrency,
-    spec.template.metadata.annotations["autoscaling.knative.dev/minScale"],
-    spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"]
-  )' 2>/dev/null)
+# Dump the whole record as JSON and pick fields out of it, rather than asking
+# gcloud for a delimited projection. A multi-field --format='value[delimiter](
+# a,b,c)' silently produced a repeated, unparseable line here -- every field
+# came back as the whole tuple -- and the cut(1) parsing downstream turned
+# that into confident garbage ("cpu=2 2Gi 4 memory=2 2Gi 4 ..."). A filtered
+# view is not a record.
+gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" \
+  --format=json > /tmp/hv_svc.json 2>/dev/null
 
-if [ -z "$CONFIG" ]; then
+if [ ! -s /tmp/hv_svc.json ]; then
   echo "error: could not read service $SERVICE in $REGION (project $PROJECT)." >&2
   exit 1
 fi
 
-CPU=$(echo "$CONFIG" | cut -d, -f1)
-MEM=$(echo "$CONFIG" | cut -d, -f2)
-CONCURRENCY=$(echo "$CONFIG" | cut -d, -f3)
-MIN_SCALE=$(echo "$CONFIG" | cut -d, -f4)
-THROTTLING=$(echo "$CONFIG" | cut -d, -f5)
+CONFIG=$(python3 - <<'PY'
+import json
+
+with open("/tmp/hv_svc.json") as handle:
+    svc = json.load(handle)
+
+template = svc.get("spec", {}).get("template", {})
+container = (template.get("spec", {}).get("containers") or [{}])[0]
+limits = container.get("resources", {}).get("limits") or {}
+annotations = template.get("metadata", {}).get("annotations") or {}
+
+print("\t".join([
+    str(limits.get("cpu") or "1"),
+    str(limits.get("memory") or "512Mi"),
+    str(template.get("spec", {}).get("containerConcurrency") or 1),
+    str(annotations.get("autoscaling.knative.dev/minScale") or 0),
+    str(annotations.get("run.googleapis.com/cpu-throttling") or "true"),
+]))
+PY
+)
+
+CPU=$(echo "$CONFIG" | cut -f1)
+MEM=$(echo "$CONFIG" | cut -f2)
+CONCURRENCY=$(echo "$CONFIG" | cut -f3)
+MIN_SCALE=$(echo "$CONFIG" | cut -f4)
+THROTTLING=$(echo "$CONFIG" | cut -f5)
 
 printf '  cpu=%s memory=%s concurrency=%s min-instances=%s cpu-throttling=%s\n' \
   "${CPU:-?}" "${MEM:-?}" "${CONCURRENCY:-?}" "${MIN_SCALE:-0}" "${THROTTLING:-true}"
@@ -136,8 +157,34 @@ SUCCEEDED=$(wc -l < /tmp/hv_times.txt | tr -d ' ')
 if [ "$SUCCEEDED" -eq 0 ]; then
   echo >&2
   echo "error: no call succeeded, so there is nothing to measure." >&2
+  echo "Last HTTP status: $code" >&2
   echo "Last response body:" >&2
   cat /tmp/hv_resp.json >&2
+  echo >&2
+  # A failed measurement is only useful if it says what to do next. These are
+  # the three codes this script can actually provoke, and they mean very
+  # different things.
+  case "$code" in
+    402)
+      echo "402 means the key was not accepted. Check HUBVIBE_API_KEY is a real" >&2
+      echo "key -- a placeholder string falls through to a payment challenge." >&2
+      ;;
+    500)
+      echo "500 is a server-side fault, not a payment or input problem: the" >&2
+      echo "service raised an unhandled exception. Nothing was billed. Get the" >&2
+      echo "actual traceback -- it is the only thing that identifies the cause:" >&2
+      echo >&2
+      echo "  gcloud logging read 'resource.labels.service_name=$SERVICE AND severity>=ERROR' --project=$PROJECT --freshness=1h --limit=5 --format='value(textPayload,jsonPayload.message)'" >&2
+      ;;
+    502)
+      echo "502 means the audit itself could not run (the target page failed to" >&2
+      echo "load). Nothing was billed. Try a different --url." >&2
+      ;;
+    000)
+      echo "000 means the request never completed -- network, or a cold start" >&2
+      echo "slower than the timeout. Retry, or raise --calls timeout." >&2
+      ;;
+  esac
   exit 1
 fi
 

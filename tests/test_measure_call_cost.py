@@ -98,5 +98,23 @@ def test_it_warns_about_min_instances_idle_billing():
     assert "idle billing" in text
 
 
+def test_service_config_is_read_from_json_not_a_delimited_projection():
+    """A multi-field gcloud --format='value[delimiter=","](a,b,c)' returned the
+    whole tuple for every field, and cut(1) turned that into confident garbage
+    ("cpu=2 2Gi 4 memory=2 2Gi 4 ..."). Parse the whole record instead."""
+    text = SCRIPT.read_text()
+    assert "--format=json" in text
+    assert 'value[delimiter=","]' not in text
+
+
+def test_a_failed_run_says_what_each_status_means():
+    """A measurement that fails is only useful if it names the next step. 500,
+    402 and 502 have completely different causes and fixes."""
+    text = SCRIPT.read_text()
+    for code in ("402)", "500)", "502)", "000)"):
+        assert code in text, f"no guidance for HTTP {code}"
+    assert "gcloud logging read" in text, "the 500 path must point at the traceback"
+
+
 if __name__ == "__main__":
     sys.exit(subprocess.call([sys.executable, "-m", "pytest", __file__, "-q"]))
