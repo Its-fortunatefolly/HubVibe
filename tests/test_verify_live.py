@@ -14,6 +14,7 @@ different causes, and a checker that collapses them is barely better than none.
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,10 @@ def _run_block(tmp_path, status, body='{"error":"x"}', api_key="k"):
 
     harness = tmp_path / "block.sh"
     harness.write_text(_HARNESS_PREAMBLE + _paid_path_block())
+    # The block resolves the API key via lib-api-key.sh, found relative to
+    # $BASH_SOURCE -- which here is this harness, not scripts/. Copy the real
+    # lib next to it so the resolution path under test is the real one.
+    shutil.copy(REPO_ROOT / "scripts" / "lib-api-key.sh", tmp_path / "lib-api-key.sh")
 
     env = dict(os.environ)
     env["PATH"] = f"{stub_dir}:{env['PATH']}"
@@ -134,8 +139,14 @@ def test_the_paid_check_uses_the_cheapest_route():
     assert "/audit/bundle" not in block
 
 
-def test_the_paid_check_sends_the_api_key_header():
-    assert "X-API-Key: $HUBVIBE_API_KEY" in _paid_path_block()
+def test_the_paid_check_sends_a_resolved_key_not_a_bare_export():
+    """It used to require `export HUBVIBE_API_KEY=...`, so a fresh shell meant
+    the paid path was skipped -- which is how the one check that answers "can
+    this take money" went unrun while everything else looked green."""
+    block = _paid_path_block()
+    assert "X-API-Key: $PAID_KEY" in block
+    assert "hv_resolve_api_key" in block
+    assert "X-API-Key: $HUBVIBE_API_KEY" not in block
 
 
 @pytest.mark.parametrize("status", ["200", "500", "402", "502"])

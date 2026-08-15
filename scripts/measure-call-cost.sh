@@ -57,20 +57,29 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ -z "${HUBVIBE_API_KEY:-}" ]; then
-  cat >&2 <<'MSG'
-error: HUBVIBE_API_KEY is not set.
+# Resolve a key rather than demanding an export (see lib-api-key.sh): the
+# demand is what made this script unrunnable without a two-step incantation.
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib-api-key.sh
+[ -f "$_LIB_DIR/lib-api-key.sh" ] && . "$_LIB_DIR/lib-api-key.sh"
 
-Every audit is metered, so this needs a way to pay. Export a subscription key:
+CALL_KEY=""
+if declare -f hv_resolve_api_key >/dev/null 2>&1; then
+  hv_resolve_api_key && CALL_KEY="$HV_API_KEY"""
+fi
 
-  export HUBVIBE_API_KEY=<key>
-
-Without it every call returns 402, no audit runs, and the measurement would
-report the cost of serving a payment challenge -- which is not the number you
-are looking for.
-MSG
+if [ -z "$CALL_KEY" ]; then
+  {
+    echo "error: no usable API key, so every call would return 402."
+    echo "       ${HV_KEY_PROBLEM:-no key could be resolved}"
+    echo
+    echo "Without a key nothing is audited, and the measurement would report"
+    echo "the cost of serving a payment challenge -- not the number you want."
+    echo "Override with:  HUBVIBE_API_KEY=your_key bash scripts/measure-call-cost.sh"
+  } >&2
   exit 64
 fi
+echo "Using $HV_KEY_SOURCE"
 
 command -v gcloud >/dev/null || { echo "error: gcloud not found. Run this in Cloud Shell." >&2; exit 64; }
 command -v python3 >/dev/null || { echo "error: python3 not found." >&2; exit 64; }
@@ -135,7 +144,7 @@ FAILURES=0
 for i in $(seq 0 "$CALLS"); do
   t=$(curl -s -o /tmp/hv_resp.json -w '%{time_total} %{http_code}' \
         --max-time 180 -X POST "$BASE_URL/audit/$ENDPOINT" \
-        -H "X-API-Key: $HUBVIBE_API_KEY" \
+        -H "X-API-Key: $CALL_KEY" \
         -H 'Content-Type: application/json' \
         --data-binary @/tmp/hv_req.json) || t="0 000"
   secs=$(echo "$t" | cut -d' ' -f1)
