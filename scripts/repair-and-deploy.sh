@@ -148,9 +148,39 @@ fi
 #    characters. One character short still looks right at a glance, and the
 #    service would advertise a crypto rail while every settlement fails --
 #    indistinguishable, from outside, from nobody buying.
-PAY_TO=$(printf '%s\n' "$SPEC" | grep -A1 'name: X402_PAY_TO_ADDRESS' \
-           | grep 'value:' | head -1 | awk '{print $2}')
-if [ -n "$PAY_TO" ]; then
+#    Parsed out of JSON rather than grepped from `flattened` output. That
+#    format pads names with alignment spaces, so a `grep 'name: X'` pattern
+#    matches nothing and the check silently skips -- which is worse than not
+#    having the check at all, because the output then looks like it passed.
+gcloud run services describe "$SERVICE" --region="$REGION" \
+  --format=json > /tmp/hv_preflight_svc.json 2>/dev/null
+
+PAY_TO=$(python3 -c '
+import json, sys
+try:
+    svc = json.load(open("/tmp/hv_preflight_svc.json"))
+except Exception:
+    sys.exit()
+spec = svc.get("spec", {}).get("template", {}).get("spec", {})
+container = (spec.get("containers") or [{}])[0]
+for entry in container.get("env") or []:
+    if entry.get("name") == "X402_PAY_TO_ADDRESS":
+        # A secret-backed value cannot be read here. Say so, rather than
+        # reporting a pass that was never actually checked.
+        print(entry["value"] if "value" in entry else "__FROM_SECRET__")
+        break
+' 2>/dev/null)
+
+if grep -q 'X402_FACILITATOR_URL' /tmp/hv_preflight_svc.json 2>/dev/null; then
+  HAS_FACILITATOR=1
+else
+  HAS_FACILITATOR=0
+fi
+
+if [ "$PAY_TO" = "__FROM_SECRET__" ]; then
+  warn "X402_PAY_TO_ADDRESS comes from Secret Manager, so its shape was NOT"
+  warn "checked here. Verify by hand that it is 0x + 40 hex characters."
+elif [ -n "$PAY_TO" ]; then
   if printf '%s' "$PAY_TO" | grep -qiE '^0x[0-9a-f]{40}$'; then
     ok "X402_PAY_TO_ADDRESS is a well-formed EVM address"
   else
@@ -159,6 +189,12 @@ if [ -n "$PAY_TO" ]; then
     warn "settlement would fail while the rail is advertised as live."
     PREFLIGHT_FAILED=1
   fi
+elif [ "$HAS_FACILITATOR" -eq 1 ]; then
+  warn "an x402 facilitator is configured but X402_PAY_TO_ADDRESS is not set."
+  warn "The service would advertise a crypto rail with no destination."
+  PREFLIGHT_FAILED=1
+else
+  ok "x402 is not configured (no rail advertised, nothing to check)"
 fi
 
 # 4. Idle billing. Not fatal, but it is pure loss at low volume and nothing
