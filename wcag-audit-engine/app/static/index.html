@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HubVibe — machine-payable site audits for AI agents</title>
-<meta name="description" content="Metered API for site compliance audits: accessibility, SEO, security headers, performance. Paid machine-to-machine via x402 and MPP, or watched per site on a plan.">
+<meta name="description" content="Metered API for site compliance audits: accessibility, SEO, security headers, performance. Paid machine-to-machine over HTTP 402, or watched per site on a plan.">
 <link rel="canonical" href="https://hubvibe-831480473793.us-south1.run.app/">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HubVibe">
 <meta property="og:title" content="HubVibe — machine-payable site audits for AI agents">
-<meta property="og:description" content="A metered API for site compliance audits, paid machine-to-machine over x402 and MPP. Deterministic checks, never an LLM guess.">
+<meta property="og:description" content="A metered API for site compliance audits, paid machine-to-machine over HTTP 402. Deterministic checks, never an LLM guess.">
 <meta property="og:url" content="https://hubvibe-831480473793.us-south1.run.app/">
 <meta property="og:image" content="https://hubvibe-831480473793.us-south1.run.app/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -19,7 +19,7 @@
 <meta property="og:image:alt" content="HubVibe — machine-payable site audits: accessibility, SEO, security, performance.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="HubVibe — machine-payable site audits for AI agents">
-<meta name="twitter:description" content="A metered API for site compliance audits, paid machine-to-machine over x402 and MPP.">
+<meta name="twitter:description" content="A metered API for site compliance audits, paid machine-to-machine over HTTP 402.">
 <meta name="twitter:image" content="https://hubvibe-831480473793.us-south1.run.app/og-image.png">
 <script type="application/ld+json">
 {
@@ -29,13 +29,13 @@
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Any",
   "url": "https://hubvibe-831480473793.us-south1.run.app/",
-  "description": "Metered API for site compliance audits: accessibility (axe-core), SEO, security headers, and performance. Machine-payable per call over x402 and MPP.",
+  "description": "Metered API for site compliance audits: accessibility (axe-core), SEO, security headers, and performance. Machine-payable per call over HTTP 402.",
   "featureList": [
     "WCAG 2.1 A/AA accessibility audit via axe-core",
     "SEO structure and metadata audit",
     "Security response-header audit",
     "Performance measurement from a real page load",
-    "HTTP 402 machine payments over x402 and MPP"
+    "HTTP 402 machine payments, no account required"
   ],
   "offers": {
     "@type": "AggregateOffer",
@@ -341,7 +341,7 @@
         <ol class="steps">
           <li><b>Call the endpoint</b>Unauthenticated. Nothing to register first.</li>
           <li><b>Read the 402</b>The response carries the exact price and every payment rail that can actually settle on this node.</li>
-          <li><b>Pay and retry</b>Over x402 or MPP. The audit runs and the result comes back on the same call.</li>
+          <li><b>Pay and retry</b>Over whichever rails are live for this deployment -- the 402 tells you. The audit runs and the result comes back on the same call.</li>
         </ol>
       </div>
       <div class="code-window">
@@ -410,7 +410,7 @@
       </p>
       <ul class="price-list">
         <li><span>Rates</span><span><a href="/.well-known/agent.json">/.well-known/agent.json</a></span></li>
-        <li><span>Payment rails</span><span>x402 · MPP</span></li>
+        <li><span>Payment</span><span>HTTP 402 &middot; <a href="/.well-known/agent.json">live rails</a></span></li>
       </ul>
     </div>
 

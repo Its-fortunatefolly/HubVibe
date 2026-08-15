@@ -1083,6 +1083,45 @@ def test_purchased_plan_is_recorded_so_the_quota_can_see_it(monkeypatch, load_ma
     assert legacy["plan"] is None
 
 
+def test_no_shipped_surface_asserts_a_payment_rail_as_available():
+    """A rail named as a fact on a static surface goes stale silently.
+
+    /mcp.json asserted `["stripe_api_key", "x402", "mpp"]` in a file and kept
+    asserting x402 after x402 was switched off. The landing page said the same
+    thing in its meta description, its JSON-LD (which search and AI crawlers
+    read), and a spec table row reading "Payment rails: x402 - MPP".
+
+    None of those can know what a deployment has configured, so none of them
+    may claim it. The rule this codebase already follows everywhere else is to
+    point at the live source instead: /.well-known/agent.json and the 402 body
+    both list only rails that can genuinely settle.
+
+    llms.txt deliberately still names all three, because it explains what the
+    protocols ARE and then says in as many words that which are live is
+    deployment-specific and must be read from agent.json. Describing a menu is
+    fine; asserting availability is not.
+    """
+    surfaces = [
+        REPO_ROOT / "wcag-audit-engine" / "app" / "static" / "index.html",
+        REPO_ROOT / "server.json",
+        REPO_ROOT / "wcag-audit-engine" / "app" / "static" / "mcp.json",
+    ]
+    offenders = []
+    for path in surfaces:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for term in ("x402", "mpp-stripe", "mpp-tempo"):
+            if term in text.lower():
+                offenders.append(f"{path.relative_to(REPO_ROOT)} names {term!r}")
+
+    assert not offenders, (
+        "these surfaces cannot know which rails a deployment can settle, so "
+        "they must not name one -- link /.well-known/agent.json instead:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
 def test_no_shipped_surface_still_quotes_the_retired_plan():
     """Retired pricing must not survive anywhere a buyer or an agent reads.
 
