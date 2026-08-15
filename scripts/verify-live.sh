@@ -226,6 +226,66 @@ else
 fi
 
 echo
+echo "The paid path: can a caller who CAN pay actually get an audit?"
+# Everything above this point only ever proves that an UNauthenticated call is
+# refused with a 402. That is the cheap half of the contract, and on its own it
+# is close to worthless: this service returned HTTP 500 to every authenticated
+# caller for an unknown length of time -- no Firestore database had ever been
+# created, so the API key lookup raised on every keyed request -- while this
+# script reported 28/28 passing. The revenue path was dead and nothing said so.
+#
+# This check costs real money ($0.03), which is why it is opt-in rather than
+# always-on. But a skipped check must be loud: silence is exactly what let the
+# outage live.
+if [ -z "${HUBVIBE_API_KEY:-}" ]; then
+  echo "  SKIP  no HUBVIBE_API_KEY set, so the paid path is NOT verified."
+  echo "        This is the check that matters most -- everything above only"
+  echo "        proves unauthenticated calls are refused. Re-run with:"
+  echo "          HUBVIBE_API_KEY=<real key> bash scripts/verify-live.sh"
+else
+  PAID_BODY=$(mktemp)
+  PAID_CODE=$(curl -sS -m 90 -o "$PAID_BODY" -w '%{http_code}' \
+    -X POST "$BASE/audit/wcag" \
+    -H "X-API-Key: $HUBVIBE_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"url":"https://example.com"}' 2>/dev/null) || PAID_CODE="000"
+
+  case "$PAID_CODE" in
+    200)
+      # A 200 is necessary but not sufficient: the result has to actually be
+      # an audit. A 200 carrying an error object would still be a dead path.
+      if grep -q '"pass"' "$PAID_BODY"; then
+        pass "authenticated /audit/wcag -> 200 with a real audit result"
+      else
+        fail "authenticated /audit/wcag -> 200 but the body carries no audit result"
+      fi
+      ;;
+    500)
+      fail "authenticated /audit/wcag -> 500. THE PAID PATH IS DEAD. This is a
+        server-side fault, not a payment problem -- the service raised an
+        unhandled exception. Get the traceback:
+          gcloud logging read 'resource.labels.service_name=hubvibe AND severity>=ERROR' --project=resolver-time --freshness=1h --limit=5"
+      ;;
+    402)
+      fail "authenticated /audit/wcag -> 402. The key was not accepted. Either
+        it is not a real key, or the key store cannot be reached (check the
+        logs for a Firestore error -- a dead key store now degrades to 402
+        rather than 500, which is correct but still means no subscriber can
+        authenticate)."
+      ;;
+    502)
+      echo "  NOTE  authenticated /audit/wcag -> 502: auth worked, but the audit"
+      echo "        itself could not run against example.com. Nothing was billed."
+      echo "        The paid path is alive; the target site is the problem."
+      ;;
+    *)
+      fail "authenticated /audit/wcag -> $PAID_CODE (expected 200)"
+      ;;
+  esac
+  rm -f "$PAID_BODY"
+fi
+
+echo
 echo "-----------------------------------------------"
 printf '  %d passed, %d failed\n' "$PASSES" "$FAILURES"
 echo "-----------------------------------------------"

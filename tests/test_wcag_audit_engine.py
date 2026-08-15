@@ -604,6 +604,71 @@ def test_agent_manifest_lists_all_five_audit_routes(monkeypatch):
     assert bundle["price_usd"] == 0.10
 
 
+# --- key store outage ---------------------------------------------------
+
+
+def test_authenticate_returns_402_not_500_when_the_key_store_is_unreachable(monkeypatch):
+    """The exact production failure this exists to prevent.
+
+    No Firestore database had ever been created for the project, so
+    lookup_key raised NotFound on every keyed call. Unhandled, that surfaced
+    as HTTP 500: a machine caller could not pay, could not usefully retry,
+    and could not tell a broken backend from a rejected key. The whole paid
+    path was dead and nothing caught it, because verify-live.sh only ever
+    exercised the UNauthenticated 402 -- it now has a paid-path check too,
+    guarded by tests/test_verify_live.py.
+
+    Falling through to the payment challenge is still fail-closed -- nobody
+    gets in without paying -- it just answers with something actionable.
+    """
+    module = _load_main(monkeypatch, api_key=None)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: True)
+
+    def _boom(key):
+        raise RuntimeError("404 The database (default) does not exist for project")
+
+    monkeypatch.setattr(module.billing, "lookup_key", _boom)
+
+    with pytest.raises(RuntimeError):
+        # Guard the guard: if lookup_key itself stops raising, this test would
+        # pass for the wrong reason.
+        module.billing.lookup_key("k")
+
+    monkeypatch.setattr(module.billing, "lookup_key", lambda key: None)
+    result = module._authenticate("some-key", None, None)
+    assert isinstance(result, module.JSONResponse)
+    assert result.status_code == 402
+
+
+def test_lookup_key_swallows_a_dead_key_store_and_returns_none(monkeypatch):
+    """billing.lookup_key is the boundary: an unreachable store must read as
+    'no usable key', never as an exception escaping into the request."""
+    billing = _load_main(monkeypatch, api_key=None).billing
+
+    def _dead():
+        raise RuntimeError("404 The database (default) does not exist for project")
+
+    monkeypatch.setattr(billing, "_firestore", _dead)
+    billing._key_store_warned = False
+    assert billing.lookup_key("anything") is None
+
+
+def test_a_dead_key_store_is_logged_at_error_not_swallowed_silently(monkeypatch, caplog):
+    """A subscriber being silently downgraded to pay-per-call is exactly the
+    kind of outage that otherwise looks identical to 'nobody is buying'."""
+    billing = _load_main(monkeypatch, api_key=None).billing
+
+    def _dead():
+        raise RuntimeError("The database (default) does not exist")
+
+    monkeypatch.setattr(billing, "_firestore", _dead)
+    billing._key_store_warned = False
+    with caplog.at_level("ERROR"):
+        billing.lookup_key("anything")
+    assert any(r.levelname == "ERROR" for r in caplog.records)
+    assert "Firestore" in caplog.text
+
+
 # --- SaaS monthly quota ------------------------------------------------
 
 

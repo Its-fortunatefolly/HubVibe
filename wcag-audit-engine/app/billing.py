@@ -22,6 +22,7 @@ api_key -> Stripe customer_id mapping -- nothing about balances or pricing,
 since Stripe is the source of truth for both.
 """
 
+import logging
 import os
 import secrets
 import uuid
@@ -294,8 +295,52 @@ def api_key_for_session(session_id: str) -> Optional[str]:
     return doc.to_dict().get("api_key")
 
 
+_key_store_warned = False
+
+
+def _warn_key_store_unavailable(exc: Exception) -> None:
+    """Say so, once, when the key store cannot be reached at all.
+
+    Logged once rather than per request because this fires on every keyed
+    call, and a paid endpoint under load would otherwise bury the logs.
+    """
+    global _key_store_warned
+    if _key_store_warned:
+        return
+    _key_store_warned = True
+    logging.getLogger(__name__).error(
+        "API key lookup failed against Firestore (%s: %s). Every X-API-Key "
+        "call will fall through to a 402 payment challenge until this is "
+        "fixed -- subscribers cannot authenticate. If this is "
+        "'The database (default) does not exist', no Firestore database has "
+        "been created for this project; create one, because checkout also "
+        "writes keys there.",
+        type(exc).__name__,
+        exc,
+    )
+
+
 def lookup_key(api_key: str) -> Optional[dict]:
-    doc = _firestore().collection("api_keys").document(api_key).get()
+    """The record behind an API key, or None if there isn't a usable one.
+
+    Returns None rather than raising when the key store itself is
+    unreachable. That distinction matters more than it looks: an
+    unhandled exception here becomes an HTTP 500, and a 500 tells a machine
+    caller nothing it can act on -- it cannot pay, cannot retry usefully, and
+    cannot tell a broken backend from a rejected key. Returning None lets the
+    caller fall through to x402/MPP, which do not touch Firestore at all, and
+    answer with the 402 challenge the caller can actually act on.
+
+    This is still fail-closed: an unreachable key store grants nobody access,
+    it only changes an unactionable 500 into an actionable 402. The cost is
+    that a genuine subscriber is asked to pay per call while the outage
+    lasts, which is why it is logged at ERROR rather than swallowed.
+    """
+    try:
+        doc = _firestore().collection("api_keys").document(api_key).get()
+    except Exception as exc:
+        _warn_key_store_unavailable(exc)
+        return None
     if not doc.exists or not doc.to_dict().get("active"):
         return None
     return doc.to_dict()
