@@ -86,9 +86,10 @@ app = FastAPI(
         "$0.10 bundle.\n\n"
         "Built for agent-to-agent use: every paid route answers an "
         "unauthenticated request with HTTP 402 carrying a machine-readable "
-        "payment challenge (x402 JSON body and/or MPP WWW-Authenticate "
-        "headers), so a paying agent can discover the price and settle "
-        "without a human in the loop.\n\n"
+        "payment challenge, so a paying agent can discover the price and "
+        "settle without a human in the loop. The challenge names the rails "
+        "this deployment can actually settle; see /.well-known/agent.json."
+        "\n\n"
         "Every result is a rule-based check against the actual page. Nothing "
         "here is an LLM judging quality, and a check that could not run is "
         "reported as an error, never as a passing result.\n\n"
@@ -668,12 +669,15 @@ def health_check():
 
 
 _AUTH_DESCRIPTION = (
-    "One of: X-API-Key header (a key issued with a human plan; plans are "
-    "priced per site watched, so a machine caller wanting volume should use "
-    "a per-call rail below instead); X-PAYMENT header (x402, see 402 response "
-    "body for price/network/payTo); or Authorization: Payment ... (MPP -- "
-    "Stripe SPT for fiat or Tempo network for crypto, see the "
-    "WWW-Authenticate response headers on a 402 for both challenges)"
+    "WHICH of these a given deployment accepts is not fixed and this schema "
+    "cannot know it: read `payment.methods` in /.well-known/agent.json, or "
+    "the `accepts[]` array in any 402 response. Both list only rails that can "
+    "genuinely settle right now. The headers each scheme uses: X-API-Key (a "
+    "key issued with a human plan; plans are priced per site watched, so a "
+    "machine caller wanting volume should use a per-call rail); X-PAYMENT "
+    "(x402 -- price/network/payTo arrive in the 402 body); Authorization: "
+    "Payment ... (MPP -- Stripe SPT for fiat or Tempo for crypto, challenges "
+    "arrive in the WWW-Authenticate headers on a 402)"
 )
 _URL_INPUT_SCHEMA = {"url": "string (required)"}
 _HTML_OR_URL_INPUT_SCHEMA = {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
@@ -822,8 +826,8 @@ def agent_manifest(request: Request):
         "guarantees": [
             "You are charged only for an audit that produced a result. A check "
             "that could not run returns HTTP 502, is never settled, and is "
-            "never reported as a pass -- x402 payments are verified to grant "
-            "access but only settled after the audit has actually delivered.",
+            "never reported as a pass -- a payment is verified to grant access "
+            "but only settled after the audit has actually delivered.",
             "Rate-limited requests are rejected before any payment is settled, "
             "so a 429 never costs you anything.",
             "Results are deterministic rule-based checks against the live page, "
@@ -1183,9 +1187,11 @@ def mcp_streamable_http(
                 "instructions": (
                     "Rule-based site compliance audits. Every tool costs money and "
                     "returns a deterministic result, never an LLM's opinion. Calls "
-                    "need an X-API-Key header, or an x402/MPP payment -- see "
-                    f"{PUBLIC_BASE_URL}/.well-known/agent.json. A tool that cannot "
-                    "run reports an error and is not charged for."
+                    "must be paid for; this deployment currently settles: "
+                    f"{', '.join(_payment_methods_live()) or 'no rail is configured'}"
+                    f" -- see {PUBLIC_BASE_URL}/.well-known/agent.json and the 402 "
+                    "challenge for how to pay. A tool that cannot run reports an "
+                    "error and is not charged for."
                 ),
             },
         }

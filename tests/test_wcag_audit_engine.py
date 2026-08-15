@@ -1083,6 +1083,87 @@ def test_purchased_plan_is_recorded_so_the_quota_can_see_it(monkeypatch, load_ma
     assert legacy["plan"] is None
 
 
+def test_mcp_handshake_names_only_rails_that_can_settle(monkeypatch):
+    """Every MCP client reads `instructions` on connect.
+
+    It used to say "need an X-API-Key header, or an x402/MPP payment" no
+    matter what was configured. Unlike the OpenAPI schema -- a module constant
+    baked in at import -- this is a request handler, so it can name exactly
+    what this deployment settles rather than hedging.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.x402_payments, "is_configured", lambda: False)
+    monkeypatch.setattr(module.mpp_payments, "stripe_configured", lambda: True)
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: False)
+
+    response = TestClient(module.app).post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {"protocolVersion": "2025-06-18"}},
+    )
+    instructions = response.json()["result"]["instructions"]
+    assert "mpp-stripe" in instructions
+    assert "x402" not in instructions
+
+
+def test_mcp_handshake_says_so_when_no_rail_is_configured(monkeypatch):
+    """Listing nothing would read as "free"; it has to say what it means."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.x402_payments, "is_configured", lambda: False)
+    monkeypatch.setattr(module.mpp_payments, "stripe_configured", lambda: False)
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: False)
+
+    response = TestClient(module.app).post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {"protocolVersion": "2025-06-18"}},
+    )
+    assert "no rail is configured" in response.json()["result"]["instructions"]
+
+
+def test_endpoint_auth_prose_does_not_contradict_its_own_method_list(monkeypatch):
+    """agent.json carried both, in the same object, disagreeing.
+
+    Each endpoint entry has a live-derived `payment_methods` list AND a static
+    `auth` prose blurb. The blurb asserted x402 unconditionally, so with x402
+    off an endpoint said `payment_methods: ["mpp-stripe"]` while the prose
+    beside it told the reader to send an X-PAYMENT header. The prose cannot be
+    per-request (it is a module constant), so it must point at the live field
+    rather than name rails as available.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.x402_payments, "is_configured", lambda: False)
+    monkeypatch.setattr(module.mpp_payments, "stripe_configured", lambda: True)
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: False)
+
+    body = TestClient(module.app).get("/.well-known/agent.json").json()
+    endpoint = body["endpoints"][0]
+    assert endpoint["payment_methods"] == ["mpp-stripe"]
+    assert "payment.methods" in endpoint["auth"]
+    assert "agent.json" in endpoint["auth"]
+    # The phrasing that read as a promise rather than a menu.
+    assert "One of: X-API-Key header" not in endpoint["auth"]
+
+
+def test_openapi_description_does_not_assert_a_rail(monkeypatch):
+    """The schema's own blurb named x402 and MPP as the challenge format."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    description = TestClient(module.app).get("/openapi.json").json()["info"]["description"]
+    assert "x402 JSON body and/or MPP" not in description
+    assert "agent.json" in description
+
+
 def test_no_shipped_surface_asserts_a_payment_rail_as_available():
     """A rail named as a fact on a static surface goes stale silently.
 
