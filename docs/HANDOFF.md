@@ -91,19 +91,17 @@ byte-identical to this repo (`diff -r` against a fresh
 README is live on its `main`, and tags `v1`/`v1.0.0` are pushed.
 `uses: Its-fortunatefolly/hubvibe-audit-action@v1` works today.
 
-**Both tags point at the first commit, one behind the listing rewrite:**
-`v1.0.0` and `v1` → `a900531`, while `main` is `ab666f3` ("Rewrite the
-listing copy for Marketplace", README +79/−35). `action.yml` and the renderer
-are identical across the two, so `@v1` *behaves* correctly — but the README
-is the Marketplace listing body, so a Release cut from `v1.0.0` as it stands
-publishes the pre-rewrite copy and the work in #41 never reaches the listing.
-No Release exists and nothing public consumes the tag, so moving both is safe.
+**Tags were retagged onto the listing rewrite on 2026-08-16** and verified
+against the remote: `v1` and `v1.0.0` both → `ab666f3`, which is that repo's
+`main`. Before this they sat on `a900531`, one commit behind — `action.yml`
+and the renderer were identical across the two, so `@v1` always *behaved*
+correctly, but README is the Marketplace listing body, so a Release cut from
+the old `v1.0.0` would have published the pre-rewrite copy and the work in
+&#35;41 would never have reached the listing. **A Release can now be cut from
+`v1.0.0` as it stands.**
 
-**These run in the ACTION repo, not this one.** That distinction has already
-cost one wrong push: run from `~/HubVibe-deploy4`, the same four commands
-retagged the monorepo instead, leaving the action repo untouched and creating
-a `v1.0.0` on a repo that can never be listed. Clone it fresh, one line at a
-time (a multi-line paste lands on a non-empty prompt and runs together):
+If they ever need moving again, note these run in the ACTION repo, not this
+one — that distinction already cost one wrong push (see the lessons below):
 
 ```bash
 cd ~ && git clone https://github.com/Its-fortunatefolly/hubvibe-audit-action
@@ -122,8 +120,8 @@ git push -f origin v1.0.0 v1
 ```
 
 Confirm it landed on the right remote — the push output must say
-`To https://github.com/Its-fortunatefolly/hubvibe-audit-action.git`. If it
-says `.../HubVibe.git`, it went to the monorepo.
+`To https://github.com/Its-fortunatefolly/hubvibe-audit-action`. If it says
+`.../HubVibe.git`, it went to the monorepo.
 
 What does NOT exist is a **Release** — the repo has zero. Tags do not publish
 to Marketplace; a Release with the "Publish this Action to the GitHub
@@ -323,3 +321,9 @@ So: live-service verification must be run by the user with
   block for the action repo starts with the clone or the `cd`, and ends with
   what the push output must say. Same class of failure as reading a filtered
   view instead of the record: the evidence was right there and unexamined.
+  Both were repaired the same day; the monorepo's stray `v1.0.0` was deleted
+  and its `v1` left at `30fce35`, which resolves a current `action.yml`, so
+  `uses: Its-fortunatefolly/HubVibe@v1` still works. The monorepo's previous
+  `v1` target is not recoverable — a force-moved tag takes its old value with
+  it, which is the argument for reading the push output *before* the next
+  command, not after someone asks.
