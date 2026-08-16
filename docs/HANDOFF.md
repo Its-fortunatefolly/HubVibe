@@ -27,7 +27,7 @@ as the test that outranks everything else.
 | | |
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
-| Tests | 262 passed, 2 skipped; flake8 clean |
+| Tests | 292 passed, 1 skipped; flake8 clean — **merge #44 first**, it pins the PyYAML that makes CI and local agree. Without it CI reads `262 passed, 2 skipped` and silently skips the 29 `action.yml` guards. |
 | Live checks | `bash scripts/verify-live.sh` → 29 passed, 0 failed, **including the authenticated paid path** |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
@@ -270,7 +270,18 @@ So: live-service verification must be run by the user with
 - **A dev machine's transitive dependencies mask missing pins.** Bazaar
   discovery silently returned `{}` because `jsonschema` was installed locally
   but not pinned. Only clean CI caught it. There is now a static test on the
-  requirements text.
+  requirements text. **It then happened again with PyYAML**, and the second
+  time it hid better: `tests/test_marketplace_action.py` opened with
+  `pytest.importorskip("yaml")`, so in CI the module did not fail — it
+  vanished, 29 tests reported as one tidy skip. Two sessions read 291 and 262
+  off the same commit and both were honest. The lesson generalises past
+  "pin your deps": **`importorskip` on a module that guards a shipped
+  artifact converts a missing pin into a green run.** Those 29 tests guard
+  `action.yml`, which had already shipped broken once, and they had never
+  executed in CI. A count that moves with the machine is itself the signal —
+  chase it, do not reconcile it. Fixed in #44: the pin, a hard `import yaml`,
+  and a test asserting the pin is still declared (deleting it breaks nothing
+  locally, which is exactly how it hid).
 - **Prove a test fails.** Every guard in this repo was verified by
   reintroducing the bug and watching the test go red, then restoring.
 - **`gcloud --format=flattened` pads names with alignment spaces.** Any
