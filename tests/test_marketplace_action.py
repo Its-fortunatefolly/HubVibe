@@ -8,6 +8,13 @@ action in someone else's CI, which is the most expensive place to find out.
 The renderer is tested hardest on the paths where no audit ran. Rendering an
 empty table for a check that failed to execute would read as a clean bill of
 health, which is the exact failure the service's own code is built to avoid.
+
+`import yaml` here is deliberately hard, not `pytest.importorskip`. It used to
+be the soft form, and because PyYAML was absent from requirements.txt, CI
+silently skipped this entire module -- all 29 guards on the one file that has
+already shipped dead-on-arrival once. A green CI run said nothing about
+action.yml for as long as that lasted. If the dependency ever goes missing
+again the suite must fail, not quietly shrink.
 """
 
 import importlib.util
@@ -17,8 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
-yaml = pytest.importorskip("yaml")
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ACTION_PATH = REPO_ROOT / "action.yml"
@@ -365,3 +371,20 @@ def test_the_renderer_survives_a_missing_response_file(tmp_path):
     )
     assert result.returncode == 0
     assert "✅" not in result.stdout
+
+
+def test_pyyaml_is_declared_so_this_module_cannot_silently_skip_again():
+    """The pin in requirements.txt is what makes every test above actually run
+    in CI.
+
+    Deleting it does not fail anywhere else: PyYAML arrives transitively in
+    plenty of environments, so a local run stays green while CI -- which
+    installs only requirements.txt -- collects 29 fewer tests and reports a
+    pass. That is precisely how the guards on action.yml went unrun, and how
+    two sessions came away with two different, both-defensible test counts.
+    """
+    declared = (REPO_ROOT / "requirements.txt").read_text().lower()
+    assert "pyyaml" in declared, (
+        "PyYAML is missing from requirements.txt; CI will skip this whole "
+        "module and report a green run that proves nothing about action.yml"
+    )
