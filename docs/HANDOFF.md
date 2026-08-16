@@ -97,13 +97,33 @@ listing copy for Marketplace", README +79/−35). `action.yml` and the renderer
 are identical across the two, so `@v1` *behaves* correctly — but the README
 is the Marketplace listing body, so a Release cut from `v1.0.0` as it stands
 publishes the pre-rewrite copy and the work in #41 never reaches the listing.
-No Release exists and nothing public consumes the tag, so moving both is safe:
+No Release exists and nothing public consumes the tag, so moving both is safe.
+
+**These run in the ACTION repo, not this one.** That distinction has already
+cost one wrong push: run from `~/HubVibe-deploy4`, the same four commands
+retagged the monorepo instead, leaving the action repo untouched and creating
+a `v1.0.0` on a repo that can never be listed. Clone it fresh, one line at a
+time (a multi-line paste lands on a non-empty prompt and runs together):
 
 ```bash
-git tag -f -a v1.0.0 -m "v1.0.0" origin/main
-git tag -f -a v1     -m "v1"     origin/main
+cd ~ && git clone https://github.com/Its-fortunatefolly/hubvibe-audit-action
+```
+```bash
+cd ~/hubvibe-audit-action
+```
+```bash
+git tag -f -a v1.0.0 -m v1.0.0 origin/main
+```
+```bash
+git tag -f -a v1 -m v1 origin/main
+```
+```bash
 git push -f origin v1.0.0 v1
 ```
+
+Confirm it landed on the right remote — the push output must say
+`To https://github.com/Its-fortunatefolly/hubvibe-audit-action.git`. If it
+says `.../HubVibe.git`, it went to the monorepo.
 
 What does NOT exist is a **Release** — the repo has zero. Tags do not publish
 to Marketplace; a Release with the "Publish this Action to the GitHub
@@ -294,3 +314,12 @@ So: live-service verification must be run by the user with
 - **The user is often on mobile.** Long multi-line pasted commands land on a
   non-empty input line and run together into garbage (`1gcloud`, `%bash`).
   Keep commands to one short line; that is why `repair-and-deploy.sh` exists.
+- **`git` commands are silent about which repo they ran in, so say it.** Two
+  repos are in play here and only one shell is ever open, almost always
+  `~/HubVibe-deploy4`. A retag block written without a `cd` was pasted there
+  and force-moved the MONOREPO's `v1` and created a monorepo `v1.0.0`, while
+  the action repo it was meant for stayed untouched — and the push output
+  said so plainly (`To .../HubVibe.git`) with nobody reading it. Any command
+  block for the action repo starts with the clone or the `cd`, and ends with
+  what the push output must say. Same class of failure as reading a filtered
+  view instead of the record: the evidence was right there and unexamined.
