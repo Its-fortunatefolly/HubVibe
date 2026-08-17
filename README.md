@@ -171,6 +171,23 @@ The `name` field is `io.github.its-fortunatefolly/hubvibe`, which the GitHub
 login authenticates against. `server.json` is validated against the official
 schema (note: `description` is capped at 100 characters).
 
+**Bump `version` before every publish.** The registry treats a version as
+immutable and rejects a re-publish of one it already serves, so a corrected
+`server.json` left at its old version fails at the last step — after the
+browser login, which is the most annoying place to find out. Check what is
+actually live first; the registry is public and needs no auth:
+
+```bash
+curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=hubvibe"
+```
+
+Correcting text without bumping the version is the trap: the file reads
+right in the repo, the registry keeps serving the old copy, and nothing
+reports a problem. On 2026-08-11 the registry took 1.1.0 whose header still
+read "pay per call with x402/MPP"; the repo dropped that rail assertion the
+same week, and the two stayed out of sync because a republish of 1.1.0 could
+never have landed.
+
 ## Repository layout
 
 ```
