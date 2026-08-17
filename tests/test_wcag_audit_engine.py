@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import time
 from pathlib import Path
 
@@ -1318,10 +1319,44 @@ def test_a_real_stripe_key_sells_normally(good_key, monkeypatch, load_main_fresh
     assert module.billing.stripe.api_key == good_key.strip()
 
 
+# 0x + exactly 40 hex. Synthetic, but it must be SHAPE-VALID: every test
+# below asserts what a live x402 deployment does, and a fixture the deploy
+# gate would reject describes a deployment that cannot exist.
+#
+# This used to be "0x...4922b" -- 39 hex -- which is the literal value
+# tests/test_preflight.py names SHORT_ADDR and exists to prove the deploy
+# preflight REJECTS. So the whole "x402 is live" suite ran under an address
+# that could never ship, which is the same failure that reached production:
+# a pay-to address of the wrong length, advertised as a live rail, settling
+# nothing. test_the_x402_fixture_would_survive_the_deploy_gate keeps the
+# fixture and the gate in agreement.
+_X402_TEST_PAY_TO = "0x32b08c5e927c69877d0fcab35618c265674922bc"
+
+
 def _x402_env(monkeypatch):
     monkeypatch.setenv("X402_FACILITATOR_URL", "https://facilitator.example")
-    monkeypatch.setenv("X402_PAY_TO_ADDRESS", "0x32b08c5e927c69877d0fcab35618c265674922b")
+    monkeypatch.setenv("X402_PAY_TO_ADDRESS", _X402_TEST_PAY_TO)
     monkeypatch.delenv("AUDIT_API_KEY", raising=False)
+
+
+def test_the_x402_fixture_would_survive_the_deploy_gate():
+    """The fixture must pass the SAME check repair-and-deploy.sh enforces.
+
+    Reads the regex out of the deploy script rather than restating it, so
+    the two cannot drift apart -- a restated copy is how the fixture and the
+    gate disagreed silently in the first place.
+    """
+    script = (REPO_ROOT / "scripts" / "repair-and-deploy.sh").read_text()
+    match = re.search(r"grep -qiE '(\^0x\[0-9a-f\]\{40\}\$)'", script)
+    assert match, (
+        "repair-and-deploy.sh no longer preflights the pay-to address with "
+        "the expected regex; this guard is now checking nothing"
+    )
+    assert re.match(match.group(1), _X402_TEST_PAY_TO, re.IGNORECASE), (
+        f"{_X402_TEST_PAY_TO} has {len(_X402_TEST_PAY_TO) - 2} hex chars; the "
+        "deploy gate requires exactly 40, so every test asserting 'x402 is "
+        "live' is describing a deployment that would never have shipped"
+    )
 
 
 def test_requirements_pull_the_extras_bazaar_discovery_needs():
@@ -1375,6 +1410,66 @@ def test_402_carries_bazaar_discovery_when_x402_is_live(monkeypatch, load_main_f
     # index sends agents into a 400.
     assert "url" in info["input"]["body"]
     assert body["extensions"]["bazaar"]["schema"], "discovery data must carry its schema"
+
+
+def test_every_paid_route_carries_bazaar_discovery(monkeypatch, load_main_fresh):
+    """Not just the bundle -- EVERY audit route the app actually serves.
+
+    The check above proves /audit/bundle is indexable. That is one route out
+    of six, and the discovery data is looked up per-path: a paid route
+    missing from _CATALOG returns {} from _bazaar_extension_for_path and
+    emits a 402 with no `extensions` at all. It still takes money, so
+    nothing looks broken -- it is simply never indexed by a facilitator, and
+    nothing else notices.
+
+    Invisible-but-payable is the worst failure mode this service has: from
+    the inside it is indistinguishable from nobody wanting to buy.
+
+    The route list comes from app.routes, NOT from _CATALOG. Deriving it
+    from the catalog makes the test circular -- dropping a route from the
+    catalog would silently drop it from the check too, so the one bug this
+    exists to catch would sail through green. (Verified by mutation: the
+    catalog-driven version passed with /audit/seo deleted.)
+    """
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_audit_main_bazaar_all")
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(module.app)
+    served = sorted({
+        route.path
+        for route in module.app.routes
+        if "POST" in getattr(route, "methods", set()) and route.path.startswith("/audit")
+    })
+    assert served, "no audit routes found -- this guard is checking nothing"
+
+    # Back-compat aliases are deliberately NOT indexed: an alias and its
+    # canonical route are the same capability, and listing both would offer
+    # an agent the identical audit twice under two URLs. The exclusion is
+    # keyed off the manifest's own alias note rather than a hardcoded list,
+    # so a genuinely new route can never be waved through by adding its name
+    # here -- it has no alias note, so it must carry discovery data.
+    manifest = client.get("/.well-known/agent.json").json()
+    aliases = {
+        e["path"]
+        for e in manifest["endpoints"]
+        if str(e.get("note", "")).lower().startswith("alias of")
+    }
+
+    missing = []
+    for path in served:
+        if path in aliases:
+            continue
+        body = client.post(path, json={"url": "https://example.com"}).json()
+        if "bazaar" not in body.get("extensions", {}):
+            missing.append(path)
+
+    assert not missing, (
+        "these paid routes emit a 402 with no Bazaar discovery data, so a "
+        "facilitator can never index them and no agent can find them by "
+        "capability (each needs a _CATALOG entry):\n  " + "\n  ".join(missing)
+    )
 
 
 def test_no_bazaar_discovery_when_x402_cannot_settle(monkeypatch):

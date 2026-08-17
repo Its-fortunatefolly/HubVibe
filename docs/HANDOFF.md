@@ -36,7 +36,7 @@ as the test that outranks everything else.
 | Webhook | `/billing/webhook`, enabled, `checkout.session.completed` |
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0, **active** |
 | Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
-| x402 | **live** since 2026-08-16, revision `hubvibe-00069-8kp` — valid pay-to address set, CDP facilitator configured, Bazaar discovery data present on the 402 |
+| x402 | **UNVERIFIED — do not treat as live.** #43 recorded it live since 2026-08-16 on revision `hubvibe-00069-8kp` with a valid pay-to address, but the owner has since said they do not have a 40-hex address. Both cannot be true. Resolve with `bash scripts/verify-live.sh` before relying on this row either way — see below. |
 
 ### Stripe price IDs (verified against the live account)
 
@@ -142,11 +142,37 @@ the registry entry is stale in both directions until it is republished.
 **4. Cosmetic:** the card statement descriptor reads `HUBEVIBE` (extra E).
 Dashboard → Settings → Payments.
 
-## Shipped 2026-08-16: x402 + Bazaar discovery
+## 2026-08-16: x402 + Bazaar discovery — REPORTED shipped, NOT confirmed
 
-This was item 1 on this list and is done. A valid `0x` + 40-hex pay-to
+**Read this before believing the section below.** It was written from one
+session's run of `verify-live.sh`. The owner has since said they do not have
+a 40-hex address, which contradicts it directly. Nobody has re-run the live
+check since, so the honest state is *unknown*, and unknown is the dangerous
+one: if the deployed address is malformed, x402 is advertised on every 402,
+agents that find the service through the Bazaar build payments that cannot
+land, and the symptom is silence — identical to nobody wanting to buy.
+
+Resolve it with one command, from a machine that can reach the service:
+
+```bash
+bash scripts/verify-live.sh
+```
+
+A `FAIL` on the unpayable-rail check means turn x402 off (unset both env
+vars) until a real Base address exists. Do not leave it advertised while
+unresolved.
+
+As of the fix in this branch the service also fails closed on its own: a
+pay-to address that is not `0x` + 40 hex is no longer advertised at all,
+whether it came from a plain env var or from Secret Manager. That reduces
+the blast radius; it does not answer whether the deployed revision predates
+the fix.
+
+The original report follows, unedited:
+
+A valid `0x` + 40-hex pay-to
 address was set alongside the CDP facilitator, and revision
-`hubvibe-00069-8kp` went out. `verify-live.sh` now reports 29/29 including:
+`hubvibe-00069-8kp` went out. `verify-live.sh` then reported 29/29 including:
 
 ```
 PASS  402 does not advertise an unpayable x402 rail
