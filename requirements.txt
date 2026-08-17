@@ -4,6 +4,9 @@
 fastapi==0.115.6
 pydantic==2.10.3
 httpx==0.28.1
+# Parses action.yml in tests/test_marketplace_action.py. Absent, that module
+# skipped in CI and 29 guards on the Marketplace action never ran.
+PyYAML==6.0.3
 playwright==1.48.0
 axe-playwright-python==0.1.8
 stripe==15.4.0
