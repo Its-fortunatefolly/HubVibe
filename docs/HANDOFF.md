@@ -27,16 +27,16 @@ as the test that outranks everything else.
 | | |
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
-| Tests | 291 passed, 1 skipped; flake8 clean |
-| Live checks | `bash scripts/verify-live.sh` → 28 passed, 0 failed, **including the authenticated paid path** |
+| Tests | 292 passed, 1 skipped; flake8 clean — the same in CI and locally, since #44 pinned PyYAML |
+| Live checks | `bash scripts/verify-live.sh` → 29 passed, 0 failed, **including the authenticated paid path** |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
 | Stripe account | `acct_1U28tvDA21T9EAQB`, **zero outstanding requirements** |
 | Payouts | daily → SUTTON BANK ····1444 |
 | Webhook | `/billing/webhook`, enabled, `checkout.session.completed` |
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0, **active** |
-| Payment rails live | `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
-| x402 | **off** — the CDP facilitator credential IS configured; the blocker is a valid pay-to address (see below) |
+| Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
+| x402 | **live** since 2026-08-16, revision `hubvibe-00069-8kp` — valid pay-to address set, CDP facilitator configured, Bazaar discovery data present on the 402 |
 
 ### Stripe price IDs (verified against the live account)
 
@@ -84,42 +84,44 @@ revision.
 
 ## What is left
 
-**1. x402 + Bazaar discovery — one valid wallet address away.**
-
-This is THE demand channel for an A2A service and it is the only thing still
-blocking it. The MCP registry is name-based: an agent finds this node only if
-it already knows the name. Bazaar is capability-based — facilitators catalog
-x402 resources by reading the discovery extension off their 402s, and agents
-shop that index by what a service does and what it costs. That is how an
-agent that has never heard of HubVibe finds it.
-
-The credential is NOT the blocker any more. `cdp-api-key-secret` exists in
-Secret Manager and the facilitator was configured. The blocker is the
-address: the deployed `X402_PAY_TO_ADDRESS` held **16 hex characters** where
-an EVM address needs 40. x402 was advertised as a live rail the whole time,
-so any agent that found it via Bazaar and tried to pay would have failed —
-which from this side is indistinguishable from nobody buying. Both x402 env
-vars were removed on 2026-08-15 rather than keep advertising an unsettleable
-rail.
-
-To turn it back on, set a real `0x` + 40-hex address:
-
-```
-X402_FACILITATOR_URL = https://api.cdp.coinbase.com/platform/v2/x402
-X402_PAY_TO_ADDRESS  = <0x + exactly 40 hex characters>
-```
-
-`repair-and-deploy.sh` preflights the address and refuses to deploy a
-malformed one, so this cannot silently regress.
-
-`_CdpAuthProvider` in `app/x402_payments.py` already signs the per-request
-JWTs correctly, verified against the real SDK.
-
-**2. Marketplace listing — one form, and it has never been submitted.**
+**1. Marketplace listing — one form, and it has never been submitted.**
 The standalone repo exists and is current: `action.yml` and the renderer are
-byte-identical to this repo, the listing README is live on its `main`, and
-tags `v1`/`v1.0.0` are pushed. `uses: Its-fortunatefolly/hubvibe-audit-action@v1`
-works today.
+byte-identical to this repo (`diff -r` against a fresh
+`scripts/publish-action-repo.sh` output is clean, zero drift), the listing
+README is live on its `main`, and tags `v1`/`v1.0.0` are pushed.
+`uses: Its-fortunatefolly/hubvibe-audit-action@v1` works today.
+
+**Tags were retagged onto the listing rewrite on 2026-08-16** and verified
+against the remote: `v1` and `v1.0.0` both → `ab666f3`, which is that repo's
+`main`. Before this they sat on `a900531`, one commit behind — `action.yml`
+and the renderer were identical across the two, so `@v1` always *behaved*
+correctly, but README is the Marketplace listing body, so a Release cut from
+the old `v1.0.0` would have published the pre-rewrite copy and the work in
+&#35;41 would never have reached the listing. **A Release can now be cut from
+`v1.0.0` as it stands.**
+
+If they ever need moving again, note these run in the ACTION repo, not this
+one — that distinction already cost one wrong push (see the lessons below):
+
+```bash
+cd ~ && git clone https://github.com/Its-fortunatefolly/hubvibe-audit-action
+```
+```bash
+cd ~/hubvibe-audit-action
+```
+```bash
+git tag -f -a v1.0.0 -m v1.0.0 origin/main
+```
+```bash
+git tag -f -a v1 -m v1 origin/main
+```
+```bash
+git push -f origin v1.0.0 v1
+```
+
+Confirm it landed on the right remote — the push output must say
+`To https://github.com/Its-fortunatefolly/hubvibe-audit-action`. If it says
+`.../HubVibe.git`, it went to the monorepo.
 
 What does NOT exist is a **Release** — the repo has zero. Tags do not publish
 to Marketplace; a Release with the "Publish this Action to the GitHub
@@ -129,15 +131,48 @@ Agreement), so it cannot be automated. Verified independently: the releases
 page says "There aren't any releases here", and
 `github.com/marketplace/actions/hubvibe-site-compliance-audit` 404s.
 
-**3. Register with Glama.** `glama.json` is in place; the directory still has
+**2. Register with Glama.** `glama.json` is in place; the directory still has
 to be pointed at the repo once.
 
-**4. Republish `server.json` to the MCP registry** (`./mcp-publisher publish`).
-The file was corrected on 2026-08-15 to stop naming x402 as available; the
-registry still serves the old text until it is republished.
+**3. Republish `server.json` to the MCP registry** (`./mcp-publisher publish`).
+The file was corrected on 2026-08-15 to stop naming x402 as available. That
+text is now *understating* the deployment — x402 went live 2026-08-16 — so
+the registry entry is stale in both directions until it is republished.
 
-**5. Cosmetic:** the card statement descriptor reads `HUBEVIBE` (extra E).
+**4. Cosmetic:** the card statement descriptor reads `HUBEVIBE` (extra E).
 Dashboard → Settings → Payments.
+
+## Shipped 2026-08-16: x402 + Bazaar discovery
+
+This was item 1 on this list and is done. A valid `0x` + 40-hex pay-to
+address was set alongside the CDP facilitator, and revision
+`hubvibe-00069-8kp` went out. `verify-live.sh` now reports 29/29 including:
+
+```
+PASS  402 does not advertise an unpayable x402 rail
+PASS  402 carries x402 Bazaar discovery data (indexable by facilitators)
+      payment:{methods:[x402 mpp-stripe mpp-tempo stripe_api_key]}
+PASS  authenticated /audit/wcag -> 200 with a real audit result
+```
+
+Why it mattered: the MCP registry is name-based — an agent finds this node
+only if it already knows the name. Bazaar is capability-based; facilitators
+catalog x402 resources by reading the discovery extension off their 402s, and
+agents shop that index by what a service does and what it costs. That is how
+an agent that has never heard of HubVibe finds it. Before this, the deployed
+`X402_PAY_TO_ADDRESS` held **16 hex characters** where 40 are required, so
+x402 was advertised as live while being unsettleable — from this side
+indistinguishable from nobody buying.
+
+`repair-and-deploy.sh` preflights the address and refuses to deploy a
+malformed one, so this cannot silently regress. Note the preflight only
+checks a *plain env var*: a pay-to address supplied via Secret Manager is
+explicitly not shape-checked. An EVM address is public — keep it a plain env
+var so the guard applies.
+
+**Being listed is not the same as being bought.** Bazaar makes the node
+findable by capability; it does not create demand. The counter to watch is
+charges, not checks passed — see below.
 
 ## The number that reframes everything: ZERO
 
@@ -218,7 +253,7 @@ So: live-service verification must be run by the user with
 |---|---|
 | `scripts/repair-and-deploy.sh` | the one deploy command. **Preflights the live environment and refuses to deploy into a broken one** (Firestore exists, every secret readable AND correctly shaped, pay-to address well-formed, min-instances reported). Idempotent — a healthy service now mints zero revisions. |
 | `scripts/repair-secrets.sh` | repairs Secret Manager. Additive only: never disables, never destroys, refuses to invent a value it cannot find, never prints one. |
-| `scripts/verify-live.sh` | 28 live checks **including the authenticated paid path** — the check that answers "can this take money". It resolves the API key itself. |
+| `scripts/verify-live.sh` | 29 live checks **including the authenticated paid path** — the check that answers "can this take money". It resolves the API key itself. |
 | `scripts/lib-api-key.sh` | resolves an API key with no human: reads which secret backs `AUDIT_API_KEY` off the service and fetches it. An explicit `HUBVIBE_API_KEY` still wins. |
 | `scripts/measure-call-cost.sh` | measures real cost per audit against real Cloud Run rates. |
 | `scripts/publish-action-repo.sh` | generates the standalone Marketplace repo, verbatim, so it cannot drift. |
@@ -235,7 +270,18 @@ So: live-service verification must be run by the user with
 - **A dev machine's transitive dependencies mask missing pins.** Bazaar
   discovery silently returned `{}` because `jsonschema` was installed locally
   but not pinned. Only clean CI caught it. There is now a static test on the
-  requirements text.
+  requirements text. **It then happened again with PyYAML**, and the second
+  time it hid better: `tests/test_marketplace_action.py` opened with
+  `pytest.importorskip("yaml")`, so in CI the module did not fail — it
+  vanished, 29 tests reported as one tidy skip. Two sessions read 291 and 262
+  off the same commit and both were honest. The lesson generalises past
+  "pin your deps": **`importorskip` on a module that guards a shipped
+  artifact converts a missing pin into a green run.** Those 29 tests guard
+  `action.yml`, which had already shipped broken once, and they had never
+  executed in CI. A count that moves with the machine is itself the signal —
+  chase it, do not reconcile it. Fixed in #44: the pin, a hard `import yaml`,
+  and a test asserting the pin is still declared (deleting it breaks nothing
+  locally, which is exactly how it hid).
 - **Prove a test fails.** Every guard in this repo was verified by
   reintroducing the bug and watching the test go red, then restoring.
 - **`gcloud --format=flattened` pads names with alignment spaces.** Any
@@ -277,3 +323,18 @@ So: live-service verification must be run by the user with
 - **The user is often on mobile.** Long multi-line pasted commands land on a
   non-empty input line and run together into garbage (`1gcloud`, `%bash`).
   Keep commands to one short line; that is why `repair-and-deploy.sh` exists.
+- **`git` commands are silent about which repo they ran in, so say it.** Two
+  repos are in play here and only one shell is ever open, almost always
+  `~/HubVibe-deploy4`. A retag block written without a `cd` was pasted there
+  and force-moved the MONOREPO's `v1` and created a monorepo `v1.0.0`, while
+  the action repo it was meant for stayed untouched — and the push output
+  said so plainly (`To .../HubVibe.git`) with nobody reading it. Any command
+  block for the action repo starts with the clone or the `cd`, and ends with
+  what the push output must say. Same class of failure as reading a filtered
+  view instead of the record: the evidence was right there and unexamined.
+  Both were repaired the same day; the monorepo's stray `v1.0.0` was deleted
+  and its `v1` left at `30fce35`, which resolves a current `action.yml`, so
+  `uses: Its-fortunatefolly/HubVibe@v1` still works. The monorepo's previous
+  `v1` target is not recoverable — a force-moved tag takes its old value with
+  it, which is the argument for reading the push output *before* the next
+  command, not after someone asks.
