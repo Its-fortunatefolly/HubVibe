@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 from typing import Optional
 
@@ -66,8 +67,58 @@ _requirements_cache: dict = {}
 _LOCK = threading.RLock()
 
 
+_pay_to_warned = False
+
+
+def _warn_pay_to_malformed(address: str) -> None:
+    """Say so, once and loudly. A silent fail-closed here looks exactly like
+    'x402 was never configured', which is the wrong diagnosis and sends the
+    next person hunting for a missing env var that is actually present."""
+    global _pay_to_warned
+    if _pay_to_warned:
+        return
+    _pay_to_warned = True
+    logging.getLogger(__name__).error(
+        "X402_PAY_TO_ADDRESS is set but is not a valid %s address (needs 0x "
+        "+ exactly 40 hex characters; this one has %d). x402 will NOT be "
+        "advertised on payment challenges until this is corrected -- "
+        "advertising it would invite agents to pay into an address that "
+        "cannot receive.",
+        _NETWORK,
+        max(len(address) - 2, 0),
+    )
+
+
+def _pay_to_is_usable() -> bool:
+    """Shape-check the recipient before we ever advertise the rail.
+
+    `bool(_PAY_TO_ADDRESS)` was the whole test, so ANY truthy string turned
+    x402 on. That is not hypothetical: a deployment once ran with a 16-hex
+    address while advertising x402 as live, so every agent that found the
+    service via the Bazaar built a payment to an address that could not
+    receive it -- indistinguishable, from this side, from nobody buying.
+
+    scripts/repair-and-deploy.sh preflights this, but only for a PLAIN env
+    var: a value supplied via Secret Manager is explicitly not shape-checked
+    there. This is the check that holds regardless of where the value came
+    from, which is the only place it can be guaranteed.
+
+    Only EVM (eip155:*) networks are checked -- the 0x+40-hex form is an EVM
+    address format, and asserting it against a non-EVM network would fail
+    closed on a correctly configured deployment.
+    """
+    if not _PAY_TO_ADDRESS:
+        return False
+    if not _NETWORK.startswith("eip155:"):
+        return True
+    if re.fullmatch(r"0x[0-9a-fA-F]{40}", _PAY_TO_ADDRESS):
+        return True
+    _warn_pay_to_malformed(_PAY_TO_ADDRESS)
+    return False
+
+
 def is_configured() -> bool:
-    return bool(_FACILITATOR_URL and _PAY_TO_ADDRESS)
+    return bool(_FACILITATOR_URL and _pay_to_is_usable())
 
 
 class _StaticAuthProvider:

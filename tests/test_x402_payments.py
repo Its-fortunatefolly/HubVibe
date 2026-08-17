@@ -25,8 +25,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 X402_PATH = REPO_ROOT / "wcag-audit-engine" / "app" / "x402_payments.py"
 
 
-def _load_x402(monkeypatch, *, facilitator="https://facilitator.example", pay_to="0xabc",
-               auth_headers=None):
+# 0x + exactly 40 hex. The default used to be "0xabc", so five tests below
+# asserted verify/settle behaviour under a pay-to address that could never
+# receive a payment. is_configured() now shape-checks it, so a placeholder
+# here silently disables the very rail these tests exercise.
+VALID_PAY_TO = "0x32b08c5e927c69877d0fcab35618c265674922bc"
+
+
+def _load_x402(monkeypatch, *, facilitator="https://facilitator.example",
+               pay_to=VALID_PAY_TO, auth_headers=None):
     if facilitator is None:
         monkeypatch.delenv("X402_FACILITATOR_URL", raising=False)
     else:
@@ -159,16 +166,60 @@ def test_payment_required_body_is_empty_when_unconfigured(monkeypatch):
 
 
 def test_payment_required_body_advertises_real_address_when_configured(monkeypatch):
-    module = _load_x402(monkeypatch, pay_to="0xdeadbeef")
+    module = _load_x402(monkeypatch, pay_to=VALID_PAY_TO)
     body = module.payment_required_body(price="$0.03")
 
-    assert body["payTo"] == "0xdeadbeef"
+    assert body["payTo"] == VALID_PAY_TO
     assert body["accepted_payment_header"] == "X-PAYMENT"
     assert body["price"] == "$0.03"
 
     entry = module.accepts_entry(price="$0.03")
     assert entry["protocol"] == "x402"
-    assert entry["pay_to"] == "0xdeadbeef"
+    assert entry["pay_to"] == VALID_PAY_TO
+
+
+@pytest.mark.parametrize(
+    "bad_address",
+    [
+        "0x32b08c5e927c69877d0fcab35618c265674922b",   # 39 hex -- one short
+        "0x32b08c5e927c69877d0fcab35618c265674922bcd",  # 41 hex -- one long
+        "0xabc",                                        # a placeholder
+        "0x32b08c5e927c69877d0fcab35618c26567492zz",   # right length, not hex
+        "32b08c5e927c69877d0fcab35618c265674922bc",    # 40 hex, missing 0x
+        "changeme",
+    ],
+)
+def test_a_malformed_pay_to_address_never_advertises_x402(monkeypatch, bad_address):
+    """A recipient that cannot receive must not be offered as a live rail.
+
+    This is the incident, not a hypothetical: a deployment ran with a 16-hex
+    pay-to address while advertising x402 as live, so every agent that found
+    the service through the Bazaar built a payment to an address that could
+    not receive it. Nothing errored. From this side it was indistinguishable
+    from nobody wanting to buy.
+
+    `bool(_PAY_TO_ADDRESS)` was the entire check, so every string below used
+    to switch the rail ON. The deploy preflight catches some of these, but
+    only when the value is a plain env var -- a Secret Manager value is
+    explicitly not shape-checked there, so this is the only check that holds
+    wherever the value came from.
+    """
+    module = _load_x402(monkeypatch, pay_to=bad_address)
+
+    assert module.is_configured() is False
+    assert module.payment_required_body(price="$0.03") == {}
+    assert module.accepts_entry(price="$0.03") is None
+
+
+def test_a_non_evm_network_is_not_held_to_the_evm_address_shape(monkeypatch):
+    """0x + 40 hex is an EVM address format. Enforcing it on a Solana or
+    other non-eip155 deployment would fail closed on a correctly configured
+    service -- the same false-negative this guard exists to prevent, pointed
+    the other way."""
+    monkeypatch.setenv("X402_NETWORK", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")
+    module = _load_x402(monkeypatch, pay_to="9mcxc1SomeSolanaStyleAddressVG12")
+
+    assert module.is_configured() is True
 
 
 @pytest.mark.parametrize("bad_header", ["", "   ", "not-base64-at-all"])
