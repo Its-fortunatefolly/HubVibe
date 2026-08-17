@@ -3,7 +3,7 @@
   "name": "io.github.Its-fortunatefolly/hubvibe",
   "title": "HubVibe Site Audits",
   "description": "Rule-based site audits: accessibility, SEO, security headers, performance. Metered per call.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "repository": {
     "url": "https://github.com/Its-fortunatefolly/HubVibe",
     "source": "github"
