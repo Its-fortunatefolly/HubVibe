@@ -27,7 +27,7 @@ as the test that outranks everything else.
 | | |
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
-| Tests | 292 passed, 1 skipped; flake8 clean — **merge #44 first**, it pins the PyYAML that makes CI and local agree. Without it CI reads `262 passed, 2 skipped` and silently skips the 29 `action.yml` guards. |
+| Tests | 292 passed, 1 skipped; flake8 clean — the same in CI and locally, since #44 pinned PyYAML |
 | Live checks | `bash scripts/verify-live.sh` → 29 passed, 0 failed, **including the authenticated paid path** |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
