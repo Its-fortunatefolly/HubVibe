@@ -84,6 +84,43 @@ revision.
 
 ## What is left
 
+**0. Turn x402 on — everything needed is now known, and none of it is Coinbase.**
+
+Established 2026-08-18, each piece verified, so do not re-litigate:
+
+- **Facilitator: Coinbase is NOT required.** CDP's verify/settle endpoints
+  need a CDP API key AND a verified Coinbase Business Account (their docs
+  say so directly) — that is the review sitting in limbo. But the code
+  supports any facilitator, and `https://facilitator.xpay.sh` is keyless,
+  Base mainnet, zero-fee, x402 v1+v2. **The owner health-checked it live
+  from Cloud Shell on 2026-08-18**: `curl https://facilitator.xpay.sh/health`
+  → `{"status":"ok","service":"xpay-facilitator"}`. When CDP clears review
+  it can replace xpay for the Bazaar listing; it is not the gate.
+- **Pay-to address: two working options.** A Stripe-custodied Base deposit
+  address (`scripts/x402-setup.py`, preview API — same architecture as
+  Stripe's own machine-payments sample), or a self-custody Base wallet
+  (e.g. Base App). NOT Cash App — custodial with no Base support, funds
+  sent there are unrecoverable. The service now refuses to advertise x402
+  for any address that is not 0x + 40 hex, wherever it came from.
+- **Settlements are mirrored into Stripe** (added 2026-08-18, from Stripe's
+  machine-payments sample): when `STRIPE_SECRET_KEY` is set, every settled
+  x402 payment is recorded as a PaymentIntent in `transaction_verification`
+  mode, idempotent by transaction hash. This is what makes on-chain revenue
+  show in the Stripe balance — "is my Stripe account going up from zero"
+  now measures x402 too, but only if the pay-to address is the
+  Stripe-custodied one, since Stripe verifies the transaction against its
+  own deposit address.
+
+So the recipe: mint the deposit address with `x402-setup.py`, then set
+
+```
+X402_FACILITATOR_URL = https://facilitator.xpay.sh
+X402_PAY_TO_ADDRESS  = <the deposit address>
+```
+
+and deploy. Preflight validates the address shape; `verify-live.sh` proves
+the 402 advertises a settleable rail.
+
 **1. Marketplace listing — one form, and it has never been submitted.**
 The standalone repo exists and is current: `action.yml` and the renderer are
 byte-identical to this repo (`diff -r` against a fresh
@@ -131,16 +168,19 @@ Agreement), so it cannot be automated. Verified independently: the releases
 page says "There aren't any releases here", and
 `github.com/marketplace/actions/hubvibe-site-compliance-audit` 404s.
 
-**2. Register with Glama.** `glama.json` is in place; the directory still has
-to be pointed at the repo once.
+**2. Republish `server.json` to the MCP registry** (`./mcp-publisher publish`).
+`server.json` is at 1.1.1 (#45) precisely so the publish can land — the
+registry rejects re-publishing a version it already serves, and it has
+served 1.1.0 with pre-correction text since 2026-08-11. Login opens a
+browser, so it must be run by a human.
 
-**3. Republish `server.json` to the MCP registry** (`./mcp-publisher publish`).
-The file was corrected on 2026-08-15 to stop naming x402 as available. That
-text is now *understating* the deployment — x402 went live 2026-08-16 — so
-the registry entry is stale in both directions until it is republished.
+**3. Cosmetic:** the card statement descriptor reads `HUBEVIBE` (extra E).
+Dashboard → Settings → Payments. (The Stripe MCP connector is read-only for
+account settings — verified 2026-08-18 — so this cannot be fixed from a
+session.)
 
-**4. Cosmetic:** the card statement descriptor reads `HUBEVIBE` (extra E).
-Dashboard → Settings → Payments.
+~~Register with Glama~~ — done; the owner confirmed 2026-08-18 the service
+is on the Glama connections registry.
 
 ## 2026-08-16: x402 + Bazaar discovery — REPORTED shipped, NOT confirmed
 
