@@ -562,3 +562,72 @@ def test_verify_and_settle_records_after_a_successful_settle(monkeypatch):
 
     assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
     assert len(calls) == 1
+
+
+# --- Bazaar discovery records must survive the facilitator's own validator ---
+#
+# The Bazaar half of a 402 is only worth emitting if a facilitator will
+# actually catalog it, and a facilitator that validates before cataloging runs
+# exactly the check below. These assert against the x402 library's own
+# `validate_discovery_extension` rather than against a hand-written expected
+# dict, because the thing that matters is not "does this look right to us" but
+# "does the indexer accept it". It did not: `declare_discovery_extension`
+# leaves `method` to be enriched by machinery this service does not use, so
+# every record went out failing its own co-emitted schema.
+
+def _validate_bazaar(extension: dict):
+    from x402.extensions.bazaar import validate_discovery_extension
+
+    assert "bazaar" in extension, "x402 is configured, so a record must be emitted"
+    return validate_discovery_extension(extension["bazaar"])
+
+
+def test_a_body_route_discovery_record_passes_the_facilitator_validator(monkeypatch):
+    module = _load_x402(monkeypatch)
+    extension = module.bazaar_extension_for_body(
+        input_example={"url": "https://example.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"],
+        },
+        output_example={"pass": True},
+    )
+    result = _validate_bazaar(extension)
+    assert result.valid, result.errors
+
+
+def test_a_body_route_discovery_record_names_the_http_method(monkeypatch):
+    """The paid routes are POST-only. A record that omits the method is not
+    just schema-invalid -- an agent reading it has no way to know how to
+    call the resource it just found."""
+    module = _load_x402(monkeypatch)
+    extension = module.bazaar_extension_for_body(
+        input_example={"url": "https://example.com"},
+        input_schema={"type": "object", "properties": {"url": {"type": "string"}}},
+    )
+    assert extension["bazaar"]["info"]["input"]["method"] == "POST"
+
+
+def test_an_mcp_tool_discovery_record_passes_the_facilitator_validator(monkeypatch):
+    module = _load_x402(monkeypatch)
+    extension = module.bazaar_extension_for_mcp_tool(
+        tool_name="audit_wcag",
+        description="WCAG 2.1 A/AA accessibility audit via axe-core. $0.03 per call.",
+        input_schema={"type": "object", "properties": {"url": {"type": "string"}}},
+        example={"url": "https://example.com"},
+    )
+    result = _validate_bazaar(extension)
+    assert result.valid, result.errors
+
+
+def test_no_discovery_record_is_emitted_when_x402_cannot_settle(monkeypatch):
+    """Same fail-closed rule as every other x402 surface: an unpayable
+    resource must not be advertised in an index agents shop by capability."""
+    module = _load_x402(monkeypatch, facilitator=None, pay_to=None)
+    assert module.bazaar_extension_for_body(
+        input_example={"url": "https://example.com"}, input_schema={"type": "object"}
+    ) == {}
+    assert module.bazaar_extension_for_mcp_tool(
+        tool_name="audit_wcag", description="d", input_schema={"type": "object"}
+    ) == {}

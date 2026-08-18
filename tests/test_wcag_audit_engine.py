@@ -2550,3 +2550,136 @@ def test_every_registry_icon_is_actually_served_by_this_app(monkeypatch):
             f"{path} is served as {response.headers['content-type']}, "
             f"advertised as {icon['mimeType']}"
         )
+
+
+# --- Registry crawlers must be able to CONNECT, not just read ---------------
+#
+# /mcp.json is the file the MCP registry, Glama and Smithery point at. It had
+# told every reader, in as many words, "not a live MCP server -- wrap these
+# with an MCP-to-HTTP adapter". That was true when it was written and stopped
+# being true when /mcp shipped, and nothing failed when it went stale: an
+# agent that believes it either builds an adapter it does not need or gives up
+# on the connection entirely. server.json already advertised /mcp as a
+# streamable-http remote, so the two files shipped contradicting each other.
+
+def test_mcp_json_advertises_a_remote_that_actually_answers(monkeypatch):
+    """The connect URL a crawler reads must be a route that speaks MCP.
+
+    Asserting the string alone would pass just as well against a typo, so
+    this drives the advertised path with a real tools/list.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    manifest = client.get("/mcp.json").json()
+
+    remotes = manifest.get("remotes") or []
+    assert remotes, "/mcp.json must tell a crawler where to connect"
+    remote = remotes[0]
+    assert remote["type"] == "streamable-http"
+
+    path = remote["url"].replace(module.PUBLIC_BASE_URL.rstrip("/"), "")
+    response = client.post(path, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    assert response.status_code == 200, f"{path} is advertised but does not answer"
+    served = {tool["name"] for tool in response.json()["result"]["tools"]}
+    assert served == {tool["name"] for tool in manifest["tools"]}
+
+
+def test_mcp_json_never_hands_a_client_another_deployment_url(monkeypatch):
+    """The static file carries production absolute URLs so a crawler reading
+    the raw file out of the repo can resolve them. Served, they have to name
+    the host that is answering, or a self-hosted copy sends its clients to
+    somebody else's paid endpoint."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://audit.example.test")
+    module = _load_main(monkeypatch)
+    manifest = TestClient(module.app).get("/mcp.json").json()
+
+    assert manifest["remotes"][0]["url"] == "https://audit.example.test/mcp"
+    assert manifest["websiteUrl"] == "https://audit.example.test/"
+    assert manifest["documentationUrl"] == "https://audit.example.test/.well-known/agent.json"
+    assert manifest["icons"][0]["src"] == "https://audit.example.test/favicon.svg"
+
+    blob = str(manifest)
+    assert "run.app" not in blob, "a production URL survived into a self-hosted manifest"
+
+
+def test_mcp_json_carries_the_identity_fields_a_registry_indexes(monkeypatch):
+    """name/description alone gets a server listed and ignored. A crawler
+    scoring an entry reads version, repository and a documentation URL, and
+    an agent choosing between two servers reads them too."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    manifest = TestClient(module.app).get("/mcp.json").json()
+
+    for field in ("name", "description", "version", "websiteUrl", "documentationUrl"):
+        assert manifest.get(field), f"/mcp.json is missing {field}"
+    assert manifest["repository"]["url"].startswith("https://github.com/")
+
+
+def test_mcp_json_version_matches_server_json(monkeypatch):
+    """server.json is what the official registry publishes; /mcp.json is what
+    Glama and Smithery read. Two version numbers that disagree make one of
+    them wrong, and there is no way for a reader to tell which."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    manifest = TestClient(module.app).get("/mcp.json").json()
+    server_json = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == server_json["version"]
+
+
+def test_every_sitemap_url_is_a_route_this_service_serves(monkeypatch):
+    """A sitemap entry that 404s costs crawl budget and teaches the crawler
+    to trust the file less. The discovery surfaces are the entries that
+    matter -- they are the reason a machine reads the sitemap at all."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    sitemap = client.get("/sitemap.xml").text
+
+    locs = re.findall(r"<loc>([^<]+)</loc>", sitemap)
+    assert locs, "sitemap.xml lists nothing"
+
+    base = "https://hubvibe-831480473793.us-south1.run.app"
+    for loc in locs:
+        assert loc.startswith(base), f"{loc} is not on this service"
+        path = loc[len(base):] or "/"
+        assert client.get(path).status_code == 200, f"sitemap lists {path}, which does not serve"
+
+    for required in ("/mcp.json", "/.well-known/agent.json"):
+        assert any(loc.endswith(required) for loc in locs), (
+            f"sitemap omits {required} -- it is the file registry crawlers come for"
+        )
+
+
+def test_one_version_number_across_every_surface_that_publishes_one(monkeypatch):
+    """server.json (official registry), /mcp.json (Glama, Smithery), the
+    OpenAPI spec and the MCP handshake all name a version. Three of those
+    were separate literals and had already drifted: the registry said 1.1.2
+    while every client that completed an MCP handshake was told 1.1.0."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    registry = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))["version"]
+
+    assert module.SERVICE_VERSION == registry
+    assert client.get("/mcp.json").json()["version"] == registry
+    assert client.get("/openapi.json").json()["info"]["version"] == registry
+
+    handshake = client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {"protocolVersion": "2025-06-18"}},
+    ).json()
+    assert handshake["result"]["serverInfo"]["version"] == registry

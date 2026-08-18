@@ -54,6 +54,17 @@ PUBLIC_BASE_URL = os.environ.get(
     "PUBLIC_BASE_URL", "https://hubvibe-831480473793.us-south1.run.app"
 )
 
+# One version number for this service, quoted by everything that publishes
+# one: the OpenAPI spec, the MCP `initialize` handshake's serverInfo, and the
+# static /mcp.json. Three literals had already drifted to two values -- the
+# registry entry and the manifest said 1.1.2 while every MCP client that
+# completed a handshake was told 1.1.0. A client caching capabilities per
+# version, or a crawler reconciling the registry against the live node, is
+# reading a version that names the wrong build. Kept in step with
+# server.json (the official registry's copy) by a test, since that file is
+# outside the container's build context and cannot be read at runtime.
+SERVICE_VERSION = "1.1.2"
+
 # Each in-flight audit holds a Chromium browser (see browser_pool), so the
 # ceiling on concurrent audits is really a memory ceiling, not a CPU one.
 # FastAPI runs these sync routes in anyio's threadpool, which defaults to 40
@@ -78,7 +89,7 @@ async def _lifespan(_app: "FastAPI"):
 app = FastAPI(
     lifespan=_lifespan,
     title="HubVibe Site Compliance Auditing Suite",
-    version="1.1.0",
+    version=SERVICE_VERSION,
     description=(
         "Machine-payable site compliance audits. Four deterministic audit "
         "dimensions -- accessibility (axe-core), SEO, security headers, and "
@@ -652,6 +663,19 @@ def mcp_manifest():
     live_methods = _payment_methods_live()
     prices = {entry["path"]: entry["price_usd"] for entry in _CATALOG}
     live_tools = {tool["name"]: tool for tool in _mcp_tools()}
+
+    # Absolute URLs in the static file are written against the production
+    # host, because a crawler fetching the raw file out of the repo has no
+    # base to resolve a relative path against. Served, they must name the
+    # host actually answering -- a manifest that hands a client someone
+    # else's MCP endpoint is worse than one that omits it.
+    base = PUBLIC_BASE_URL.rstrip("/")
+    manifest["websiteUrl"] = f"{base}/"
+    manifest["documentationUrl"] = f"{base}/.well-known/agent.json"
+    for remote in manifest.get("remotes", []):
+        remote["url"] = f"{base}/mcp"
+    for icon in manifest.get("icons", []):
+        icon["src"] = f"{base}/favicon.svg"
 
     manifest["auth"]["methods"] = live_methods
     manifest["auth"]["description"] = (
@@ -1414,7 +1438,7 @@ def mcp_streamable_http(
             "result": {
                 "protocolVersion": version,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "hubvibe-site-audit", "version": "1.1.0"},
+                "serverInfo": {"name": "hubvibe-site-audit", "version": SERVICE_VERSION},
                 "instructions": (
                     "Rule-based site compliance audits. Every tool costs money and "
                     "returns a deterministic result, never an LLM's opinion. Calls "
