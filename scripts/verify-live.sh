@@ -110,6 +110,22 @@ else
   pass "402 does not advertise an unpayable x402 rail"
 fi
 
+# accepts[] and the manifest's payment.methods describe the same fact, and
+# they used to disagree: the manifest listed stripe_api_key while accepts[]
+# -- the array an agent actually iterates -- omitted it, so a CI pipeline
+# holding a pre-funded key could not learn from the challenge that its key
+# was spendable here.
+MANIFEST=$(curl -sS -m 30 "$BASE/.well-known/agent.json" 2>/dev/null)
+if printf '%s' "$MANIFEST" | grep -q 'stripe_api_key'; then
+  if printf '%s' "$CHALLENGE" | grep -q '"api_key"'; then
+    pass "402 accepts[] offers the API-key rail the manifest advertises"
+  else
+    fail "manifest lists stripe_api_key but the 402's accepts[] omits it -- an agent reading the challenge cannot find the rail"
+  fi
+else
+  pass "no API-key rail advertised anywhere (consistent: Stripe is not configured)"
+fi
+
 if curl -sS -m 30 -D - -o /dev/null -X POST "$BASE/audit/wcag" \
   -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null \
   | grep -qi '^www-authenticate:.*Payment'; then
@@ -140,6 +156,61 @@ if printf '%s' "$MCP_TOOLS" | grep -q 'audit_bundle'; then
   pass "MCP tools/list advertises the audit tools"
 else
   fail "MCP tools/list did not return the audit tools"
+fi
+
+# Tool definition quality, checked against the deployed container rather
+# than the repo. An agent decides whether to spend money here from the tool
+# definition alone: without an outputSchema it cannot tell, before paying,
+# whether the response is a shape its pipeline can consume.
+if printf '%s' "$MCP_TOOLS" | python3 -c '
+import json, sys
+try:
+    tools = json.load(sys.stdin)["result"]["tools"]
+except Exception:
+    sys.exit(1)
+if not tools:
+    sys.exit(1)
+for tool in tools:
+    if not tool.get("outputSchema") or not tool.get("annotations"):
+        sys.exit(1)
+    schema = tool.get("inputSchema") or {}
+    if not (schema.get("required") or schema.get("anyOf")):
+        sys.exit(1)
+sys.exit(0)
+' 2>/dev/null; then
+  pass "every MCP tool declares input constraints, an outputSchema and annotations"
+else
+  fail "MCP tools are under-specified -- agents drop connections rather than guess a contract"
+fi
+
+# /mcp.json is what the registry points at; /mcp is what a client calls.
+# Two copies of a schema drift, and the one that drifts is the one agents read.
+if python3 -c '
+import json, sys, urllib.request
+base = sys.argv[1]
+try:
+    with urllib.request.urlopen(base + "/mcp.json", timeout=30) as handle:
+        manifest = {t["name"]: t for t in json.load(handle)["tools"]}
+    request = urllib.request.Request(
+        base + "/mcp",
+        data=json.dumps({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as handle:
+        live = {t["name"]: t for t in json.load(handle)["result"]["tools"]}
+except Exception:
+    sys.exit(1)
+if set(manifest) != set(live):
+    sys.exit(1)
+for name, tool in live.items():
+    for field in ("inputSchema", "outputSchema", "annotations", "title"):
+        if manifest[name].get(field) != tool.get(field):
+            sys.exit(1)
+sys.exit(0)
+' "$BASE" 2>/dev/null; then
+  pass "/mcp.json and /mcp advertise identical tool contracts"
+else
+  fail "/mcp.json has drifted from /mcp -- the registry points agents at a stale contract"
 fi
 
 # The MCP paywall has to be readable by a machine. It used to stringify the
@@ -213,6 +284,50 @@ else
   echo "        Set X402_FACILITATOR_URL and X402_PAY_TO_ADDRESS to turn on"
   echo "        both the x402 rail and Bazaar indexing. Until then agents can"
   echo "        only find this node via the MCP registry, not by capability."
+fi
+
+# /audit is the shortest and most guessable paid path on this service. It is
+# an alias of /audit/wcag with no catalog row of its own, which once left it
+# as the single paid route absent from capability discovery.
+ALIAS=$(curl -sS -m 30 -X POST "$BASE/audit" \
+  -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
+NAMED=$(curl -sS -m 30 -X POST "$BASE/audit/wcag" \
+  -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
+if printf '%s\n%s' "$ALIAS" "$NAMED" | python3 -c '
+import json, sys
+raw = sys.stdin.read().splitlines()
+try:
+    alias, named = json.loads(raw[0]), json.loads(raw[1])
+except Exception:
+    sys.exit(1)
+sys.exit(0 if alias.get("extensions") == named.get("extensions") else 1)
+' 2>/dev/null; then
+  pass "/audit advertises the same capability as the route it aliases"
+else
+  fail "/audit is discoverable differently from /audit/wcag -- a paid path agents cannot find by capability"
+fi
+
+# A manifest that describes its inputs only as prose ("string (required)")
+# is one a request generator cannot act on.
+if printf '%s' "$MANIFEST" | python3 -c '
+import json, sys
+try:
+    endpoints = json.load(sys.stdin)["endpoints"]
+except Exception:
+    sys.exit(1)
+if not endpoints:
+    sys.exit(1)
+for endpoint in endpoints:
+    schema = endpoint.get("input_schema") or {}
+    if schema.get("type") != "object" or "properties" not in schema:
+        sys.exit(1)
+    if (endpoint.get("output_schema") or {}).get("type") != "object":
+        sys.exit(1)
+sys.exit(0)
+' 2>/dev/null; then
+  pass "agent.json publishes parseable JSON Schemas for every endpoint"
+else
+  fail "agent.json describes its endpoints only in prose -- crawlers and request generators cannot use it"
 fi
 
 echo

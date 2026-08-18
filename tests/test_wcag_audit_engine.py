@@ -2163,29 +2163,6 @@ def test_mcp_tool_schemas_never_admit_an_empty_call(monkeypatch):
         jsonschema.validate({"url": "https://example.com"}, schema)
 
 
-def test_mcp_tools_carry_spec_annotations_and_titles(monkeypatch):
-    """title + annotations are what registries render and rank on; their
-    absence lists the tool as an unlabeled blob. idempotentHint must be False
-    everywhere: results may repeat but BILLING repeats too, and an agent
-    planning retries deserves to know repetition is not free."""
-    from fastapi.testclient import TestClient
-
-    module = _load_main(monkeypatch)
-    client = TestClient(module.app)
-    tools = _rpc(client, "tools/list").json()["result"]["tools"]
-
-    for t in tools:
-        assert t["title"], f"{t['name']} has no title"
-        ann = t["annotations"]
-        assert ann["readOnlyHint"] is True
-        assert ann["destructiveHint"] is False
-        assert ann["idempotentHint"] is False, (
-            f"{t['name']}: every call is billed again -- advertising it as "
-            "idempotent invites free-retry planning that costs real money"
-        )
-        assert ann["openWorldHint"] is True
-
-
 def test_mcp_tool_call_without_payment_is_an_error_result_not_a_crash(monkeypatch):
     """A payment requirement is a normal outcome the model should see, so it
     belongs in the result as isError -- not a JSON-RPC protocol error."""
@@ -2338,3 +2315,238 @@ def test_mcp_initialize_only_returns_handshake_protocol_versions(monkeypatch):
             params["protocolVersion"] = requested
         got = _rpc(client, "initialize", params).json()["result"]["protocolVersion"]
         assert got in handshake_versions, f"initialize returned unusable version {got}"
+
+
+# --- Discovery contract: what an agent reads before it decides to pay ------
+#
+# Everything below guards a machine-readable surface. The failure these
+# catch is not a 500 -- it is an agent that reads the manifest, builds a
+# call, and gets a 400 or never calls at all, which from this side is
+# indistinguishable from nobody wanting to buy.
+
+
+def test_the_html_or_url_schema_states_the_either_or_the_routes_enforce():
+    """/audit/wcag and /audit/seo 400 on a body with neither field. A schema
+    that leaves `required` off entirely tells an agent `{}` is acceptable and
+    sends it into that 400."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("wcag_audit_main_schema", MAIN_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    schema = module._MCP_HTML_OR_URL_SCHEMA
+    assert schema["anyOf"] == [{"required": ["url"]}, {"required": ["html"]}], (
+        "the html-or-url routes require one of the two; the schema must say so"
+    )
+    # A stricter schema than the route is its own failure: the Pydantic
+    # models ignore unknown keys, so declaring additionalProperties false
+    # would advertise a rejection that never happens.
+    assert "additionalProperties" not in schema
+    assert module._MCP_URL_SCHEMA["required"] == ["url"]
+
+
+def test_every_mcp_tool_declares_what_comes_back_not_just_what_goes_in(monkeypatch):
+    """An agent decides whether to spend money here from the tool definition
+    alone. Without an outputSchema it cannot tell, before paying, whether the
+    response is a shape its pipeline can consume."""
+    module = _load_main(monkeypatch)
+
+    for tool in module._mcp_tools():
+        assert tool["outputSchema"]["type"] == "object", tool["name"]
+        assert "pass" in tool["outputSchema"]["properties"], (
+            f"{tool['name']} must declare the field callers branch on"
+        )
+        assert tool["outputSchema"]["required"] == ["pass"]
+        assert tool["title"], tool["name"]
+        # Audits read a third-party page and mutate nothing. An orchestrator
+        # uses these to decide whether it may retry or parallelise unattended.
+        annotations = tool["annotations"]
+        assert annotations["readOnlyHint"] is True, tool["name"]
+        assert annotations["destructiveHint"] is False, tool["name"]
+        assert annotations["idempotentHint"] is True, tool["name"]
+        assert annotations["openWorldHint"] is True, tool["name"]
+
+
+def test_mcp_json_serves_the_same_schemas_the_mcp_endpoint_does(monkeypatch):
+    """Two hand-maintained copies of a schema drift, and the one that drifts
+    is the one agents are reading. /mcp.json is what the MCP registry points
+    at; /mcp is what a client actually calls. They must agree."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    served = {tool["name"]: tool for tool in client.get("/mcp.json").json()["tools"]}
+    live = {tool["name"]: tool for tool in module._mcp_tools()}
+    assert set(served) == set(live)
+
+    for name, tool in live.items():
+        for field in ("title", "inputSchema", "outputSchema", "annotations"):
+            assert served[name][field] == tool[field], f"{name}.{field} drifted from /mcp"
+
+
+def test_the_static_mcp_manifest_on_disk_matches_what_is_served(monkeypatch):
+    """The route overwrites these fields at serve time, so a stale copy on
+    disk cannot reach an agent through /mcp.json -- but the raw file is
+    fetched directly from the repo by crawlers, so it must not lie either."""
+    import json
+
+    module = _load_main(monkeypatch)
+    static = json.loads(
+        (REPO_ROOT / "wcag-audit-engine" / "app" / "static" / "mcp.json").read_text()
+    )
+    on_disk = {tool["name"]: tool for tool in static["tools"]}
+    for tool in module._mcp_tools():
+        for field in ("title", "inputSchema", "outputSchema", "annotations"):
+            assert on_disk[tool["name"]][field] == tool[field], (
+                f"static mcp.json {tool['name']}.{field} is stale -- "
+                "regenerate it from _mcp_tools()"
+            )
+
+
+def test_agent_manifest_publishes_parseable_schemas_not_only_prose(monkeypatch):
+    """`"url": "string (required)"` is not something a crawler or a request
+    generator can act on. The JSON Schema alongside it is."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    endpoints = client.get("/.well-known/agent.json").json()["endpoints"]
+    assert endpoints, "manifest advertises no endpoints"
+    for endpoint in endpoints:
+        schema = endpoint["input_schema"]
+        assert schema["type"] == "object", endpoint["path"]
+        assert "properties" in schema, endpoint["path"]
+        assert endpoint["output_schema"]["type"] == "object", endpoint["path"]
+        # Same objects the MCP tools advertise -- one contract, not three.
+        assert schema in (module._MCP_URL_SCHEMA, module._MCP_HTML_OR_URL_SCHEMA), (
+            f"{endpoint['path']} publishes a schema no tool advertises"
+        )
+
+
+def test_the_audit_alias_is_indexable_like_every_other_paid_path(
+    monkeypatch, load_main_fresh
+):
+    """/audit is the shortest and most guessable paid path here. It is an
+    alias of /audit/wcag and so has no catalog row of its own, which left it
+    as the one paid route absent from Bazaar discovery -- findable only by
+    someone who already had the URL."""
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_audit_main_alias")
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(module.app)
+    alias = client.post("/audit", json={"url": "https://example.com"})
+    named = client.post("/audit/wcag", json={"url": "https://example.com"})
+
+    assert alias.status_code == named.status_code == 402
+    assert alias.json()["extensions"] == named.json()["extensions"], (
+        "the alias must advertise the same capability as the route it aliases"
+    )
+
+
+def test_the_api_key_rail_appears_in_accepts_when_it_can_settle(
+    monkeypatch, load_main_fresh
+):
+    """`accepts` is the array an agent iterates. A CI pipeline holding a
+    pre-funded key had to parse prose out of `alternative` to learn its key
+    was spendable here, while agent.json's payment.methods listed the rail --
+    two machine-readable surfaces disagreeing about the same fact."""
+    for var in ("STRIPE_METERED_PRICE_ID", "STRIPE_FLAT_SUBSCRIPTION_PRICE_ID"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
+    monkeypatch.delenv("AUDIT_API_KEY", raising=False)
+
+    module = load_main_fresh("wcag_audit_main_keyrail")
+
+    from fastapi.testclient import TestClient
+
+    body = TestClient(module.app).post("/audit/bundle", json={"url": "https://x"}).json()
+    rail = next((a for a in body["accepts"] if a["protocol"] == "api_key"), None)
+    assert rail is not None, "a configured key rail is missing from accepts"
+    assert rail["send_via_header"] == "X-API-Key"
+    assert rail["price_usd"] == body["price_usd"], "the rail must quote this route's price"
+
+    manifest = TestClient(module.app).get("/.well-known/agent.json").json()
+    assert "stripe_api_key" in manifest["payment"]["methods"]
+    assert rail["method"] == "stripe_api_key", (
+        "the rail's name must match the one agent.json publishes"
+    )
+
+
+def test_the_api_key_rail_is_omitted_when_no_key_could_be_issued(monkeypatch):
+    """Fail closed, like every other rail: with no Stripe configured there is
+    no way to issue or meter a key, so advertising it would send an agent to
+    a rail that cannot settle."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key=None)
+    assert not module.billing.is_configured()
+
+    body = TestClient(module.app).post("/audit/wcag", json={"url": "https://x"}).json()
+    assert all(a["protocol"] != "api_key" for a in body["accepts"])
+
+
+def test_the_registry_manifest_cannot_be_rejected_for_a_field_the_schema_bounds():
+    """server.json is published to the MCP registry, which validates it
+    against the schema the file itself names. The bounds worth guarding
+    offline are the ones whose violation is invisible here and only shows up
+    as a rejected publish -- above all description's 100-character cap.
+    """
+    import json
+
+    manifest = json.loads((REPO_ROOT / "server.json").read_text())
+
+    for field in ("name", "description", "version"):
+        assert manifest.get(field), f"server.json is missing required field {field}"
+
+    assert len(manifest["description"]) <= 100, (
+        "the registry caps description at 100 characters and rejects the publish"
+    )
+    assert len(manifest.get("title", "")) <= 100
+    assert manifest["name"].count("/") == 1, "name must be reverse-DNS with one slash"
+
+    # Icons are rendered by the registry and by every subregistry mirroring
+    # it. The schema requires HTTPS and tells consumers to prefer icons on
+    # the server's own domain, so an icon pointing anywhere else is one
+    # consumers are entitled to refuse to load.
+    origin = manifest["websiteUrl"].rstrip("/")
+    for icon in manifest.get("icons", []):
+        assert icon["src"].startswith("https://"), icon["src"]
+        assert icon["src"].startswith(origin), (
+            f"{icon['src']} is not served from this server's own domain"
+        )
+        assert icon["mimeType"] in {
+            "image/png", "image/jpeg", "image/jpg", "image/svg+xml", "image/webp"
+        }, icon["mimeType"]
+
+
+def test_every_registry_icon_is_actually_served_by_this_app(monkeypatch):
+    """An icon URL that 404s is worse than no icon: the listing renders
+    broken rather than plain. These are paths on our own service, so whether
+    they resolve is something this repo can answer without the network."""
+    import json
+    from fastapi.testclient import TestClient
+
+    manifest = json.loads((REPO_ROOT / "server.json").read_text())
+    icons = manifest.get("icons", [])
+    if not icons:
+        pytest.skip("server.json declares no icons")
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    origin = manifest["websiteUrl"].rstrip("/")
+
+    for icon in icons:
+        path = icon["src"][len(origin):]
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} is advertised but not served"
+        assert icon["mimeType"] in response.headers["content-type"], (
+            f"{path} is served as {response.headers['content-type']}, "
+            f"advertised as {icon['mimeType']}"
+        )

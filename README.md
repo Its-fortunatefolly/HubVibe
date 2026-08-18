@@ -168,8 +168,12 @@ In [`wcag-audit-engine/integrations/`](wcag-audit-engine/integrations/):
   process-lifetime budget, both before anything is signed — an autonomous
   loop with an unbounded wallet is a drained wallet. Exposes LangChain/CrewAI
   tools via `hubvibe_tools()`.
-- **`github_action.yml`** — a copyable workflow, for repos that would rather
-  paste a job than depend on a published action.
+- **`github_action.yml`** — a complete, copyable workflow file. It *calls* the
+  published action rather than curl-ing the API: a hand-rolled HTTP step has
+  to re-implement the retry policy, the 4xx no-retry rule and the JSON
+  encoding of the target URL, and then be maintained against the API by
+  whoever pasted it. One file, one URL to edit, `on: push` and
+  `on: pull_request`.
 
 At the repo root:
 

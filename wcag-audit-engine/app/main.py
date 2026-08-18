@@ -263,6 +263,12 @@ def _bazaar_extension_for_path(path: Optional[str]) -> dict:
     """
     if not path:
         return {}
+    # /audit is an alias of /audit/wcag and is deliberately absent from the
+    # catalog (one row per sellable route, so prices cannot be duplicated).
+    # Without this it was also absent from Bazaar discovery, which made the
+    # shortest and most guessable paid path on the service the one path an
+    # agent could not find by capability.
+    path = _CATALOG_ALIASES.get(path, path)
     entry = next((e for e in _CATALOG if e["path"] == path), None)
     if entry is None:
         return {}
@@ -302,6 +308,29 @@ def _payment_required_response(
     if x402_entry:
         accepts.append(x402_entry)
     accepts.extend(mpp_payments.accepts_entries(price_usd=price_usd))
+    # The API-key rail belongs in `accepts` too. It was listed in
+    # /.well-known/agent.json's payment.methods and described in
+    # `alternative` below, but not here -- and `accepts` is the array an
+    # agent iterates. A CI pipeline holding a pre-funded key had no way to
+    # discover from the challenge alone that its key is spendable here; it
+    # had to parse prose. Gated on billing.is_configured() like every other
+    # rail: with no Stripe configured, no key can be issued or metered, so
+    # advertising it would be advertising a rail that cannot settle.
+    if billing.is_configured():
+        accepts.append(
+            {
+                "protocol": "api_key",
+                "method": "stripe_api_key",
+                "send_via_header": "X-API-Key",
+                "price_usd": price_usd,
+                "detail": (
+                    "Pre-funded key issued against a Stripe subscription; calls "
+                    "are metered against it. Usable unattended -- no browser "
+                    "step at call time."
+                ),
+                "get_one": f"{PUBLIC_BASE_URL}/billing/checkout",
+            }
+        )
 
     body = {
         "error": "payment_required",
@@ -607,12 +636,22 @@ def mcp_manifest():
     price an agent reads, and the price the route actually charges cannot
     drift apart -- and a second hand-maintained copy of the numbers defeats
     that by construction.
+
+    Per-tool SCHEMAS, for the same reason and it is not hypothetical: this
+    file already carried its own inputSchema copies, and they had drifted
+    from what /mcp serves -- the file omitted the html-or-url either-or that
+    the routes enforce, so an agent reading this manifest could construct a
+    body the route rejects. Schemas, titles and annotations are now taken from
+    _mcp_tools(), the same function the live MCP endpoint answers
+    tools/list with, so the two cannot disagree again. What the static file
+    still owns is the prose: tool names and descriptions.
     """
     with open(STATIC_DIR / "mcp.json", encoding="utf-8") as handle:
         manifest = json.load(handle)
 
     live_methods = _payment_methods_live()
     prices = {entry["path"]: entry["price_usd"] for entry in _CATALOG}
+    live_tools = {tool["name"]: tool for tool in _mcp_tools()}
 
     manifest["auth"]["methods"] = live_methods
     manifest["auth"]["description"] = (
@@ -627,6 +666,10 @@ def mcp_manifest():
         path = endpoint.get("path")
         if path in prices:
             endpoint["price_usd"] = prices[path]
+        live = live_tools.get(tool.get("name"))
+        if live is not None:
+            for field in ("title", "inputSchema", "outputSchema", "annotations"):
+                tool[field] = live[field]
 
     return JSONResponse(content=manifest, media_type="application/json")
 
@@ -738,6 +781,22 @@ _CATALOG = [
 ]
 
 
+def _schema_for(prose_input: dict) -> dict:
+    """The JSON Schema matching a catalog row's prose `input` description.
+
+    One function rather than a per-row field so the manifest, the MCP tools
+    and the Bazaar index cannot end up describing different bodies for the
+    same route -- the failure mode being an agent that generates a request
+    from the manifest and gets a 400 from the route.
+    """
+    return _MCP_URL_SCHEMA if prose_input is _URL_INPUT_SCHEMA else _MCP_HTML_OR_URL_SCHEMA
+
+
+# Paths that are served but are not their own catalog row. /audit predates
+# the named dimensions and is kept working for callers wired to it.
+_CATALOG_ALIASES = {"/audit": "/audit/wcag"}
+
+
 def _payment_methods_live() -> list:
     """Only the rails that can actually settle on this deployment.
 
@@ -840,6 +899,14 @@ def agent_manifest(request: Request):
                 "payment_required": True,
                 "price_usd": entry["price_usd"],
                 "input": entry["input"],
+                # The prose `input` above is for a human skimming the
+                # manifest. `input_schema`/`output_schema` are the same facts
+                # as JSON Schema, and they are the same objects the MCP tools
+                # and the Bazaar index advertise, so a crawler scoring this
+                # node -- or an agent generating a request from it -- gets a
+                # parseable contract instead of "string (required)".
+                "input_schema": _schema_for(entry["input"]),
+                "output_schema": _MCP_OUTPUT_SCHEMAS[entry["path"]],
                 "returns": entry["returns"],
                 "description": entry["description"],
                 "auth": _AUTH_DESCRIPTION,
@@ -860,6 +927,8 @@ def agent_manifest(request: Request):
                 "payment_required": True,
                 "price_usd": 0.03,
                 "input": _HTML_OR_URL_INPUT_SCHEMA,
+                "input_schema": _schema_for(_HTML_OR_URL_INPUT_SCHEMA),
+                "output_schema": _MCP_OUTPUT_SCHEMAS["/audit/wcag"],
                 "auth": _AUTH_DESCRIPTION,
                 "payment_methods": live_methods,
                 "note": "Alias of /audit/wcag, kept for backward compatibility.",
@@ -1021,66 +1090,190 @@ receipt and we'll sort it out.</footer>
 # the list below is the handshake set, newest first.
 MCP_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 
+# Input schemas are advertised to MCP clients, to the x402 Bazaar index, and
+# in /.well-known/agent.json. They must describe EXACTLY what the routes
+# accept: a schema stricter than the route makes a conforming client refuse
+# to send a call that would have worked, and a schema looser than the route
+# sends it into a 400 it paid nothing for but still burned a round trip on.
+#
+# `format: "uri"` is annotation-only in JSON Schema and the routes take a
+# plain string, so it documents intent without inventing a constraint the
+# server does not enforce. `additionalProperties` is deliberately left unset
+# for the same reason -- the Pydantic models ignore unknown keys, so
+# declaring `false` would advertise a rejection that never happens.
 _MCP_URL_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
+    "title": "Live URL to audit",
     "properties": {
         "url": {
             "type": "string",
             "format": "uri",
-            "description": (
-                "Live, publicly reachable URL to audit, including the scheme "
-                "(e.g. https://example.com). The audit loads this page for real."
-            ),
-        },
+            "description": "Live, fetchable http(s) URL to audit.",
+            "examples": ["https://example.com"],
+        }
     },
     "required": ["url"],
 }
-# `anyOf` is load-bearing, not decoration: without it the schema said {} was a
-# legal call, and a schema-driven agent that sends {} pays the auth round-trip
-# only to get a 400. The one-of-url-or-html rule the route enforces must be
-# expressed where the machine reads it, not in prose it never sees.
+# The either-or is a real route rule: both routes 400 on a body carrying
+# neither field. Stating it as `anyOf` rather than leaving `required` off
+# entirely is the difference between an agent knowing the constraint and
+# discovering it by spending a call on a 400.
 _MCP_HTML_OR_URL_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
+    "title": "Live URL or raw HTML to audit",
     "properties": {
         "url": {
             "type": "string",
             "format": "uri",
-            "description": (
-                "Live, publicly reachable URL to audit, including the scheme "
-                "(e.g. https://example.com). Provide either url or html, not both."
-            ),
+            "description": "Live, fetchable http(s) URL to audit.",
+            "examples": ["https://example.com"],
         },
         "html": {
             "type": "string",
-            "description": (
-                "Raw HTML document to audit instead of a URL -- for pages that "
-                "are not deployed anywhere yet. Provide either url or html."
-            ),
+            "description": "Raw HTML source to audit instead of fetching a URL.",
         },
     },
     "anyOf": [{"required": ["url"]}, {"required": ["html"]}],
 }
 
+# Output schemas. MCP has carried `outputSchema` since 2025-06-18 and
+# capability crawlers score on it, but the operational reason is narrower:
+# without one, an agent cannot tell before paying whether this tool returns a
+# shape its pipeline can consume. `pass` and `status` are the two fields every
+# audit response carries and the two an automated caller actually branches on.
+_FINDINGS_SCHEMA = {
+    "type": "array",
+    "description": "One entry per rule that did not pass. Empty when the check is clean.",
+    "items": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "Stable rule identifier."},
+            "severity": {"type": "string", "description": "Rule severity."},
+            "detail": {"type": "string", "description": "What failed and where."},
+        },
+        "required": ["id"],
+    },
+}
+_MCP_STATUS_PROPERTIES = {
+    "status": {"type": "string", "const": "ok", "description": "Present only on a completed audit."},
+    "pass": {"type": "boolean", "description": "Whether every rule in this dimension passed."},
+}
+_MCP_WCAG_OUTPUT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        **_MCP_STATUS_PROPERTIES,
+        "engine": {"type": "string", "const": "axe-core"},
+        "violations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "axe-core rule id."},
+                    "impact": {"type": "string", "description": "axe-core impact level."},
+                    "help": {"type": "string"},
+                    "help_url": {"type": "string", "format": "uri"},
+                    "nodes_affected": {"type": "integer", "minimum": 0},
+                },
+                "required": ["id"],
+            },
+        },
+    },
+    "required": ["pass"],
+}
+_MCP_FINDINGS_OUTPUT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {**_MCP_STATUS_PROPERTIES, "findings": _FINDINGS_SCHEMA},
+    "required": ["pass"],
+}
+_MCP_PERFORMANCE_OUTPUT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        **_MCP_STATUS_PROPERTIES,
+        "metrics": {
+            "type": "object",
+            "properties": {
+                "dom_node_count": {"type": "integer", "minimum": 0},
+                "total_bytes_transferred": {"type": "integer", "minimum": 0},
+                "request_count": {"type": "integer", "minimum": 0},
+            },
+        },
+        "findings": _FINDINGS_SCHEMA,
+    },
+    "required": ["pass"],
+}
+_MCP_BUNDLE_OUTPUT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        **_MCP_STATUS_PROPERTIES,
+        "wcag": _MCP_WCAG_OUTPUT_SCHEMA,
+        "seo": _MCP_FINDINGS_OUTPUT_SCHEMA,
+        "security": _MCP_FINDINGS_OUTPUT_SCHEMA,
+        "performance": _MCP_PERFORMANCE_OUTPUT_SCHEMA,
+    },
+    "required": ["pass"],
+}
+
+
+# Output schema per sellable path. Keyed off the catalog rather than added
+# to it because the schemas are defined below the catalog, and the catalog
+# has to stay importable by the manifest routes that sit above them.
+_MCP_OUTPUT_SCHEMAS = {
+    "/audit/wcag": _MCP_WCAG_OUTPUT_SCHEMA,
+    "/audit/seo": _MCP_FINDINGS_OUTPUT_SCHEMA,
+    "/audit/security": _MCP_FINDINGS_OUTPUT_SCHEMA,
+    "/audit/performance": _MCP_PERFORMANCE_OUTPUT_SCHEMA,
+    "/audit/bundle": _MCP_BUNDLE_OUTPUT_SCHEMA,
+}
+
+# Human-facing tool titles. MCP clients show `title` in preference to `name`,
+# and a crawler indexing capability reads it as the label.
 _MCP_TOOL_TITLES = {
-    "audit_wcag": "WCAG 2.1 A/AA accessibility audit",
-    "audit_seo": "SEO structural audit",
-    "audit_security": "Security-header audit",
-    "audit_performance": "Page-weight and performance audit",
-    "audit_bundle": "Full compliance bundle (all four audits)",
+    "/audit/wcag": "Accessibility audit (WCAG 2.1 A/AA)",
+    "/audit/seo": "SEO and metadata audit",
+    "/audit/security": "Security header audit",
+    "/audit/performance": "Page performance audit",
+    "/audit/bundle": "Full site compliance bundle (all four audits)",
+}
+
+# Every tool here reads a third-party page and returns a report. Nothing it
+# does mutates state on the caller's side or on the audited site, and the same
+# URL audited twice returns the same verdict for the same page -- so
+# readOnly/idempotent are accurate, and openWorld is accurate because the tool
+# reaches an arbitrary external host. These are the hints an orchestrator uses
+# to decide whether it may retry or parallelise a call without asking, so
+# stating them is what lets an agent drive this node unattended.
+_MCP_AUDIT_ANNOTATIONS = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
 }
 
 
 def _mcp_tools() -> list:
     """Tool list, derived from the same catalog the REST routes and the agent
     manifest use, so a tool can never advertise a price the route won't
-    charge."""
+    charge.
+
+    Carries inputSchema, outputSchema, title and annotations because an agent
+    deciding whether to spend money here has to answer three questions before
+    it calls: what do I send, what comes back, and is it safe to retry. A tool
+    that leaves any of them to prose is one an automated caller skips.
+    """
     tools = []
     for entry in _CATALOG:
-        name = "audit_" + entry["path"].rsplit("/", 1)[-1]
+        path = entry["path"]
+        name = "audit_" + path.rsplit("/", 1)[-1]
         tools.append(
             {
                 "name": name,
-                "title": _MCP_TOOL_TITLES.get(name, name),
+                "title": _MCP_TOOL_TITLES[path],
                 "description": (
                     f"{entry['description']} ${entry['price_usd']:.2f} per call. "
                     f"Returns: {entry['returns']}"
@@ -1090,17 +1283,8 @@ def _mcp_tools() -> list:
                     if entry["input"] is _URL_INPUT_SCHEMA
                     else _MCP_HTML_OR_URL_SCHEMA
                 ),
-                # MCP tool annotations, per spec. idempotentHint is FALSE on
-                # purpose: the result may be identical but every call is
-                # billed again, and an agent planning retries deserves to
-                # know repetition is not free.
-                "annotations": {
-                    "title": _MCP_TOOL_TITLES.get(name, name),
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": False,
-                    "openWorldHint": True,
-                },
+                "outputSchema": _MCP_OUTPUT_SCHEMAS[path],
+                "annotations": dict(_MCP_AUDIT_ANNOTATIONS, title=_MCP_TOOL_TITLES[path]),
             }
         )
     return tools
