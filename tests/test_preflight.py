@@ -110,6 +110,19 @@ def test_a_well_formed_pay_to_address_passes(tmp_path):
     assert "DEPLOY_INVOKED" in result.stdout
 
 
+def test_the_zero_address_blocks_the_deploy(tmp_path):
+    """0x + 40 zeros is SHAPE-valid -- it passes the hex check that catches
+    the short address above -- but address(0) is unownable and USDC reverts
+    transfers to it. This exact value shipped once, discovered live on
+    2026-08-18: x402 advertised, every possible payment unreceivable, and
+    from our side identical to zero demand. The shape gate alone blessed it."""
+    zero = [{"name": "X402_PAY_TO_ADDRESS",
+             "value": "0x0000000000000000000000000000000000000000"}]
+    result = _run(tmp_path, env=zero)
+    assert "ZERO ADDRESS" in result.stdout
+    assert "DEPLOY_INVOKED" not in result.stdout
+
+
 def test_a_secret_backed_address_is_reported_as_unchecked(tmp_path):
     """Its value cannot be read here. Claiming a pass would be worse than
     saying nothing, so it says exactly what it did not check."""
