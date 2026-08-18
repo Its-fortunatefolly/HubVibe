@@ -36,7 +36,8 @@ as the test that outranks everything else.
 | Webhook | `/billing/webhook`, enabled, `checkout.session.completed` |
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0, **active** |
 | Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
-| x402 | **UNVERIFIED — do not treat as live.** #43 recorded it live since 2026-08-16 on revision `hubvibe-00069-8kp` with a valid pay-to address, but the owner has since said they do not have a 40-hex address. Both cannot be true. Resolve with `bash scripts/verify-live.sh` before relying on this row either way — see below. |
+| x402 | **live, verified by the owner 2026-08-18** on revision `hubvibe-00071-97g` — 29/29 twice from Cloud Shell, including the Bazaar discovery check. The proof is structural, not a checker line: this revision carries the #46 fail-closed guard, which refuses to advertise x402 unless the pay-to address is exactly `0x` + 40 hex, so x402 appearing in the advertised methods IS the address validation. (The earlier contradiction — "valid address set" vs "the owner has no 40-hex address" — resolved as both true: the address belongs to the deployment, minted custodially, not to a wallet the owner holds.) |
+| x402 settle side | **untested until the first real payment.** The configured facilitator is CDP, whose verify/settle is gated on a Coinbase Business Account review still in limbo. If agent payments bounce, the fix is one env var: `X402_FACILITATOR_URL=https://facilitator.xpay.sh` — keyless, Base mainnet, zero-fee, health-checked live by the owner (`{"status":"ok"}`) — then redeploy. |
 
 ### Stripe price IDs (verified against the live account)
 
@@ -182,33 +183,33 @@ session.)
 ~~Register with Glama~~ — done; the owner confirmed 2026-08-18 the service
 is on the Glama connections registry.
 
-## 2026-08-16: x402 + Bazaar discovery — REPORTED shipped, NOT confirmed
+## 2026-08-16: x402 + Bazaar discovery — shipped; RESOLVED live 2026-08-18
 
-**Read this before believing the section below.** It was written from one
-session's run of `verify-live.sh`. The owner has since said they do not have
-a 40-hex address, which contradicts it directly. Nobody has re-run the live
-check since, so the honest state is *unknown*, and unknown is the dangerous
-one: if the deployed address is malformed, x402 is advertised on every 402,
-agents that find the service through the Bazaar build payments that cannot
-land, and the symptom is silence — identical to nobody wanting to buy.
+This section spent two days marked "not confirmed" because of a real
+contradiction: it claimed a valid pay-to address was set, and the owner said
+they do not have a 40-hex address. The resolution, established on
+2026-08-18: **both were true**. The address belongs to the deployment —
+minted custodially, never something the owner holds in a wallet app. Keep
+that distinction; it is what made the contradiction look unresolvable.
 
-Resolve it with one command, from a machine that can reach the service:
+How it was proven, because the method matters more than the number: the
+owner deployed revision `hubvibe-00071-97g` from Cloud Shell and got 29/29
+twice. That revision carries the #46 fail-closed guard, which refuses to
+advertise x402 unless the pay-to address is exactly `0x` + 40 hex —
+regardless of whether it came from a plain env var or Secret Manager. So
+`x402` appearing in the live advertised methods is not a checker line that
+could be too lenient (the verify-live "unpayable rail" check only catches
+`payTo:null`); it is the guard itself attesting the address shape. **When
+this revision or later advertises x402, the address is well-formed, by
+construction.**
 
-```bash
-bash scripts/verify-live.sh
-```
+Still unknown: whether the CDP facilitator will actually SETTLE — its
+verify/settle endpoints are gated on a Coinbase Business Account review
+that is still pending. The first real agent payment answers it. If payments
+bounce, switch `X402_FACILITATOR_URL` to `https://facilitator.xpay.sh`
+(keyless, Base mainnet, zero-fee, owner-health-checked) and redeploy.
 
-A `FAIL` on the unpayable-rail check means turn x402 off (unset both env
-vars) until a real Base address exists. Do not leave it advertised while
-unresolved.
-
-As of the fix in this branch the service also fails closed on its own: a
-pay-to address that is not `0x` + 40 hex is no longer advertised at all,
-whether it came from a plain env var or from Secret Manager. That reduces
-the blast radius; it does not answer whether the deployed revision predates
-the fix.
-
-The original report follows, unedited:
+The original 2026-08-16 report follows, unedited:
 
 A valid `0x` + 40-hex pay-to
 address was set alongside the CDP facilitator, and revision
