@@ -1023,15 +1023,50 @@ MCP_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 
 _MCP_URL_SCHEMA = {
     "type": "object",
-    "properties": {"url": {"type": "string", "description": "Live URL to audit"}},
+    "properties": {
+        "url": {
+            "type": "string",
+            "format": "uri",
+            "description": (
+                "Live, publicly reachable URL to audit, including the scheme "
+                "(e.g. https://example.com). The audit loads this page for real."
+            ),
+        },
+    },
     "required": ["url"],
 }
+# `anyOf` is load-bearing, not decoration: without it the schema said {} was a
+# legal call, and a schema-driven agent that sends {} pays the auth round-trip
+# only to get a 400. The one-of-url-or-html rule the route enforces must be
+# expressed where the machine reads it, not in prose it never sees.
 _MCP_HTML_OR_URL_SCHEMA = {
     "type": "object",
     "properties": {
-        "url": {"type": "string", "description": "Live URL to audit"},
-        "html": {"type": "string", "description": "Raw HTML to audit instead of a URL"},
+        "url": {
+            "type": "string",
+            "format": "uri",
+            "description": (
+                "Live, publicly reachable URL to audit, including the scheme "
+                "(e.g. https://example.com). Provide either url or html, not both."
+            ),
+        },
+        "html": {
+            "type": "string",
+            "description": (
+                "Raw HTML document to audit instead of a URL -- for pages that "
+                "are not deployed anywhere yet. Provide either url or html."
+            ),
+        },
     },
+    "anyOf": [{"required": ["url"]}, {"required": ["html"]}],
+}
+
+_MCP_TOOL_TITLES = {
+    "audit_wcag": "WCAG 2.1 A/AA accessibility audit",
+    "audit_seo": "SEO structural audit",
+    "audit_security": "Security-header audit",
+    "audit_performance": "Page-weight and performance audit",
+    "audit_bundle": "Full compliance bundle (all four audits)",
 }
 
 
@@ -1045,6 +1080,7 @@ def _mcp_tools() -> list:
         tools.append(
             {
                 "name": name,
+                "title": _MCP_TOOL_TITLES.get(name, name),
                 "description": (
                     f"{entry['description']} ${entry['price_usd']:.2f} per call. "
                     f"Returns: {entry['returns']}"
@@ -1054,6 +1090,17 @@ def _mcp_tools() -> list:
                     if entry["input"] is _URL_INPUT_SCHEMA
                     else _MCP_HTML_OR_URL_SCHEMA
                 ),
+                # MCP tool annotations, per spec. idempotentHint is FALSE on
+                # purpose: the result may be identical but every call is
+                # billed again, and an agent planning retries deserves to
+                # know repetition is not free.
+                "annotations": {
+                    "title": _MCP_TOOL_TITLES.get(name, name),
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
             }
         )
     return tools

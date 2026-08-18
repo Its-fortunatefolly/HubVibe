@@ -2136,6 +2136,56 @@ def test_mcp_tools_list_is_free_and_complete(monkeypatch):
         assert "$" in t["description"], "tool description must state its price"
 
 
+def test_mcp_tool_schemas_never_admit_an_empty_call(monkeypatch):
+    """The rule tools/call enforces -- url or html, at least one -- must be
+    expressed IN the schema, not only in prose.
+
+    Registry crawlers (Glama, Smithery) and schema-driven agents build calls
+    from inputSchema alone. Before this, the html-or-url schema had no
+    `required` and no `anyOf`, so {} was a schema-legal call: the agent does
+    everything right by its lights, pays the auth round-trip, and gets a 400.
+    An endpoint that invites doomed calls reads as flaky and gets dropped
+    from the agent's toolbox.
+    """
+    import jsonschema
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    tools = _rpc(client, "tools/list").json()["result"]["tools"]
+
+    for t in tools:
+        schema = t["inputSchema"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({}, schema)
+        # And the arguments the route genuinely accepts must stay legal.
+        jsonschema.validate({"url": "https://example.com"}, schema)
+
+
+def test_mcp_tools_carry_spec_annotations_and_titles(monkeypatch):
+    """title + annotations are what registries render and rank on; their
+    absence lists the tool as an unlabeled blob. idempotentHint must be False
+    everywhere: results may repeat but BILLING repeats too, and an agent
+    planning retries deserves to know repetition is not free."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    tools = _rpc(client, "tools/list").json()["result"]["tools"]
+
+    for t in tools:
+        assert t["title"], f"{t['name']} has no title"
+        ann = t["annotations"]
+        assert ann["readOnlyHint"] is True
+        assert ann["destructiveHint"] is False
+        assert ann["idempotentHint"] is False, (
+            f"{t['name']}: every call is billed again -- advertising it as "
+            "idempotent invites free-retry planning that costs real money"
+        )
+        assert ann["openWorldHint"] is True
+
+
 def test_mcp_tool_call_without_payment_is_an_error_result_not_a_crash(monkeypatch):
     """A payment requirement is a normal outcome the model should see, so it
     belongs in the result as isError -- not a JSON-RPC protocol error."""
