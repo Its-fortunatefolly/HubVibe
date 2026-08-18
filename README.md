@@ -1,8 +1,8 @@
 # HubVibe
 
-**Machine-payable site compliance audits.** An agent calls an endpoint, gets an
-HTTP 402 carrying the price and how to pay, settles it, and receives a result —
-no account, no signup, no human in the loop.
+**Machine-payable site compliance audits.** WCAG 2.1 A/AA, SEO, security
+headers, and performance — deterministic rules against the real rendered page,
+priced per call, payable by software with no account and no human in the loop.
 
 Live: **https://hubvibe-831480473793.us-south1.run.app**
 
@@ -10,11 +10,53 @@ Every check is a deterministic rule run against the live page. Nothing here is
 a language model judging whether a site looks compliant, and a check that could
 not run is returned as an error, never as a passing result.
 
+There are two ways in. Both take under a minute.
+
 ---
 
-## Try it
+## 1 — Gate your CI on it: one step, nothing to install
 
-An unauthenticated call tells you exactly what it costs and how to pay:
+```yaml
+- uses: Its-fortunatefolly/HubVibe@v1
+  with:
+    url: https://staging.example.com
+    api-key: ${{ secrets.HUBVIBE_API_KEY }}
+```
+
+That is the entire integration. Every pull request now runs the full
+compliance bundle against your deployed preview and **fails the build on the
+regression that caused it** — not in an audit six months later.
+
+- Findings render in the job summary: rule, impact, nodes hit, link to the fix.
+- A check that failed to *execute* is an error, never a silent pass — a green
+  build means the checks actually ran.
+- `fail-on-error: false` keeps our outage from ever blocking your deploy;
+  your real regressions still gate it.
+- **$0.10 per PR** for all four checks as one bundle, $0.03 for a single
+  check. A repo merging 100 PRs a month spends $10. No subscription, no seat
+  licence, no minimum.
+
+Gate a promotion on it:
+
+```yaml
+- name: Audit staging
+  id: audit
+  uses: Its-fortunatefolly/HubVibe@v1
+  with:
+    url: https://staging.example.com
+    api-key: ${{ secrets.HUBVIBE_API_KEY }}
+
+- name: Promote to production
+  if: steps.audit.outputs.passed == 'true'
+  run: ./deploy-production.sh
+```
+
+Keys come from [`/billing/checkout`](https://hubvibe-831480473793.us-south1.run.app/billing/checkout).
+Or skip the key entirely — see the second way in.
+
+## 2 — Point your agent at it: no key, no signup, pay per call
+
+An unauthenticated call is not an error here. It is the price sheet:
 
 ```bash
 curl -i -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
@@ -29,15 +71,40 @@ WWW-Authenticate: Payment ...
 {
   "error": "payment_required",
   "price_usd": 0.03,
-  "accepts": [ { "protocol": "mpp", "method": "tempo", ... } ],
+  "accepts": [ { "protocol": "x402", ... }, { "protocol": "mpp", ... } ],
   "docs": "/.well-known/agent.json"
 }
+```
+
+An agent reads the 402, signs an x402 payment (USDC on Base), retries with
+`X-PAYMENT`, and gets the audit. Payment is **verified before the audit runs
+and settled only after it produces a result** — a failed audit is never
+charged, on any rail.
+
+For Python agents and swarms, the bundled tollbooth client does the whole
+loop — challenge, budget check, signing, retry — with two hard spending
+limits enforced *before* anything is signed:
+
+```python
+from integrations.hubvibe_tollbooth import HubVibeTollbooth
+
+booth = HubVibeTollbooth.from_env()          # HUBVIBE_WALLET_KEY or HUBVIBE_API_KEY
+result = booth.audit("https://example.com")  # full bundle, $0.10
+result = booth.audit("https://example.com", endpoint="wcag")  # $0.03
 ```
 
 `accepts` lists only the payment rails that can genuinely settle on this
 deployment. A rail that is not configured is omitted rather than advertised
 with a null recipient, so a paying agent never builds a payment that cannot
 land.
+
+**How machines find this node without being told the URL:** every 402
+carries x402 Bazaar discovery data, so facilitators index it by capability
+and price; the MCP endpoint at [`/mcp`](https://hubvibe-831480473793.us-south1.run.app/mcp)
+is listed in the official registry as `io.github.Its-fortunatefolly/hubvibe`;
+and [`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json)
+is generated from the same catalog the routes charge from, so the advertised
+price is the charged price by construction.
 
 ## Endpoints
 
