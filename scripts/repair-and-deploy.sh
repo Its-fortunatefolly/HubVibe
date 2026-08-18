@@ -205,7 +205,16 @@ if [ "$PAY_TO" = "__FROM_SECRET__" ]; then
   warn "X402_PAY_TO_ADDRESS comes from Secret Manager, so its shape was NOT"
   warn "checked here. Verify by hand that it is 0x + 40 hex characters."
 elif [ -n "$PAY_TO" ]; then
-  if printf '%s' "$PAY_TO" | grep -qiE '^0x[0-9a-f]{40}$'; then
+  if [ "$PAY_TO" = "0x0000000000000000000000000000000000000000" ]; then
+    # Shape-valid, unownable. This exact value shipped once: it passes the
+    # 40-hex check below, the app advertised x402 as live, and USDC's
+    # contract reverts transfers to address(0) -- no payment could ever
+    # arrive, and from our side that is indistinguishable from no demand.
+    warn "X402_PAY_TO_ADDRESS is the ZERO ADDRESS (0x + 40 zeros). It is"
+    warn "well-formed but unownable: USDC transfers to address(0) revert."
+    warn "Set a real recipient address you control."
+    PREFLIGHT_FAILED=1
+  elif printf '%s' "$PAY_TO" | grep -qiE '^0x[0-9a-f]{40}$'; then
     ok "X402_PAY_TO_ADDRESS is a well-formed EVM address"
   else
     warn "X402_PAY_TO_ADDRESS is NOT a valid EVM address (needs 0x + exactly"

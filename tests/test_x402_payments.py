@@ -193,6 +193,9 @@ def test_payment_required_body_advertises_real_address_when_configured(monkeypat
         "0x32b08c5e927c69877d0fcab35618c26567492zz",   # right length, not hex
         "32b08c5e927c69877d0fcab35618c265674922bc",    # 40 hex, missing 0x
         "changeme",
+        # Shape-valid but unownable: passes every format check, and USDC
+        # reverts transfers to address(0). Shipped once, live, for real.
+        "0x0000000000000000000000000000000000000000",
     ],
 )
 def test_a_malformed_pay_to_address_never_advertises_x402(monkeypatch, bad_address):

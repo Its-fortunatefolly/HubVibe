@@ -97,6 +97,19 @@ def _warn_pay_to_malformed(address: str) -> None:
     )
 
 
+def _warn_pay_to_burn_address() -> None:
+    global _pay_to_warned
+    if _pay_to_warned:
+        return
+    _pay_to_warned = True
+    logging.getLogger(__name__).error(
+        "X402_PAY_TO_ADDRESS is the zero address (0x + 40 zeros). It is "
+        "well-formed but unownable: USDC transfers to address(0) revert, so "
+        "no payment could ever arrive. x402 will NOT be advertised until a "
+        "real recipient address is set."
+    )
+
+
 def _pay_to_is_usable() -> bool:
     """Shape-check the recipient before we ever advertise the rail.
 
@@ -120,6 +133,15 @@ def _pay_to_is_usable() -> bool:
     if not _NETWORK.startswith("eip155:"):
         return True
     if re.fullmatch(r"0x[0-9a-fA-F]{40}", _PAY_TO_ADDRESS):
+        # Shape-valid is not payable. The zero address is 0x + 40 hex and
+        # passes every format check, but address(0) is unownable and USDC's
+        # contract reverts transfers to it -- it is the canonical way to
+        # satisfy a shape gate with a value that can never receive money.
+        # This is not hypothetical: a deployment ran with exactly this,
+        # advertising x402 as live while every settlement was impossible.
+        if set(_PAY_TO_ADDRESS[2:]) == {"0"}:
+            _warn_pay_to_burn_address()
+            return False
         return True
     _warn_pay_to_malformed(_PAY_TO_ADDRESS)
     return False
