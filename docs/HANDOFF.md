@@ -27,14 +27,14 @@ as the test that outranks everything else.
 | | |
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
-| Tests | 292 passed, 1 skipped; flake8 clean — the same in CI and locally, since #44 pinned PyYAML |
-| Live checks | `bash scripts/verify-live.sh` → 29 passed, 0 failed, **including the authenticated paid path** |
+| Tests | 322 passed, 1 skipped; flake8 clean — the same in CI and locally, since #44 pinned PyYAML |
+| Live checks | `bash scripts/verify-live.sh` → **34** checks (was 29; 5 discovery-contract checks added 2026-08-18), **including the authenticated paid path**. Last run against the deployed node: see the x402 row — this session could not reach `*.run.app`. |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
 | Stripe account | `acct_1U28tvDA21T9EAQB`, **zero outstanding requirements** |
 | Payouts | daily → SUTTON BANK ····1444 |
 | Webhook | `/billing/webhook`, enabled, `checkout.session.completed` |
-| MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0, **active** |
+| MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0 active; `server.json` on main is **1.1.2** and not yet republished |
 | Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
 | x402 | **live, verified by the owner 2026-08-18** on revision `hubvibe-00071-97g` — 29/29 twice from Cloud Shell, including the Bazaar discovery check. The proof is structural, not a checker line: this revision carries the #46 fail-closed guard, which refuses to advertise x402 unless the pay-to address is exactly `0x` + 40 hex, so x402 appearing in the advertised methods IS the address validation. (The earlier contradiction — "valid address set" vs "the owner has no 40-hex address" — resolved as both true: the address belongs to the deployment, minted custodially, not to a wallet the owner holds.) |
 | x402 settle side | **untested until the first real payment.** The configured facilitator is CDP, whose verify/settle is gated on a Coinbase Business Account review still in limbo. If agent payments bounce, the fix is one env var: `X402_FACILITATOR_URL=https://facilitator.xpay.sh` — keyless, Base mainnet, zero-fee, health-checked live by the owner (`{"status":"ok"}`) — then redeploy. |
@@ -48,6 +48,88 @@ as the test that outranks everything else.
 | Agency | `price_1U34PXDA21T9EAQB7aMyADgE` | $249.00/mo |
 
 Machine rates: **$0.03** per single audit, **$0.10** per bundle.
+
+## 2026-08-18: the discovery contract — five gaps closed
+
+All five were the same shape: a machine-readable surface that told an agent
+something *different* from what another surface said, or said nothing at all
+where an agent needed a fact to act. None of them 500s. Each one ends with an
+agent that does not call, and from this side that is indistinguishable from
+nobody wanting to buy — which is the failure mode this business can least
+afford to misread.
+
+Each was verified by booting the service locally with every rail configured,
+running `verify-live.sh` against it, then booting the **pre-fix** code on a
+second port and re-running the same script: **33 passed / 0 failed** on the
+fix, **28 passed / 5 failed** on `origin/main`. The five FAIL lines are the
+five gaps. (33 not 34 because the paid-path check reports NOTE rather than
+PASS on a local box with no Playwright browsers — auth succeeds, the audit
+itself 502s. That branch is loud, not silent, which is the point of it.)
+
+**None of this was verified against the deployed Cloud Run node.** This
+session's sandbox is denied `*.run.app` at the network policy (`CONNECT
+tunnel failed, response 403`), so the deploy-and-verify step is still owed —
+see *How to deploy* below. Local agreement is not a deploy; that lesson is
+already in this file twice.
+
+1. **`accepts[]` omitted the API-key rail.** `/.well-known/agent.json` listed
+   `stripe_api_key` in `payment.methods`; the 402's `accepts[]` — the array an
+   agent actually iterates — did not. A CI pipeline holding a pre-funded key
+   had to parse prose out of `alternative` to learn its key was spendable.
+   Now emitted as a fourth `accepts` entry, gated on `billing.is_configured()`
+   like every other rail, so an unconfigured node still advertises nothing.
+
+2. **`/mcp.json` had drifted from `/mcp`.** The static file carried its own
+   `inputSchema` copies and they no longer matched what `tools/list` serves —
+   the file omitted the html-or-url either-or the routes enforce, so an agent
+   reading the manifest the *MCP registry points at* could build a body the
+   route rejects. `/mcp.json` now takes schemas, titles and annotations from
+   `_mcp_tools()`, the same function `/mcp` answers with. The static file
+   still owns the prose. Two tests hold the line, one on the served pair and
+   one on the copy on disk (crawlers fetch the raw file from GitHub).
+
+3. **Tool definitions were under-specified.** No `outputSchema` on any tool,
+   no `anyOf` expressing the html-or-url rule, no annotations. An agent
+   deciding whether to spend money here answers three questions from the tool
+   definition alone — what do I send, what comes back, is it safe to retry —
+   and all three were prose or absent. Added `outputSchema` per tool, `title`,
+   and `readOnly/destructive/idempotent/openWorld` hints (all accurate: these
+   read a third-party page and mutate nothing).
+   **Deliberately NOT added: `additionalProperties: false`.** The Pydantic
+   models ignore unknown keys, so declaring it would advertise a rejection
+   that never happens — a schema stricter than the route makes a conforming
+   client refuse a call that would have worked. Same reasoning as the
+   fail-closed rule, pointed the other way.
+
+4. **`/audit` was invisible to capability discovery.** It is an alias of
+   `/audit/wcag` and correctly has no catalog row of its own, which left the
+   shortest and most guessable paid path on the service as the one paid path
+   carrying no Bazaar extension. `_CATALOG_ALIASES` maps it.
+
+5. **`agent.json` described its inputs only as prose** (`"url": "string
+   (required)"`). Nothing a crawler scoring this node or an agent generating
+   a request can act on. Each endpoint now also carries `input_schema` and
+   `output_schema` — the same objects the MCP tools advertise, via
+   `_schema_for()`, so there is one contract rather than three.
+
+Also: `server.json` gained `icons` (validated against the live registry
+schema, which is reachable from the sandbox) and went to **1.1.2**. Two tests
+guard it offline — the 100-character `description` cap whose violation is
+invisible here and only shows up as a rejected publish, and that every
+advertised icon URL is a path this app actually serves.
+
+**GitHub Action.** `action.yml` was already correct at the root and needed no
+change. What changed is `integrations/github_action.yml`, the file consumers
+copy: it hand-rolled the HTTP call, so it duplicated — and would have to keep
+duplicating — the action's retry policy, its 4xx no-retry rule (a metered
+endpoint must never be paid twice for the same answer) and its JSON encoding
+of the target URL. It now calls the published action, and the Marketplace
+listing README carries the same complete workflow rather than a bare step
+fragment. A developer copies a file, not a snippet plus the scaffolding they
+have to infer.
+
+**Every guard above was proved by reintroducing the bug and watching the test
+go red, then restoring** — 12 new tests, 12 proven, per the rule below.
 
 ## Decisions already made — do not reverse these
 

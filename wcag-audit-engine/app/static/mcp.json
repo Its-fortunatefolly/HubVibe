@@ -9,19 +9,97 @@
   "tools": [
     {
       "name": "audit_wcag",
+      "title": "Accessibility audit (WCAG 2.1 A/AA)",
       "description": "WCAG 2.1 A/AA accessibility audit via axe-core against raw HTML or a live URL.",
       "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
+        "title": "Live URL or raw HTML to audit",
         "properties": {
-          "html": {
-            "type": "string",
-            "description": "Raw HTML source to audit"
-          },
           "url": {
             "type": "string",
-            "description": "Live URL to audit instead of raw HTML"
+            "format": "uri",
+            "description": "Live, fetchable http(s) URL to audit.",
+            "examples": [
+              "https://example.com"
+            ]
+          },
+          "html": {
+            "type": "string",
+            "description": "Raw HTML source to audit instead of fetching a URL."
           }
-        }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "url"
+            ]
+          },
+          {
+            "required": [
+              "html"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a completed audit."
+          },
+          "pass": {
+            "type": "boolean",
+            "description": "Whether every rule in this dimension passed."
+          },
+          "engine": {
+            "type": "string",
+            "const": "axe-core"
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "axe-core rule id."
+                },
+                "impact": {
+                  "type": "string",
+                  "description": "axe-core impact level."
+                },
+                "help": {
+                  "type": "string"
+                },
+                "help_url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "nodes_affected": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "pass"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Accessibility audit (WCAG 2.1 A/AA)"
       },
       "httpEndpoint": {
         "method": "POST",
@@ -31,19 +109,87 @@
     },
     {
       "name": "audit_seo",
+      "title": "SEO and metadata audit",
       "description": "Title, meta description, H1 structure, canonical link, OpenGraph tags, structured data, and lang attribute.",
       "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
+        "title": "Live URL or raw HTML to audit",
         "properties": {
-          "html": {
-            "type": "string",
-            "description": "Raw HTML source to audit"
-          },
           "url": {
             "type": "string",
-            "description": "Live URL to audit instead of raw HTML"
+            "format": "uri",
+            "description": "Live, fetchable http(s) URL to audit.",
+            "examples": [
+              "https://example.com"
+            ]
+          },
+          "html": {
+            "type": "string",
+            "description": "Raw HTML source to audit instead of fetching a URL."
           }
-        }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "url"
+            ]
+          },
+          {
+            "required": [
+              "html"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a completed audit."
+          },
+          "pass": {
+            "type": "boolean",
+            "description": "Whether every rule in this dimension passed."
+          },
+          "findings": {
+            "type": "array",
+            "description": "One entry per rule that did not pass. Empty when the check is clean.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable rule identifier."
+                },
+                "severity": {
+                  "type": "string",
+                  "description": "Rule severity."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "What failed and where."
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "pass"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "SEO and metadata audit"
       },
       "httpEndpoint": {
         "method": "POST",
@@ -53,18 +199,74 @@
     },
     {
       "name": "audit_security",
+      "title": "Security header audit",
       "description": "HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking protection, Referrer-Policy, and CORS from a live HTTP response. Not a TLS/cipher-suite scan or a penetration test.",
       "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
+        "title": "Live URL to audit",
         "properties": {
           "url": {
             "type": "string",
-            "description": "Live URL to audit"
+            "format": "uri",
+            "description": "Live, fetchable http(s) URL to audit.",
+            "examples": [
+              "https://example.com"
+            ]
           }
         },
         "required": [
           "url"
         ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a completed audit."
+          },
+          "pass": {
+            "type": "boolean",
+            "description": "Whether every rule in this dimension passed."
+          },
+          "findings": {
+            "type": "array",
+            "description": "One entry per rule that did not pass. Empty when the check is clean.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable rule identifier."
+                },
+                "severity": {
+                  "type": "string",
+                  "description": "Rule severity."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "What failed and where."
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "pass"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Security header audit"
       },
       "httpEndpoint": {
         "method": "POST",
@@ -74,18 +276,91 @@
     },
     {
       "name": "audit_performance",
+      "title": "Page performance audit",
       "description": "DOM node count, transferred bytes, and request count from one real page load. Not a full Lighthouse-style audit.",
       "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
+        "title": "Live URL to audit",
         "properties": {
           "url": {
             "type": "string",
-            "description": "Live URL to audit"
+            "format": "uri",
+            "description": "Live, fetchable http(s) URL to audit.",
+            "examples": [
+              "https://example.com"
+            ]
           }
         },
         "required": [
           "url"
         ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a completed audit."
+          },
+          "pass": {
+            "type": "boolean",
+            "description": "Whether every rule in this dimension passed."
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "dom_node_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "total_bytes_transferred": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "request_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "findings": {
+            "type": "array",
+            "description": "One entry per rule that did not pass. Empty when the check is clean.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable rule identifier."
+                },
+                "severity": {
+                  "type": "string",
+                  "description": "Rule severity."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "What failed and where."
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "pass"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Page performance audit"
       },
       "httpEndpoint": {
         "method": "POST",
@@ -95,18 +370,245 @@
     },
     {
       "name": "audit_bundle",
+      "title": "Full site compliance bundle (all four audits)",
       "description": "Runs audit_wcag + audit_seo + audit_security + audit_performance against one URL in a single call, billed once. If any dimension fails to run, the whole call fails and nothing is billed.",
       "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
+        "title": "Live URL to audit",
         "properties": {
           "url": {
             "type": "string",
-            "description": "Live URL to audit"
+            "format": "uri",
+            "description": "Live, fetchable http(s) URL to audit.",
+            "examples": [
+              "https://example.com"
+            ]
           }
         },
         "required": [
           "url"
         ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a completed audit."
+          },
+          "pass": {
+            "type": "boolean",
+            "description": "Whether every rule in this dimension passed."
+          },
+          "wcag": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "ok",
+                "description": "Present only on a completed audit."
+              },
+              "pass": {
+                "type": "boolean",
+                "description": "Whether every rule in this dimension passed."
+              },
+              "engine": {
+                "type": "string",
+                "const": "axe-core"
+              },
+              "violations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "axe-core rule id."
+                    },
+                    "impact": {
+                      "type": "string",
+                      "description": "axe-core impact level."
+                    },
+                    "help": {
+                      "type": "string"
+                    },
+                    "help_url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "nodes_affected": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "pass"
+            ]
+          },
+          "seo": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "ok",
+                "description": "Present only on a completed audit."
+              },
+              "pass": {
+                "type": "boolean",
+                "description": "Whether every rule in this dimension passed."
+              },
+              "findings": {
+                "type": "array",
+                "description": "One entry per rule that did not pass. Empty when the check is clean.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Stable rule identifier."
+                    },
+                    "severity": {
+                      "type": "string",
+                      "description": "Rule severity."
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "What failed and where."
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "pass"
+            ]
+          },
+          "security": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "ok",
+                "description": "Present only on a completed audit."
+              },
+              "pass": {
+                "type": "boolean",
+                "description": "Whether every rule in this dimension passed."
+              },
+              "findings": {
+                "type": "array",
+                "description": "One entry per rule that did not pass. Empty when the check is clean.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Stable rule identifier."
+                    },
+                    "severity": {
+                      "type": "string",
+                      "description": "Rule severity."
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "What failed and where."
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "pass"
+            ]
+          },
+          "performance": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "ok",
+                "description": "Present only on a completed audit."
+              },
+              "pass": {
+                "type": "boolean",
+                "description": "Whether every rule in this dimension passed."
+              },
+              "metrics": {
+                "type": "object",
+                "properties": {
+                  "dom_node_count": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "total_bytes_transferred": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "request_count": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "findings": {
+                "type": "array",
+                "description": "One entry per rule that did not pass. Empty when the check is clean.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Stable rule identifier."
+                    },
+                    "severity": {
+                      "type": "string",
+                      "description": "Rule severity."
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "What failed and where."
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "pass"
+            ]
+          }
+        },
+        "required": [
+          "pass"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Full site compliance bundle (all four audits)"
       },
       "httpEndpoint": {
         "method": "POST",

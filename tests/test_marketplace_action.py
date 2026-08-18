@@ -388,3 +388,53 @@ def test_pyyaml_is_declared_so_this_module_cannot_silently_skip_again():
         "PyYAML is missing from requirements.txt; CI will skip this whole "
         "module and report a green run that proves nothing about action.yml"
     )
+
+
+def test_the_listing_ships_a_complete_workflow_not_only_a_step(tmp_path):
+    """A step fragment is not something a developer can act on -- they still
+    have to know the workflow scaffolding around it. Adoption is what turns
+    into paid call volume, and the difference between "here is a step" and
+    "here is the file" is a real share of it.
+    """
+    target = tmp_path / "listing"
+    subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "publish-action-repo.sh"), str(target)],
+        check=True,
+        capture_output=True,
+    )
+    readme = (target / "README.md").read_text()
+
+    assert "on:" in readme and "push:" in readme, (
+        "the listing must show a workflow with its triggers, not just a step"
+    )
+    assert "jobs:" in readme and "runs-on:" in readme
+    assert ".github/workflows/" in readme, "say where the file goes"
+    assert "secrets.HUBVIBE_API_KEY" in readme
+
+
+def test_the_shipped_workflow_calls_the_action_rather_than_curl():
+    """integrations/github_action.yml is copied into consumer repos. When it
+    hand-rolled the HTTP call it duplicated the action's retry policy, its
+    4xx no-retry rule (a metered endpoint must never be paid twice for the
+    same answer) and its JSON encoding of the target URL -- three behaviours
+    that then had to be maintained by whoever copied it."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / "wcag-audit-engine" / "integrations" / "github_action.yml").read_text()
+    )
+    # PyYAML parses a bare `on:` key as the boolean True.
+    triggers = workflow.get("on", workflow.get(True))
+    assert "push" in triggers, "the CI gate must run on push"
+
+    steps = workflow["jobs"]["audit"]["steps"]
+    action_step = next((s for s in steps if "uses" in s), None)
+    assert action_step is not None, "the workflow must call the published action"
+    assert action_step["uses"].startswith("Its-fortunatefolly/hubvibe-audit-action@")
+
+    assert not any("curl" in str(s.get("run", "")) for s in steps), (
+        "no hand-rolled HTTP call -- the action already owns that logic"
+    )
+
+    endpoint = action_step["with"]["endpoint"]
+    assert endpoint in {"wcag", "seo", "security", "performance", "bundle"}, endpoint
