@@ -27,7 +27,7 @@ as the test that outranks everything else.
 | | |
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
-| Tests | 313 passed, 1 skipped; flake8 clean — the same in CI and locally, since #44 pinned PyYAML |
+| Tests | 322 passed, 1 skipped; flake8 clean — the same in CI and locally, since #44 pinned PyYAML |
 | Live checks | `bash scripts/verify-live.sh` → **34** checks (was 29; 5 discovery-contract checks added 2026-08-18), **including the authenticated paid path**. Last run against the deployed node: see the x402 row — this session could not reach `*.run.app`. |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
