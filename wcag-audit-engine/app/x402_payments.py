@@ -22,6 +22,14 @@ Requires, at deploy time:
 - X402_PAY_TO_ADDRESS    the wallet address that receives payment
 - X402_NETWORK           CAIP-2 network id (default: "eip155:8453", Base mainnet)
 - X402_PRICE             default: "$0.03"
+
+Optional, and worth having: when STRIPE_SECRET_KEY is set and the pay-to
+address is a Stripe-custodied deposit address (scripts/x402-setup.py mints
+one), every settled payment is also recorded as a Stripe PaymentIntent in
+transaction_verification mode -- the pattern from Stripe's machine-payments
+sample. That is what makes on-chain revenue show up in the Stripe balance,
+reporting, and payouts instead of accumulating invisibly on an address.
+Recording failures never fail the payment; the money moved on-chain already.
 """
 
 import asyncio
@@ -473,6 +481,113 @@ def verify_only_sync(payment_header: str, price: Optional[str] = None):
         return None
 
 
+# CAIP-2 network id -> the name Stripe's crypto transaction_verification
+# expects. Deliberately tiny: recording is only attempted on networks this
+# map names, because guessing a network name would create a PaymentIntent
+# that verifies against the wrong chain -- worse than not recording at all.
+_STRIPE_NETWORK_NAMES = {"eip155:8453": "base"}
+
+# Pinned to the same preview version app/mpp_payments.py already targets;
+# the crypto payment_method surface only exists behind it.
+_STRIPE_RECORD_API_VERSION = "2026-05-27.preview"
+
+_record_disabled_logged = False
+
+
+def record_settlement_in_stripe(settle_result, requirements) -> None:
+    """Mirror a settled on-chain payment into Stripe as a PaymentIntent.
+
+    This is the pattern from Stripe's own machine-payments sample: after the
+    facilitator settles USDC on-chain, create a PaymentIntent in
+    `transaction_verification` mode carrying the transaction hash. Stripe
+    verifies the transaction against the deposit address and the payment
+    shows up in the same balance, reporting, and payouts as every card
+    charge. Without this, x402 revenue lands on the deposit address but the
+    Stripe account reads zero -- earning and looking dead at the same time,
+    which this project can no longer afford to confuse.
+
+    Never raises, and its outcome must never influence the settle result:
+    by the time this runs the money has already moved on-chain, so a
+    recording failure is a bookkeeping gap to log loudly, not a payment
+    failure to report to the caller. Recording is also idempotent by
+    construction -- the idempotency key is the transaction hash, so a retry
+    or a double call cannot double-count revenue.
+
+    Silently does nothing when Stripe is not configured, when the network
+    has no known Stripe name, or when the settled amount rounds below one
+    cent -- each of those is a deployment where recording cannot be correct.
+    """
+    global _record_disabled_logged
+    try:
+        tx_hash = getattr(settle_result, "transaction", None)
+        if not tx_hash or not getattr(settle_result, "success", False):
+            return
+
+        stripe_key = os.environ.get("STRIPE_SECRET_KEY")
+        if not stripe_key:
+            if not _record_disabled_logged:
+                _record_disabled_logged = True
+                logging.getLogger(__name__).warning(
+                    "x402 settlement succeeded but STRIPE_SECRET_KEY is not "
+                    "set, so on-chain revenue will NOT appear in Stripe. The "
+                    "USDC is on the pay-to address; only the bookkeeping is "
+                    "missing."
+                )
+            return
+
+        network_name = _STRIPE_NETWORK_NAMES.get(_NETWORK)
+        if not network_name:
+            if not _record_disabled_logged:
+                _record_disabled_logged = True
+                logging.getLogger(__name__).warning(
+                    "x402 settled on %s, which has no known Stripe "
+                    "transaction_verification network name -- settlements "
+                    "will not be mirrored into Stripe.",
+                    _NETWORK,
+                )
+            return
+
+        # requirements.amount is atomic USDC units (6 decimals):
+        # $0.01 == 10_000 units. Stripe wants integer cents.
+        amount_cents = round(int(requirements.amount) / 10_000)
+        if amount_cents < 1:
+            return
+
+        import stripe as _stripe
+
+        intent = _stripe.PaymentIntent.create(
+            amount=amount_cents,
+            currency="usd",
+            confirm=True,
+            payment_method_data={"type": "crypto"},
+            payment_method_types=["crypto"],
+            payment_method_options={
+                "crypto": {
+                    "mode": "transaction_verification",
+                    "transaction_verification_options": {
+                        "network": network_name,
+                        "transaction_hash": tx_hash,
+                    },
+                }
+            },
+            idempotency_key=tx_hash,
+            api_key=stripe_key,
+            stripe_version=_STRIPE_RECORD_API_VERSION,
+        )
+        logging.getLogger(__name__).info(
+            "recorded x402 settlement in Stripe: %s, %d cents, tx %s",
+            getattr(intent, "id", "<no id>"),
+            amount_cents,
+            tx_hash,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "x402 settlement succeeded on-chain but recording it in Stripe "
+            "failed. Revenue is on the pay-to address; Stripe will not show "
+            "it until this transaction hash is recorded."
+        )
+
+
 def settle_sync(pending) -> bool:
     """Capture a previously verified payment. Call only after delivering.
 
@@ -489,7 +604,10 @@ def settle_sync(pending) -> bool:
         async def _run():
             return await server.settle_payment(pending.payload, pending.requirements[0])
 
-        return bool(asyncio.run(_run()).success)
+        result = asyncio.run(_run())
+        if result.success:
+            record_settlement_in_stripe(result, pending.requirements[0])
+        return bool(result.success)
     except Exception:
         return False
 
@@ -518,6 +636,8 @@ async def verify_and_settle(payment_header: str, price: Optional[str] = None) ->
             return False
 
         settle_result = await server.settle_payment(payload, requirements[0])
+        if settle_result.success:
+            record_settlement_in_stripe(settle_result, requirements[0])
         return bool(settle_result.success)
     except Exception:
         return False

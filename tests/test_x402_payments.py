@@ -66,12 +66,18 @@ def _install_fake_server(monkeypatch, module, *, valid=True, settled=True):
     server = MagicMock()
     server.initialize = MagicMock(return_value=None)
     server.register = MagicMock()
-    server.build_payment_requirements = MagicMock(return_value=[MagicMock()])
+    # Concrete amount so the Stripe-recording path can do arithmetic on it;
+    # atomic USDC units, $0.03. A bare MagicMock would make int() raise and
+    # silently skip recording in every test that goes through this helper.
+    requirement = MagicMock()
+    requirement.amount = "30000"
+    server.build_payment_requirements = MagicMock(return_value=[requirement])
 
     verify_result = MagicMock()
     verify_result.is_valid = valid
     settle_result = MagicMock()
     settle_result.success = settled
+    settle_result.transaction = "0xsettledtx"
 
     async def _verify(*a, **k):
         return verify_result
@@ -388,3 +394,168 @@ def test_static_headers_still_used_when_no_cdp_credentials(monkeypatch):
         monkeypatch, auth_headers=json.dumps({"Authorization": "Bearer tok"})
     )
     assert type(module._auth_provider()).__name__ == "_StaticAuthProvider"
+
+
+# --- Recording settlements in Stripe -------------------------------------
+#
+# The pattern from Stripe's machine-payments sample: after the facilitator
+# settles USDC on-chain, mirror it into Stripe as a PaymentIntent in
+# transaction_verification mode. This is what makes x402 revenue appear in
+# the Stripe balance instead of accumulating invisibly on an address -- and
+# "earning while reading zero" is the one confusion this project cannot
+# afford, because zero is also what no demand looks like.
+
+
+def _settlement(tx="0xtxhash", success=True, amount="30000"):
+    """A settle result + requirements pair shaped like the real library's:
+    amount is atomic USDC units (6 decimals), $0.03 == 30_000."""
+    result = MagicMock()
+    result.transaction = tx
+    result.success = success
+    requirements = MagicMock()
+    requirements.amount = amount
+    return result, requirements
+
+
+def _capture_payment_intents(monkeypatch, module, *, boom=False):
+    """Intercept stripe.PaymentIntent.create inside the module under test."""
+    import stripe
+
+    calls = []
+
+    def _create(**kwargs):
+        if boom:
+            raise RuntimeError("stripe exploded")
+        calls.append(kwargs)
+        pi = MagicMock()
+        pi.id = "pi_test"
+        return pi
+
+    monkeypatch.setattr(stripe.PaymentIntent, "create", staticmethod(_create))
+    return calls
+
+
+def test_a_settled_payment_is_recorded_as_a_stripe_payment_intent(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+
+    result, requirements = _settlement(amount="30000")  # $0.03
+    module.record_settlement_in_stripe(result, requirements)
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["amount"] == 3, "30_000 atomic USDC units is 3 cents"
+    assert call["currency"] == "usd"
+    opts = call["payment_method_options"]["crypto"]
+    assert opts["mode"] == "transaction_verification"
+    assert opts["transaction_verification_options"]["network"] == "base"
+    assert opts["transaction_verification_options"]["transaction_hash"] == "0xtxhash"
+
+
+def test_recording_is_idempotent_by_transaction_hash(monkeypatch):
+    """A retry or double call must not double-count revenue. The idempotency
+    key IS the transaction hash, so Stripe collapses duplicates server-side."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+
+    result, requirements = _settlement(tx="0xsame")
+    module.record_settlement_in_stripe(result, requirements)
+
+    assert calls[0]["idempotency_key"] == "0xsame"
+
+
+def test_recording_failure_never_fails_the_settlement(monkeypatch):
+    """By the time recording runs the money has already moved on-chain. A
+    bookkeeping failure that turned into a payment failure would refuse
+    service to a caller who has already paid -- the worst possible outcome."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    module = _load_x402(monkeypatch)
+    _capture_payment_intents(monkeypatch, module, boom=True)
+    _install_fake_server(monkeypatch, module)
+
+    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
+
+
+def test_settlement_still_succeeds_without_a_stripe_key(monkeypatch):
+    """Stripe recording is optional bookkeeping, not a payment dependency.
+    A deployment paying to a self-custody wallet has no Stripe to record
+    into, and its payments must still settle."""
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+    _install_fake_server(monkeypatch, module)
+
+    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
+    assert calls == [], "no key, no PaymentIntent -- and no crash"
+
+
+def test_a_failed_settlement_is_never_recorded(monkeypatch):
+    """Recording an unsettled payment would invent revenue in Stripe that
+    never arrived on-chain -- bookkeeping fraud by bug."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+
+    result, requirements = _settlement(success=False)
+    module.record_settlement_in_stripe(result, requirements)
+    result2, requirements2 = _settlement(tx=None)
+    module.record_settlement_in_stripe(result2, requirements2)
+
+    assert calls == []
+
+
+def test_an_unmapped_network_skips_recording_rather_than_guessing(monkeypatch):
+    """transaction_verification verifies against a named network. Guessing
+    the name records the payment against the wrong chain, which is worse
+    than not recording: it looks reconciled and is not."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_NETWORK", "eip155:1")  # Ethereum mainnet, unmapped
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+
+    result, requirements = _settlement()
+    module.record_settlement_in_stripe(result, requirements)
+
+    assert calls == []
+
+
+def test_sub_cent_settlements_are_not_recorded(monkeypatch):
+    """Stripe rejects zero-cent PaymentIntents; a sub-cent settlement would
+    turn every recording attempt into a logged error."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+
+    result, requirements = _settlement(amount="4000")  # $0.004
+    module.record_settlement_in_stripe(result, requirements)
+
+    assert calls == []
+
+
+def test_settle_sync_records_after_a_successful_settle(monkeypatch):
+    """Both settle paths must record -- settle_sync is the one the paid
+    routes actually use (verify first, deliver, then settle)."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+    _install_fake_server(monkeypatch, module)
+
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    assert pending is not None
+    assert module.settle_sync(pending) is True
+    assert len(calls) == 1
+
+
+def test_verify_and_settle_records_after_a_successful_settle(monkeypatch):
+    """The legacy /audit route settles through verify_and_settle_sync, not
+    settle_sync -- if only one path records, revenue splits into visible and
+    invisible depending on which route the agent happened to call."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+    _install_fake_server(monkeypatch, module)
+
+    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
+    assert len(calls) == 1
