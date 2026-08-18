@@ -61,6 +61,37 @@ Runs against your deployed preview or staging URL and fails the build if it regr
 
 That's the whole integration.
 
+## The whole file, if you'd rather paste one
+
+Save as `.github/workflows/hubvibe-audit.yml`, edit the one URL, add
+`HUBVIBE_API_KEY` to your repository secrets. Every push to `main` and every
+pull request is audited from then on.
+
+```yaml
+name: HubVibe Site Compliance Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # The one line to edit. Your deployed preview, staging, or production URL.
+  AUDIT_URL: https://your-site.example.com
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Its-fortunatefolly/hubvibe-audit-action@v1
+        with:
+          url: ${{ env.AUDIT_URL }}
+          api-key: ${{ secrets.HUBVIBE_API_KEY }}
+          endpoint: bundle          # or: wcag, seo, security, performance
+          fail-on-violation: true   # your regressions gate the build
+          fail-on-error: false      # our outage does not
+```
+
 ## What it checks
 
 | | |
