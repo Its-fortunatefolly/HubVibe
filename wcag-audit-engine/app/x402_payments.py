@@ -376,6 +376,7 @@ def bazaar_extension_for_body(
     input_example: dict,
     input_schema: dict,
     output_example: Optional[dict] = None,
+    method: str = "POST",
 ) -> dict:
     """Bazaar discovery data for a JSON-body route, or {} when x402 is off.
 
@@ -383,6 +384,20 @@ def bazaar_extension_for_body(
     reading this extension off their 402 responses, and agents shopping for a
     capability search that index. Without it a paid endpoint is reachable only
     by someone who already knows the URL, which is the opposite of the point.
+
+    `method` is filled in here rather than left to the library. The library
+    documents it as "NOT passed to this function -- inferred from the route
+    key or enriched by bazaar_resource_server_extension at runtime", and this
+    service uses neither: it hand-builds its 402 so that one challenge can
+    carry x402, MPP and the API-key rail together. So nothing ever enriched
+    it, and every 402 went out with an `info.input` that omitted `method`
+    while the `schema` shipped alongside it in the same object declared
+    `method` required. The Bazaar's own facilitator-side validator
+    (`validate_discovery_extension`) rejects that record --
+    `input: 'method' is a required property` -- so a facilitator that
+    validates before cataloguing indexed nothing. The rail settled fine and
+    the discovery half was silently dead, which is the exact failure this
+    extension exists to prevent.
 
     Gated on is_configured() for the same reason every other x402 surface is:
     the index is reached through a facilitator, so with no facilitator
@@ -395,12 +410,17 @@ def bazaar_extension_for_body(
     try:
         from x402.extensions.bazaar import OutputConfig, declare_discovery_extension
 
-        return declare_discovery_extension(
+        extension = declare_discovery_extension(
             input=input_example,
             input_schema=input_schema,
             body_type="json",
             output=OutputConfig(example=output_example) if output_example else None,
         )
+        # setdefault, not assignment: if a future library version starts
+        # emitting the method itself, the library's value wins rather than
+        # being overwritten by this default.
+        extension["bazaar"]["info"]["input"].setdefault("method", method)
+        return extension
     except Exception as exc:
         # Discovery is an enhancement. It must never be the reason a caller
         # fails to receive a payment challenge it could otherwise act on --
