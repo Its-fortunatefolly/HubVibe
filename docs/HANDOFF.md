@@ -27,7 +27,7 @@ as the test that outranks everything else.
 | | |
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
-| Tests | 322 passed, 1 skipped; flake8 clean — the same in CI and locally, since #44 pinned PyYAML |
+| Tests | `python -m pytest -q` — read the number off the run, do not trust a number written here. It was 292, then 313, then 322, then 325 (#51) inside two days, and a row like this is stale one merge after it is written. flake8 clean, and the count is the same in CI and locally since #44 pinned PyYAML — that agreement, not the integer, is the thing worth checking. |
 | Live checks | `bash scripts/verify-live.sh` is now **34** checks — 29, plus the 5 discovery-contract checks #48 added on 2026-08-18. **The deployed node has only ever been run against the 29-check version** (the owner's 29/29 from Cloud Shell, see the x402 row, predates #48). The 5 new checks have passed only against a locally booted node. Re-run to close that gap: a 34/34 is the first result that covers the whole script. |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
