@@ -27,7 +27,7 @@ as the test that outranks everything else.
 | | |
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
-| Tests | 322 passed, 1 skipped; flake8 clean — the same in CI and locally, since #44 pinned PyYAML |
+| Tests | `python -m pytest -q` — read the number off the run, do not trust a number written here. It was 292, then 313, then 322, then 325 (#51) inside two days, and a row like this is stale one merge after it is written. flake8 clean, and the count is the same in CI and locally since #44 pinned PyYAML — that agreement, not the integer, is the thing worth checking. |
 | Live checks | `bash scripts/verify-live.sh` is now **34** checks — 29, plus the 5 discovery-contract checks #48 added on 2026-08-18. **The deployed node has only ever been run against the 29-check version** (the owner's 29/29 from Cloud Shell, see the x402 row, predates #48). The 5 new checks have passed only against a locally booted node. Re-run to close that gap: a 34/34 is the first result that covers the whole script. |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
@@ -37,7 +37,7 @@ as the test that outranks everything else.
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0 active; `server.json` on main is **1.1.2** and not yet republished |
 | Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
 | x402 | **ADVERTISED BUT UNPAYABLE — the deployed pay-to address is `0x` + 40 ZEROS.** Confirmed 2026-08-18 by printing the live env var. The zero address is shape-valid, so it passed the #46 guard, the preflight, and every verify-live run — and `address(0)` is unownable, so no payment has ever been able to land. Discovery works, the paid path works, the money path is dead. **Fix: deploy a real recipient address** (see the x402 section below). Do not read "x402 in the advertised methods" as working; read the address. |
-| x402 settle side | **untested until the first real payment.** The configured facilitator is CDP, whose verify/settle is gated on a Coinbase Business Account review still in limbo. If agent payments bounce, the fix is one env var: `X402_FACILITATOR_URL=https://facilitator.xpay.sh` — keyless, Base mainnet, zero-fee, health-checked live by the owner (`{"status":"ok"}`) — then redeploy. |
+| x402 settle side | **untested until the first real payment.** The configured facilitator is CDP, whose verify/settle is gated on a Coinbase Business Account review that is **not going to clear**: it wants proof of a DBA the owner does not have, and the EIN on file belongs to a different business. Treat CDP as unavailable, not pending. The replacement is one env var — `X402_FACILITATOR_URL=https://facilitator.xpay.sh`, keyless, Base mainnet, zero-fee, health-checked live by the owner (`{"status":"ok"}`) — then redeploy. That claim is now true; **it was not before.** The CDP key pair stays mounted on the service, and `_auth_provider()` used to hand it to whatever facilitator was configured, so the swap would have signed every xpay.sh call with a JWT bound to a host Coinbase never issued for. CDP credentials are now used only against a Coinbase host and ignored (with a logged warning) anywhere else. Six tests hold that line. |
 
 ### Stripe price IDs (verified against the live account)
 
@@ -265,7 +265,7 @@ session.)
 ~~Register with Glama~~ — done; the owner confirmed 2026-08-18 the service
 is on the Glama connections registry.
 
-## 2026-08-16: x402 + Bazaar discovery — shipped; RESOLVED live 2026-08-18
+## 2026-08-16: x402 + Bazaar discovery — discovery shipped; the MONEY PATH IS DEAD
 
 This section spent two days marked "not confirmed" because of a real
 contradiction: it claimed a valid pay-to address was set, and the owner said
