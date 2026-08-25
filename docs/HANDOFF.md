@@ -28,7 +28,7 @@ as the test that outranks everything else.
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
 | Tests | `python -m pytest -q` — read the number off the run, do not trust a number written here. It was 292, then 313, then 322, then 325 (#51) inside two days, and a row like this is stale one merge after it is written. flake8 clean, and the count is the same in CI and locally since #44 pinned PyYAML — that agreement, not the integer, is the thing worth checking. |
-| Live checks | `bash scripts/verify-live.sh` is now **34** checks — 29, plus the 5 discovery-contract checks #48 added on 2026-08-18. **The deployed node has only ever been run against the 29-check version** (the owner's 29/29 from Cloud Shell, see the x402 row, predates #48). The 5 new checks have passed only against a locally booted node. Re-run to close that gap: a 34/34 is the first result that covers the whole script. |
+| Live checks | `bash scripts/verify-live.sh` → **34 passed, 0 failed** against the deployed node, 2026-08-25. First run ever to cover the whole script, including the 5 discovery-contract checks from #48 and the authenticated paid path. |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
 | Stripe account | `acct_1U28tvDA21T9EAQB`, **zero outstanding requirements** |
@@ -37,7 +37,7 @@ as the test that outranks everything else.
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0 active; `server.json` on main is **1.1.2** and not yet republished |
 | Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
 | x402 | **live, verified by the owner 2026-08-18** on revision `hubvibe-00071-97g` — 29/29 twice from Cloud Shell, including the Bazaar discovery check. The proof is structural, not a checker line: this revision carries the #46 fail-closed guard, which refuses to advertise x402 unless the pay-to address is exactly `0x` + 40 hex, so x402 appearing in the advertised methods IS the address validation. (The earlier contradiction — "valid address set" vs "the owner has no 40-hex address" — resolved as both true: the address belongs to the deployment, minted custodially, not to a wallet the owner holds.) |
-| x402 settle side | **untested until the first real payment.** The configured facilitator is CDP, whose verify/settle is gated on a Coinbase Business Account review that is **not going to clear**: it wants proof of a DBA the owner does not have, and the EIN on file belongs to a different business. Treat CDP as unavailable, not pending. The replacement is one env var — `X402_FACILITATOR_URL=https://facilitator.xpay.sh`, keyless, Base mainnet, zero-fee, health-checked live by the owner (`{"status":"ok"}`) — then redeploy. That claim is now true; **it was not before.** The CDP key pair stays mounted on the service, and `_auth_provider()` used to hand it to whatever facilitator was configured, so the swap would have signed every xpay.sh call with a JWT bound to a host Coinbase never issued for. CDP credentials are now used only against a Coinbase host and ignored (with a logged warning) anywhere else. Six tests hold that line. |
+| x402 settle side | Facilitator is now **xpay.sh** (keyless, Base mainnet, zero fee) — CDP is abandoned, not pending: its review wants proof of a DBA that does not exist. The CDP key pair may stay mounted; since #55 those credentials only go to a Coinbase host. Settlement itself is still unproven until the first real agent payment — nothing has ever been attempted. |
 
 ### Stripe price IDs (verified against the live account)
 
@@ -130,6 +130,41 @@ have to infer.
 
 **Every guard above was proved by reintroducing the bug and watching the test
 go red, then restoring** — 12 new tests, 12 proven, per the rule below.
+
+## 2026-08-25: the rail is live, and why it was not
+
+`34 passed, 0 failed`. The first time the full checker has ever run clean
+against the deployed service.
+
+What had been wrong was not the code and not the config. It was that they
+were never in the same place. `gcloud run services update --update-env-vars`
+mints a revision carrying the **same container image**, so every fix merged
+to `main` — the #48 discovery contract, the #55 CDP guard — sat in the repo
+while the container went on serving an older image. Config read correct,
+`verify-live.sh` failed checks that passed locally, and that reads as a
+broken checker rather than a stale deploy. Fixed in #57: `go-live-x402.sh`
+now hands off to `repair-and-deploy.sh`, which deploys source.
+
+**Green config is not a deploy.** File that next to "green tests do not prove
+a deploy" — same failure, one layer up.
+
+Two questions are now closed and should not be reopened:
+
+- **The pay-to address exists and is well-formed.** Two sessions burned days
+  on "the owner has no 40-hex address." The live 402 advertises x402, and the
+  #46 guard refuses to advertise unless the address is exactly `0x` + 40 hex.
+  The address is real; it was minted for the deployment, not held in a wallet
+  app. Both halves of the old contradiction were true.
+- **Coinbase is out of the path entirely.** It was only ever the facilitator —
+  the referee that verifies signatures — never the destination of the money.
+  The DBA review blocks CDP and nothing else.
+
+What this changes in the world: facilitators populate the x402 Bazaar by
+reading the discovery extension off live 402s. Until now no working
+facilitator was serving this node, so the capability index had nothing to
+list and no cold agent could find it by what it does. That is now possible
+for the first time. It is not the same as demand, and the counter to watch is
+still charges, not checks passed.
 
 ## Decisions already made — do not reverse these
 
