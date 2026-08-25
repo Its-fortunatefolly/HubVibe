@@ -12,13 +12,21 @@
 # was deleted rather than kept alongside this one: two copies of a published
 # action drift, and the one that drifts is always the one people are running.
 #
+# The Marketplace NAME must be globally unique across every action, and
+# cannot match an existing action, user, or organization name. GitHub
+# rejected "HubVibe Site Compliance Audit" at the publish step on
+# 2026-08-25. If this one is rejected too, change it here and re-run
+# scripts/publish-action-repo.sh -- nothing else depends on this string,
+# and the job-summary heading in scripts/render_audit_summary.py is a
+# separate string that does not have to match.
+#
 # Design note on adoption: a paid third-party call in someone else's CI is
 # adopted only if it is predictable. So this action never charges for a run it
 # cannot complete, never hard-fails a build over a transient network blip
 # (retries first), and prints the price it is about to spend before spending it.
 # Those constraints are what make it installable in an enterprise pipeline, not
 # a tax on one.
-name: "HubVibe Site Compliance Audit"
+name: "HubVibe WCAG SEO and Security Audit"
 description: "Automated WCAG, SEO, security, and performance compliance audits for CI/CD pipelines."
 author: "HubVibe"
 
