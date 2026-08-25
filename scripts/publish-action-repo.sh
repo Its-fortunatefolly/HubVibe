@@ -46,7 +46,7 @@ cp "$REPO_ROOT/action.yml" "$TARGET/action.yml"
 cp "$REPO_ROOT/scripts/render_audit_summary.py" "$TARGET/scripts/render_audit_summary.py"
 
 cat > "$TARGET/README.md" <<'MARKDOWN'
-# HubVibe Site Compliance Audit
+# HubVibe WCAG SEO and Security Audit
 
 **Catch accessibility, SEO, security-header and performance regressions in the pull request that caused them — not in an audit six months later.**
 
@@ -210,7 +210,7 @@ Next steps:
   cd $TARGET
   git init -b main
   git add .
-  git commit -m "HubVibe Site Compliance Audit action"
+  git commit -m "HubVibe WCAG SEO and Security Audit action"
   git remote add origin https://github.com/Its-fortunatefolly/hubvibe-audit-action.git
   git push -u origin main
 
@@ -224,7 +224,7 @@ Then, on github.com: Releases -> Draft a new release -> choose tag v1.0.0 ->
 tick "Publish this Action to the GitHub Marketplace" -> accept the agreement
 -> Publish release.
 
-The Marketplace name must be globally unique. "HubVibe Site Compliance Audit"
+The Marketplace name must be globally unique. "HubVibe WCAG SEO and Security Audit"
 is set in action.yml; if the publish flow reports it as taken, change the
 name there and re-run this script.
 EOF

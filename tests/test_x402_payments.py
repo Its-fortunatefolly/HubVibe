@@ -564,6 +564,84 @@ def test_verify_and_settle_records_after_a_successful_settle(monkeypatch):
     assert len(calls) == 1
 
 
+# --- Switching away from CDP -------------------------------------------------
+#
+# The handoff bills leaving CDP as "one env var": point X402_FACILITATOR_URL at
+# a keyless facilitator, redeploy. The CDP key pair stays mounted on the Cloud
+# Run service, so that claim only holds if the credentials stop being used when
+# the facilitator is no longer Coinbase's.
+
+
+def test_cdp_credentials_are_not_sent_to_a_non_coinbase_facilitator(monkeypatch):
+    """A CDP token is a JWT bound to Coinbase's own host, not a shared secret
+    anyone else could validate. Signing a third-party facilitator's requests
+    with one is meaningless at best and a 401 at worst -- and a 401 here is
+    the worst failure this file knows: x402 still advertised on every 402,
+    every payment rejected, indistinguishable from nobody buying."""
+    module = _load_cdp(monkeypatch, url="https://facilitator.xpay.sh")
+    assert module._auth_provider() is None, (
+        "CDP credentials were handed to a facilitator that cannot validate them"
+    )
+
+
+def test_the_documented_one_variable_swap_actually_works(monkeypatch):
+    """The whole point: with the CDP key pair still mounted, changing only
+    X402_FACILITATOR_URL must leave a working, advertised x402 rail."""
+    module = _load_cdp(monkeypatch, url="https://facilitator.xpay.sh")
+    assert module.is_configured(), "the rail stopped being advertised"
+    assert module.accepts_entry(price="$0.03") is not None
+
+
+def test_static_headers_still_reach_a_non_coinbase_facilitator(monkeypatch):
+    """Ignoring CDP must fall through to the generic credential path, not
+    swallow it -- a facilitator that wants a bearer token still gets one."""
+    module = _load_cdp(
+        monkeypatch,
+        url="https://facilitator.example.com",
+        auth_headers=json.dumps({"Authorization": "Bearer tok"}),
+    )
+    provider = module._auth_provider()
+    assert provider is not None
+    assert provider.get_auth_headers().verify == {"Authorization": "Bearer tok"}
+
+
+def test_cdp_is_still_used_for_coinbase_hosts(monkeypatch):
+    """The fall-through must not disarm CDP where it is the right credential."""
+    module = _load_cdp(monkeypatch)
+    provider = module._auth_provider()
+    assert provider is not None
+    assert type(provider).__name__ == "_CdpAuthProvider"
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "https://api.cdp.coinbase.com/platform/v2/x402",
+        "https://coinbase.com/x402",
+        "https://user:pw@api.cdp.coinbase.com:443/platform/v2/x402",
+    ],
+)
+def test_coinbase_hosts_are_recognised_through_port_and_userinfo(monkeypatch, host):
+    module = _load_cdp(monkeypatch, url=host)
+    assert module._host_is_coinbase(host) is True
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        # The lookalike that matters: suffix matching on "coinbase.com" without
+        # the leading dot would accept this and hand over the key pair.
+        "https://api.cdp.coinbase.com.evil.example/x402",
+        "https://notcoinbase.com/x402",
+        "https://facilitator.xpay.sh",
+    ],
+)
+def test_lookalike_hosts_never_receive_cdp_credentials(monkeypatch, host):
+    module = _load_cdp(monkeypatch, url=host)
+    assert module._host_is_coinbase(host) is False
+    assert module._auth_provider() is None
+
+
 # --- Bazaar discovery records must survive the facilitator's own validator ---
 #
 # The Bazaar half of a 402 is only worth emitting if a facilitator will

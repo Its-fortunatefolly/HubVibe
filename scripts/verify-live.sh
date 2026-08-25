@@ -278,7 +278,30 @@ echo "Machine discovery: is this node findable by agents that would pay it?"
 DISC=$(curl -sS -m 30 -X POST "$BASE/audit/bundle" \
   -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
 if printf '%s' "$DISC" | grep -q '"bazaar"'; then
-  pass "402 carries x402 Bazaar discovery data (indexable by facilitators)"
+  # Presence was the whole check, and presence is not indexability. The
+  # record shipped for months without `info.input.method` while the schema
+  # emitted beside it declared method required, so the Bazaar's own
+  # facilitator-side validator rejected every one -- and this line passed
+  # every time, including the 34/34 of 2026-08-25. A grep for the word
+  # "bazaar" cannot tell a catalogued record from a discarded one.
+  #
+  # Checked with python rather than the x402 library because this script
+  # runs in Cloud Shell against the deployed node, where the library is not
+  # installed. `method` is the field that actually broke; the unit tests in
+  # tests/test_x402_payments.py run the full validator.
+  if printf '%s' "$DISC" | python3 -c '
+import json, sys
+try:
+    info = json.load(sys.stdin)["extensions"]["bazaar"]["info"]["input"]
+except Exception:
+    sys.exit(1)
+# mcp-type records carry no method by design; only body records need one.
+sys.exit(0 if info.get("type") != "http" or info.get("method") else 1)
+' 2>/dev/null; then
+    pass "402 carries x402 Bazaar discovery data (indexable by facilitators)"
+  else
+    fail "402 carries a Bazaar record that names no HTTP method -- a validating facilitator discards it, so this node is not indexable by capability"
+  fi
 else
   echo "  NOTE  no Bazaar discovery on the 402 -- expected while x402 is off."
   echo "        Set X402_FACILITATOR_URL and X402_PAY_TO_ADDRESS to turn on"

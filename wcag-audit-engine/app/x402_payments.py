@@ -246,6 +246,49 @@ class _CdpAuthProvider:
         return AuthHeaders(**signed)
 
 
+# Hosts a Coinbase CDP key pair can actually sign for. A CDP token is a JWT
+# minted against Coinbase's own key and bound to the request host; it is not a
+# shared secret any other facilitator could validate. Sending one anywhere
+# else is meaningless at best and a 401 at worst.
+_CDP_HOST_SUFFIX = ".coinbase.com"
+
+
+def _host_is_coinbase(url: str) -> bool:
+    """True when `url` names a Coinbase host.
+
+    Raises on a URL with no host at all. That is a different fault from
+    "pointed somewhere else on purpose": there is nothing to bind a JWT to
+    and nothing for the facilitator client to call either, so it stays a
+    loud construction-time failure rather than being downgraded into the
+    quiet fall-through that a deliberate facilitator swap deserves.
+    """
+    from urllib.parse import urlparse
+
+    netloc = urlparse(url).netloc
+    if not netloc:
+        raise ValueError(f"X402_FACILITATOR_URL is not a valid URL: {url!r}")
+    host = netloc.split("@")[-1].split(":")[0].lower()
+    return host == "coinbase.com" or host.endswith(_CDP_HOST_SUFFIX)
+
+
+_cdp_mismatch_warned = False
+
+
+def _warn_cdp_ignored(url: str) -> None:
+    global _cdp_mismatch_warned
+    if _cdp_mismatch_warned:
+        return
+    _cdp_mismatch_warned = True
+    logging.getLogger(__name__).warning(
+        "CDP credentials are set but X402_FACILITATOR_URL points at %s, which "
+        "is not a Coinbase host. A CDP token is bound to Coinbase's own host "
+        "and cannot be validated by anyone else, so it is being ignored. This "
+        "deployment is talking to that facilitator with "
+        "X402_FACILITATOR_AUTH_HEADERS, or keyless if that is unset.",
+        url,
+    )
+
+
 def _auth_provider():
     """The facilitator auth provider for this deployment, or None.
 
@@ -253,9 +296,25 @@ def _auth_provider():
     silently dropping credentials would leave x402 advertised and every
     payment rejected by the facilitator, which looks identical to "nobody is
     buying" and could go unnoticed indefinitely.
+
+    CDP credentials are used ONLY against a Coinbase host. The handoff bills
+    switching away from CDP as "one env var" -- point X402_FACILITATOR_URL at
+    a keyless facilitator and redeploy -- and that was not true while this
+    branch was unconditional: the CDP key pair stays mounted on the service,
+    so every call to the new facilitator went out signed with a JWT bound to
+    a host Coinbase never issued for. Whether that 401s or is ignored is the
+    third party's choice, not ours, and the failure mode if it 401s is the
+    worst one this file knows: x402 still advertised on every 402, every
+    payment rejected, indistinguishable from nobody buying. Ignoring the
+    credentials instead makes the documented one-variable swap actually work,
+    and says so in the log rather than deciding it silently.
     """
     if _CDP_API_KEY_ID and _CDP_API_KEY_SECRET:
-        return _CdpAuthProvider(_CDP_API_KEY_ID, _CDP_API_KEY_SECRET, _FACILITATOR_URL or "")
+        if _host_is_coinbase(_FACILITATOR_URL or ""):
+            return _CdpAuthProvider(
+                _CDP_API_KEY_ID, _CDP_API_KEY_SECRET, _FACILITATOR_URL or ""
+            )
+        _warn_cdp_ignored(_FACILITATOR_URL or "")
 
     if not _FACILITATOR_AUTH_HEADERS:
         return None
