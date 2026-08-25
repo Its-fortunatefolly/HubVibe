@@ -159,12 +159,37 @@ Two questions are now closed and should not be reopened:
   the referee that verifies signatures — never the destination of the money.
   The DBA review blocks CDP and nothing else.
 
-What this changes in the world: facilitators populate the x402 Bazaar by
-reading the discovery extension off live 402s. Until now no working
-facilitator was serving this node, so the capability index had nothing to
-list and no cold agent could find it by what it does. That is now possible
-for the first time. It is not the same as demand, and the counter to watch is
-still charges, not checks passed.
+### Bazaar discovery is NOT live, and cannot be with this facilitator
+
+Checked directly on 2026-08-25, after the swap:
+
+    curl -s https://facilitator.xpay.sh/discovery/resources
+    {"message":"Not Found"}
+
+xpay.sh settles payments and runs no Bazaar index. The Bazaar is populated by
+facilitators reading the discovery extension off 402s; if the facilitator has
+no `/discovery/resources`, nothing is cataloged. This node's 402s carry the
+extension correctly -- `verify-live.sh` passes that check -- and it goes
+nowhere.
+
+**Payable is not discoverable.** Two sessions in a row inferred the second
+from the first. Do not repeat it: serving discovery data is our half; a
+facilitator indexing it is the other half, and we do not control it.
+
+So capability-based discovery -- an agent that has never heard of HubVibe
+finding it by what it does -- is currently **unavailable**. CDP is the
+facilitator that would provide it and it is blocked on the DBA review. The
+open question worth one search, and nobody has done it: **is there a keyless
+x402 facilitator that also serves `/discovery/resources`?** If one exists,
+switching to it restores capability discovery for the price of one env var.
+
+Until then the discovery that actually exists is name-based or human-browsed:
+the MCP registry, the GitHub Marketplace listing, Glama, and the crawler
+surfaces (`llms.txt`, `agent.json`, `sitemap.xml`). Marketplace is the
+primary channel now, not the Bazaar.
+
+None of this is demand, and the counter to watch is still charges, not checks
+passed.
 
 ## Decisions already made — do not reverse these
 
