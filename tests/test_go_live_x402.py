@@ -57,12 +57,34 @@ def test_the_zero_address_is_rejected_even_though_it_is_well_formed():
     assert "0x0000000000000000000000000000000000000000" in _text()
 
 
-def test_it_verifies_against_the_live_service_after_deploying():
-    """Green tests do not prove a deploy. A route that passed every local
-    test still 500'd in the container."""
+def test_it_deploys_the_source_and_not_only_the_variables():
+    """`services update --update-env-vars` mints a revision carrying the SAME
+    image. The variables change, the code does not -- so a service can report
+    every variable correct while running an image from before the fixes those
+    variables activate.
+
+    That is not hypothetical: the #48 discovery checks failed against a live
+    service whose config was entirely correct, because the running image
+    predated #48. The only symptom was a checker failing where it passed
+    locally, which reads as a broken checker rather than a stale deploy.
+    """
+    lines = [ln.strip() for ln in _text().splitlines() if not ln.strip().startswith("#")]
+    invocation = [ln for ln in lines if "repair-and-deploy.sh" in ln]
+    assert invocation, (
+        "setting env vars is not a deploy -- the source has to ship too. "
+        "A mention in a comment does not count; this must be an invocation."
+    )
     text = _text()
-    assert "verify-live.sh" in text
-    assert text.index("services update") < text.index("verify-live.sh")
+    assert text.index("services update") < text.index(invocation[0])
+
+
+def test_it_hands_off_rather_than_keeping_a_second_copy_of_the_deploy():
+    """Two copies of the deploy logic drift, and the copy that drifts is
+    always the one people are running. repair-and-deploy.sh owns the source
+    deploy, its preflight, and the live verification."""
+    text = _text()
+    assert "gcloud run deploy" not in text
+    assert "exec bash" in text
 
 
 def test_it_does_not_point_at_the_facilitator_that_cannot_be_used():
@@ -74,7 +96,12 @@ def test_it_does_not_point_at_the_facilitator_that_cannot_be_used():
     assert "coinbase" not in default[0].lower()
 
 
-def test_it_is_safe_to_re_run():
-    """A correct deployment must mint no revision -- Cloud Run revisions were
-    once created on every run of a script that was supposed to be idempotent."""
-    assert "nothing to change -- no revision minted" in _text()
+def test_it_does_not_mint_a_revision_just_to_rewrite_identical_variables():
+    """The variable step is skipped when both are already correct.
+
+    The source deploy that follows is deliberately NOT conditional: there is
+    no cheap way to know whether the running image matches the source, and
+    reporting "nothing to do" while serving a stale image is precisely the
+    failure this script was written to end.
+    """
+    assert "both variables already correct" in _text()
