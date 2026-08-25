@@ -128,7 +128,7 @@ else
   warn "changing from ${CUR_FACILITATOR:-<unset>} to $FACILITATOR"
 fi
 
-step "3. Applying"
+step "3. Setting the variables"
 UPDATE_ARGS=()
 [ "$CUR_FACILITATOR" != "$FACILITATOR" ] && UPDATE_ARGS+=("X402_FACILITATOR_URL=$FACILITATOR")
 # Written as an explicit if: `A || B && C` in bash parses left-to-right as
@@ -139,17 +139,37 @@ if [ "$NEED_ADDRESS" -eq 1 ] || [ -n "${X402_PAY_TO_ADDRESS:-}" ]; then
 fi
 
 if [ ${#UPDATE_ARGS[@]} -eq 0 ]; then
-  ok "nothing to change -- no revision minted"
+  ok "both variables already correct"
 else
   IFS=','; JOINED="${UPDATE_ARGS[*]}"; unset IFS
   gcloud run services update "$SERVICE" --region="$REGION" \
     --update-env-vars="$JOINED" \
-    || die "update failed -- the running revision is untouched"
-  ok "deployed"
+    || die "setting the variables failed -- the running revision is untouched"
+  ok "variables set"
 fi
 
-# The CDP key pair can stay mounted. Since the fix in #55, CDP credentials are
-# used only against a Coinbase host and ignored anywhere else, so they no
-# longer sign requests to a facilitator that cannot validate them.
-step "4. Verifying against the live service"
-bash "$REPO_ROOT/scripts/verify-live.sh"
+# The CDP key pair can stay mounted. Since #55, CDP credentials are used only
+# against a Coinbase host and ignored anywhere else, so they no longer sign
+# requests to a facilitator that cannot validate them.
+
+# 4. Deploy the SOURCE, not just the variables.
+#
+# This step is why the first version of this script was wrong, and the way it
+# was wrong is the one this repo keeps relearning: `services update
+# --update-env-vars` mints a revision carrying the SAME container image. The
+# variables change, the code does not. A service can therefore report every
+# variable correct while running an image from before the fixes those
+# variables are meant to activate -- and the only visible symptom was
+# verify-live.sh failing checks that pass locally, which reads as a broken
+# checker rather than a stale deploy.
+#
+# It happened here: the discovery-contract checks added in #48 failed against
+# a service whose variables were all correct, because the running image
+# predated #48. Green config is not a deploy.
+#
+# repair-and-deploy.sh already does the source deploy, with a preflight that
+# refuses to deploy into a broken environment, so hand off rather than keep a
+# second copy of that logic -- the copy that drifts is always the one running.
+step "4. Deploying the current source"
+warn "env vars alone do not ship code; this deploys the image too"
+exec bash "$REPO_ROOT/scripts/repair-and-deploy.sh"
