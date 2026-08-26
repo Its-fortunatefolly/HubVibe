@@ -36,7 +36,7 @@ as the test that outranks everything else.
 | Webhook | `/billing/webhook`, enabled, `checkout.session.completed` |
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0 active; `server.json` on main is **1.1.2** and not yet republished |
 | Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
-| x402 | **live, verified by the owner 2026-08-18** on revision `hubvibe-00071-97g` — 29/29 twice from Cloud Shell, including the Bazaar discovery check. The proof is structural, not a checker line: this revision carries the #46 fail-closed guard, which refuses to advertise x402 unless the pay-to address is exactly `0x` + 40 hex, so x402 appearing in the advertised methods IS the address validation. (The earlier contradiction — "valid address set" vs "the owner has no 40-hex address" — resolved as both true: the address belongs to the deployment, minted custodially, not to a wallet the owner holds.) |
+| x402 | **Live per #58** — `verify-live.sh` reported 34 passed / 0 failed against the deployed node on 2026-08-25. **Do not re-derive this from the advertised-methods list.** On 2026-08-18 the deployed pay-to address was `0x` + 40 ZEROS: shape-valid, so it passed the #46 guard, the preflight, and every verify-live run, while `address(0)` is unownable and USDC reverts transfers to it — the rail was advertised and unpayable for days and nothing said so. A shape check proves shape; shape is not payability. `scripts/go-live-x402.sh` now replaces zeros explicitly, and the app and preflight both reject them. To know the current recipient, read it: `gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format=json` and look at `X402_PAY_TO_ADDRESS`. |
 | x402 settle side | Facilitator is now **xpay.sh** (keyless, Base mainnet, zero fee) — CDP is abandoned, not pending: its review wants proof of a DBA that does not exist. The CDP key pair may stay mounted; since #55 those credentials only go to a Coinbase host. Settlement itself is still unproven until the first real agent payment — nothing has ever been attempted. |
 
 ### Stripe price IDs (verified against the live account)
@@ -325,7 +325,7 @@ session.)
 ~~Register with Glama~~ — done; the owner confirmed 2026-08-18 the service
 is on the Glama connections registry.
 
-## 2026-08-16: x402 + Bazaar discovery — shipped; RESOLVED live 2026-08-18
+## 2026-08-16: x402 + Bazaar discovery — discovery shipped; the MONEY PATH IS DEAD
 
 This section spent two days marked "not confirmed" because of a real
 contradiction: it claimed a valid pay-to address was set, and the owner said
@@ -334,19 +334,54 @@ they do not have a 40-hex address. The resolution, established on
 minted custodially, never something the owner holds in a wallet app. Keep
 that distinction; it is what made the contradiction look unresolvable.
 
-How it was proven, because the method matters more than the number: the
-owner deployed revision `hubvibe-00071-97g` from Cloud Shell and got 29/29
-twice. That revision carries the #46 fail-closed guard, which refuses to
-advertise x402 unless the pay-to address is exactly `0x` + 40 hex —
-regardless of whether it came from a plain env var or Secret Manager. So
-`x402` appearing in the live advertised methods is not a checker line that
-could be too lenient (the verify-live "unpayable rail" check only catches
-`payTo:null`); it is the guard itself attesting the address shape. **When
-this revision or later advertises x402, the address is well-formed, by
-construction.**
+### The "by construction" argument was WRONG. Read this before trusting a shape check.
 
-Still unknown: whether the CDP facilitator will actually SETTLE — its
-verify/settle endpoints are gated on a Coinbase Business Account review
+An earlier version of this section argued: revision `hubvibe-00071-97g`
+carries the #46 fail-closed guard, which refuses to advertise x402 unless
+the pay-to address is `0x` + 40 hex; the live node advertises x402;
+therefore the address is well-formed **by construction**.
+
+The logic held. The conclusion was worthless. Later on 2026-08-18 the owner
+printed the deployed value:
+
+```
+X402_PAY_TO_ADDRESS = 0x0000000000000000000000000000000000000000
+```
+
+The zero address is `0x` + 40 hex. It passes the #46 guard, it passes the
+preflight, and the verify-live "unpayable rail" check only ever looked for
+`payTo:null`. Every gate said yes. And `address(0)` is unownable — USDC's
+contract reverts transfers to it — so **not one x402 payment could ever have
+arrived**, on any revision, since the day it was set.
+
+This is the single most expensive lesson in this file: **a shape check
+proves shape, and shape is not payability.** "Well-formed" answered a
+question nobody was asking. The question was "can money land here", and the
+zero address is precisely the value that satisfies a format gate while
+answering no. Whoever set it on 2026-08-16 almost certainly did so to get
+past the shape gate.
+
+Three layers now reject it specifically (see the 2026-08-18 zero-address
+commit): the app guard logs at ERROR and turns the rail off, the preflight
+blocks the deploy, and both are mutation-tested. But those protect the
+NEXT deploy — they do not retroactively fix a running revision.
+
+**Current state of x402: advertised, and unpayable, until a real recipient
+address is deployed.** Do not read "x402 in the advertised methods" as
+working. Read the address itself:
+
+```bash
+gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format=json \
+  | python3 -c "import json,sys;d=json.load(sys.stdin);env=[e for c in d['spec']['template']['spec']['containers'] for e in c.get('env',[])];print(next((e.get('value') or 'FROM SECRET: '+e['valueFrom']['secretKeyRef']['name'] for e in env if e['name']=='X402_PAY_TO_ADDRESS'),'NOT SET'))"
+```
+
+Then set a real one — a Stripe-custodied Base deposit address from
+`scripts/x402-setup.py --network base` (revenue lands in the Stripe balance,
+and the #47 PaymentIntent mirroring only fires for a Stripe-custodied
+address), or a self-custody Base address — and redeploy.
+
+Also still unknown, and separate: whether the CDP facilitator will SETTLE —
+its verify/settle endpoints are gated on a Coinbase Business Account review
 that is still pending. The first real agent payment answers it. If payments
 bounce, switch `X402_FACILITATOR_URL` to `https://facilitator.xpay.sh`
 (keyless, Base mainnet, zero-fee, owner-health-checked) and redeploy.
