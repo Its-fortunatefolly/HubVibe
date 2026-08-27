@@ -28,7 +28,7 @@ as the test that outranks everything else.
 |---|---|
 | Cloud Run | project `resolver-time`, service `hubvibe`, region `us-south1` |
 | Tests | `python -m pytest -q` — read the number off the run, do not trust a number written here. It was 292, then 313, then 322, then 325 (#51) inside two days, and a row like this is stale one merge after it is written. flake8 clean, and the count is the same in CI and locally since #44 pinned PyYAML — that agreement, not the integer, is the thing worth checking. |
-| Live checks | `bash scripts/verify-live.sh` is **36 checks** since #61. Last run against the deployed node: **34 passed, 0 failed, 2026-08-27** — but that was the *pre-#61* checker, run from a `HubVibe-deploy4` sitting on `8df2d44`. **The 2 payability checks have never run against the deployed node, and the deployed revision predates the payability fix, so it is still serving a 402 no client can pay.** A 36/36 is the first result that means the rail works. Deploy, then re-run. |
+| Live checks | `bash scripts/verify-live.sh` → **36 passed, 0 failed against the deployed node, 2026-08-27** (owner, Cloud Shell, post-#61/#62 deploy). This is the first run that ever proved payability: `accepts[] is spec-shaped: 1 payable x402 entry` and `402 carries the v2 PAYMENT-REQUIRED challenge header` both passed live. The deployed 402 is now constructible into a signature by a conforming x402 client — the #61 unpayability is fixed *in production*, not just on main. |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
 | Stripe account | `acct_1U28tvDA21T9EAQB`, **zero outstanding requirements** |
@@ -400,16 +400,20 @@ revision.
 
 ## What is left
 
-**THE ONE THING. Deploy #61, then make the first paid call.** Everything else
-in this section is downstream of it. Exact sequence, in Cloud Shell:
+**THE ONE THING — half done.** The deploy landed and the checker proved it:
+**36/36 against the deployed node, 2026-08-27**, including both payability
+checks. The half that remains is the first paid call, in Cloud Shell:
 
 ```bash
-cd ~/HubVibe-deploy4 && git fetch origin main && git reset --hard origin/main
-bash scripts/repair-and-deploy.sh          # deploys SOURCE, not just env vars
-bash scripts/verify-live.sh                # must be 36/36, not 34/34
+cd ~/HubVibe-deploy4                       # already reset + deployed 2026-08-27
 export HUBVIBE_WALLET_KEY=0x...            # funded with USDC on Base
 bash scripts/first-paid-call.sh
 ```
+
+That one call, for $0.03, is the only thing that can prove the two facts still
+unproven: the facilitator actually settling a payment, and the Bazaar record
+riding a real payment payload. The script preflights the live 402 and refuses
+to spend if anything about it would waste the payment.
 
 Two ways to read the output wrong, both already made once:
 
