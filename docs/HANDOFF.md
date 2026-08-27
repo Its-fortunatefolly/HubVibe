@@ -403,6 +403,80 @@ It is safe to re-run. It refuses to point at a Stripe secret that does not
 exist, and it strips placeholder x402 values before they can reach a live
 revision.
 
+## 2026-08-27: open item 3 answered — Dexter is the facilitator with discovery
+
+The open item was: "is there a keyless x402 facilitator that ALSO serves
+`/discovery/resources`? If yes, capability discovery returns for one env var."
+
+**Answer: yes. Dexter (`https://x402.dexter.cash`).**
+
+What it is:
+- Free, no API key, no registration, no business review
+- Base mainnet (EVM, USDC) and Solana — supports the existing `eip155:8453`
+  network and pay-to address
+- x402 v2 spec compliant: standard `/verify`, `/settle`, `/supported` endpoints
+- **Auto-discovery**: when a payment settles through Dexter, the resource is
+  automatically indexed in the Dexter Marketplace (a live, searchable directory
+  of paid APIs used by agents). No registration step.
+- Battle-tested: 10M+ transactions settled
+
+Why xpay.sh was not this:
+
+    curl -s https://facilitator.xpay.sh/discovery/resources
+    {"message":"Not Found"}
+
+xpay.sh settles payments and runs no index. An unpaid resource is uncatalogued
+by construction, on any facilitator — but with xpay.sh, even the first payment
+could not have broken that loop. With Dexter, the first payment indexes the node.
+
+**Note on CDP Bazaar**: the CDP facilitator's Bazaar indexing is also broken as
+of 2026-08 (GitHub issue #2112: the facilitator never emits the
+`EXTENSION-RESPONSES` header the spec requires). Dexter's marketplace approach
+is currently the only live path to capability-based discovery.
+
+**The CDP guard already handles the switch.** `x402_payments._auth_provider()`
+ignores CDP credentials for non-Coinbase hosts (the guard from #55). CDP keys
+stay mounted; they stop being used when `X402_FACILITATOR_URL` points elsewhere.
+`go-live-x402.sh` now defaults to Dexter; the one-variable swap the handoff
+always described is now literally one variable.
+
+**What is still unproven:** Dexter settling a payment to the current pay-to
+address. Settlement is the same unknown it has always been — never attempted on
+any facilitator. The first-paid-call.sh script proves it.
+
+**The deploy command** (Cloud Shell, one call, proves settlement + indexes):
+
+```bash
+cd ~/HubVibe-deploy4 && git fetch origin main && git reset --hard origin/main
+bash scripts/go-live-x402.sh   # sets X402_FACILITATOR_URL=https://x402.dexter.cash + deploys
+```
+
+Then, after the deploy:
+
+```bash
+export HUBVIBE_WALLET_KEY=0x...     # funded with USDC on Base; NO ETH needed
+bash scripts/first-paid-call.sh     # now checks Dexter's index by default
+```
+
+If the wallet check blocks you:
+
+```bash
+bash scripts/first-paid-call.sh --new-wallet   # mints a fresh Base wallet; fund it, then re-run
+```
+
+Two ways to verify the facilitator actually changed on the live service before spending:
+
+```bash
+curl -s https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
+  -X POST -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' \
+  | python3 -c "import json,sys; b=json.load(sys.stdin); print([a.get('payTo') for a in b.get('accepts',[])])"
+```
+
+The deploy is what changes the facilitator. An env-var-only `gcloud services update
+--update-env-vars` mounts the new value on the **same image** — the same trap as
+before #57. go-live-x402.sh ends by calling repair-and-deploy.sh which deploys
+source. Do not shortcut it.
+
 ## What is left
 
 **THE ONE THING — half done.** The deploy landed and the checker proved it:

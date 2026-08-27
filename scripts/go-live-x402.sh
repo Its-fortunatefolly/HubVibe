@@ -25,10 +25,14 @@ set -uo pipefail
 SERVICE="${SERVICE:-hubvibe}"
 REGION="${REGION:-us-south1}"
 
-# Keyless, Base mainnet, zero fee. Chosen because it needs no business
-# verification: the Coinbase CDP facilitator is gated on a review that asks
-# for a DBA this business does not have, so CDP is unavailable, not pending.
-FACILITATOR="${X402_FACILITATOR:-https://facilitator.xpay.sh}"
+# Dexter: free, Base mainnet, x402 v2, auto-indexes paid endpoints in its
+# marketplace so agents can find this node by capability. Settlement-tested
+# (10M+ transactions on Solana + Base). No API key or registration required.
+# The previous default (xpay.sh) settles but runs no discovery index, so
+# every caller who would have found this node through capability search never
+# arrived. One env var. No other changes needed -- the CDP guard already
+# ignores CDP credentials for non-Coinbase hosts.
+FACILITATOR="${X402_FACILITATOR:-https://x402.dexter.cash}"
 STRIPE_SECRET_NAME="${STRIPE_SECRET_NAME:-SECRET_STRIPE_KEY}"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
