@@ -55,6 +55,34 @@ expect_status() {
 
 echo
 echo "HubVibe live verification: $BASE"
+
+# Say which checker this is, before saying anything about the node.
+#
+# A stale checkout is the most persistent way this script has lied. It is not
+# a hypothetical: the payability checks landed in #61, and the next two runs
+# against the deployed node still reported "34 passed, 0 failed" from a
+# checkout that predated them -- a green that could not have gone red, read as
+# proof the rail worked. The count is the tell, and nothing printed it next to
+# what the count should be.
+#
+# So: name the commit, and if it is behind origin/main say so loudly. Fetch is
+# --quiet and failure-tolerant; a checker that dies because the network hiccups
+# while looking up its own version is worse than one that cannot tell.
+if git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --git-dir >/dev/null 2>&1; then
+  REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  HEAD_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null)
+  git -C "$REPO_DIR" fetch origin main --quiet 2>/dev/null || true
+  BEHIND=$(git -C "$REPO_DIR" rev-list --count "HEAD..origin/main" 2>/dev/null || echo 0)
+  if [ "${BEHIND:-0}" -gt 0 ]; then
+    printf '\n  \033[31mSTALE CHECKOUT\033[0m  this copy is %s commit(s) behind origin/main.\n' "$BEHIND"
+    printf '  You are running an OLD checker. Checks added since then cannot fail\n'
+    printf '  here, so a clean run below proves less than it appears to. Fix first:\n\n'
+    printf '      git -C %s fetch origin main && git -C %s reset --hard origin/main\n\n' \
+      "$REPO_DIR" "$REPO_DIR"
+  else
+    echo "  checker: $HEAD_SHA (current with origin/main)"
+  fi
+fi
 echo
 
 echo "Service up"
@@ -500,8 +528,16 @@ fi
 
 echo
 echo "-----------------------------------------------"
-printf '  %d passed, %d failed\n' "$PASSES" "$FAILURES"
+printf '  %d passed, %d failed  (of %d checks in this checker)\n' \
+  "$PASSES" "$FAILURES" "$((PASSES + FAILURES))"
 echo "-----------------------------------------------"
+# The total is printed because the count is what exposes a stale checkout: a
+# run that says 34 when the current checker has 36 is not a pass, it is an old
+# script that never asked the two questions that matter.
+if [ "${BEHIND:-0}" -gt 0 ]; then
+  printf '\n  \033[31mThis was the OLD checker\033[0m (%s commits behind). Whatever it said\n' "$BEHIND"
+  printf '  about this node, it did not run the checks added since.\n'
+fi
 echo
 
 [ "$FAILURES" -eq 0 ] || exit 1
