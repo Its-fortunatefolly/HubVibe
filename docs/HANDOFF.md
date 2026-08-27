@@ -49,6 +49,72 @@ as the test that outranks everything else.
 
 Machine rates: **$0.03** per single audit, **$0.10** per bundle.
 
+## 2026-08-18: the Bazaar record every 402 emitted was rejected by the indexer
+
+The single most expensive bug found so far, because nothing about it was
+visible from this side. x402 was on, payments were settleable, and every 402
+carried a `extensions.bazaar` block — and the Bazaar's own facilitator-side
+validator threw all of them away.
+
+```
+validate_discovery_extension(...) ->
+    ValidationResult(valid=False, errors=["input: 'method' is a required property"])
+```
+
+The record shipped an `info.input` with no `method`, alongside a `schema` —
+in the same object — declaring `method` required. The x402 library says why
+in its own docstring: *"The HTTP method is NOT passed to this function. It is
+automatically inferred from the route key or enriched by
+`bazaar_resource_server_extension` at runtime."* This service uses neither.
+It hand-builds its 402 so one challenge can carry x402, MPP and the API-key
+rail together, which is the right call and is exactly what left `method`
+unfilled forever. A facilitator that validates before cataloguing indexed
+nothing, so capability-based discovery — the entire reason the extension is
+emitted — had never worked, on any route, since the day it shipped.
+
+Fixed in `bazaar_extension_for_body`, which now names the method (`setdefault`,
+so a future library version that emits it wins). Four tests now assert against
+the library's own `validate_discovery_extension` rather than a hand-written
+expected dict: the question that matters is not "does this look right to us"
+but "does the indexer accept it". Verified against a locally booted node —
+all six sellable paths (`/audit`, the four dimensions, `/audit/bundle`) plus
+the MCP-tool variant emitted on a paid `tools/call` now return `valid=True`.
+
+**This does not make discovery live, and must not be read as doing so.** See
+"Bazaar discovery is NOT live" below: xpay.sh serves no `/discovery/resources`,
+so there is currently no facilitator indexing anything this node emits. What
+changed is narrower and still worth having — the record was *also* invalid, so
+the moment a facilitator with an index does arrive, it would have discarded
+every one. Two independent failures stacked; this fixes the one that is ours.
+It corrects one line in that entry too: "this node's 402s carry the extension
+correctly — `verify-live.sh` passes that check" was true only of the checker,
+which grepped for the word `"bazaar"` and never read the record. That check
+now asserts the method is named, so this cannot pass while being discarded.
+
+**Lesson, generalised:** when a surface exists to be consumed by someone
+else's validator, test it with *their* validator. Everything about this bug
+looked correct locally and in every prior test.
+
+### Same session: /mcp.json told crawlers there was no MCP server
+
+`note` read *"This service is a plain HTTP/REST API, not a live MCP stdio/SSE
+server … wrap these with an MCP-to-HTTP adapter."* True when written; false
+since `/mcp` shipped. `server.json` was meanwhile advertising `/mcp` as a
+`streamable-http` remote, so the two files a registry reads contradicted each
+other, and the one that said "no server here" is the one Glama, Smithery and
+MCP.so fetch. `/mcp.json` now carries `remotes[]`, `version`,
+`documentationUrl`, `repository` and `icons`, and the note describes both
+transports as alternatives to one catalog. The served copy rewrites every
+absolute URL from `PUBLIC_BASE_URL`, so a self-hosted copy cannot hand its
+clients the production endpoint.
+
+Also folded in: `SERVICE_VERSION`, one constant behind the OpenAPI spec, the
+MCP handshake's `serverInfo` and `/mcp.json`. Three literals had drifted to
+two values — the registry said 1.1.2 while every client that completed an MCP
+handshake was told 1.1.0. And `sitemap.xml` had omitted `/mcp.json` and
+`/openapi.json`: the file registry crawlers come for was not in the file that
+tells crawlers what to fetch.
+
 ## 2026-08-18: the discovery contract — five gaps closed
 
 All five were the same shape: a machine-readable surface that told an agent
@@ -490,6 +556,32 @@ and it has a Stripe MCP connector with live read + write access.
 
 So: live-service verification must be run by the user with
 `verify-live.sh`. Do not claim a live URL is fine without evidence.
+
+There is also **no `gcloud` in the sandbox**, so nothing here can write to
+Secret Manager or create a Cloud Run revision. `repair-and-deploy.sh` says as
+much and stops (`gcloud is not on PATH. Run this in Cloud Shell.`) rather than
+half-applying. Setting `X402_PAY_TO_ADDRESS` is therefore always an
+owner-side action, from Cloud Shell.
+
+**What the sandbox CAN do instead, and should — boot the service locally.**
+This is how the Bazaar bug above was found, after months of it being invisible:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r wcag-audit-engine/requirements.txt
+cd wcag-audit-engine
+X402_FACILITATOR_URL=https://x402.org/facilitator \
+X402_PAY_TO_ADDRESS=0x32b08c5e927c69877d0fcab35618c265674922bc \
+PUBLIC_BASE_URL=http://127.0.0.1:8080 \
+../.venv/bin/python -m uvicorn app.main:app --port 8080
+```
+
+The address above is the test-suite constant — shape-valid, so the fail-closed
+guard advertises x402 and the whole 402 path becomes inspectable without
+network, money, or a facilitator that answers. Every discovery surface
+(`/mcp.json`, `/.well-known/agent.json`, `/openapi.json`, the 402 bodies, the
+`/mcp` JSON-RPC endpoint) can be driven and asserted against this. Use it
+before claiming a discovery surface is right; do NOT use it to claim anything
+about the deployed node, which may be running an older revision.
 
 ## Tooling added 2026-08-15 — use it, do not rebuild it
 
