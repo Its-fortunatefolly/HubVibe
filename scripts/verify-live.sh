@@ -89,6 +89,9 @@ echo
 echo "402 challenge is machine-actionable"
 CHALLENGE=$(curl -sS -m 30 -X POST "$BASE/audit/wcag" \
   -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
+# Headers separately: the v2 challenge is not in the body at all.
+CHALLENGE_HEADERS=$(curl -sS -m 30 -D - -o /dev/null -X POST "$BASE/audit/wcag" \
+  -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
 
 if printf '%s' "$CHALLENGE" | grep -q '"price_usd"'; then
   pass "402 body carries price_usd"
@@ -100,6 +103,63 @@ if printf '%s' "$CHALLENGE" | grep -q '"accepts"'; then
   pass "402 body carries an accepts[] list"
 else
   fail "402 body missing accepts[] -- agents cannot pick a payment rail"
+fi
+
+# Carrying an accepts[] and carrying a PAYABLE accepts[] are different facts,
+# and for as long as this rail has been advertised only the first was true.
+# `accepts[]` held a shape of our own invention -- `protocol`/`price`/`pay_to`
+# -- missing four fields PaymentRequirementsV1 requires. A client validates
+# EVERY entry and raises before signing, so the failure never reached the
+# facilitator: nothing rejected, nothing logged, and from this side identical
+# to nobody wanting to buy. Every check above stayed green throughout.
+#
+# Field names rather than the x402 library, because this runs in Cloud Shell
+# against the deployed node where the library is not installed. The unit tests
+# drive the real client; this catches the shape regressing in production.
+PAYABLE=$(printf '%s' "$CHALLENGE" | python3 -c '
+import json, sys
+try:
+    body = json.load(sys.stdin)
+except Exception:
+    print("FAIL|the 402 body is not JSON"); sys.exit()
+
+if body.get("x402Version") != 1:
+    print("FAIL|402 body does not say x402Version:1 -- a v1 client will not read "
+          "accepts[] at all"); sys.exit()
+
+required = {"scheme", "network", "maxAmountRequired", "resource",
+            "maxTimeoutSeconds", "asset", "payTo"}
+accepts = body.get("accepts") or []
+if not accepts:
+    print("FAIL|accepts[] is empty -- no rail an x402 client can pay"); sys.exit()
+
+for i, entry in enumerate(accepts):
+    missing = sorted(required - set(entry))
+    if missing:
+        print("FAIL|accepts[%d] is missing %s -- a conforming client raises a "
+              "ValidationError before signing, so this rail is advertised and "
+              "unpayable" % (i, ", ".join(missing)))
+        sys.exit()
+    if entry.get("protocol") or entry.get("price"):
+        print("FAIL|accepts[%d] carries non-spec keys -- a non-x402 rail in "
+              "accepts[] fails validation for the whole challenge" % i)
+        sys.exit()
+print("OK|accepts[] is spec-shaped: %d payable x402 entr%s"
+      % (len(accepts), "y" if len(accepts) == 1 else "ies"))
+')
+case "$PAYABLE" in
+  OK*)   pass "$(printf '%s' "$PAYABLE" | cut -d'|' -f2)" ;;
+  *)     fail "$(printf '%s' "$PAYABLE" | cut -d'|' -f2)" ;;
+esac
+
+# The v2 half. A v2 client reads this header FIRST and only falls back to the
+# body, so a node without it serves every modern client the legacy path -- and
+# has nowhere to put the v2 extensions slot or the service name the Bazaar
+# indexes by.
+if printf '%s' "$CHALLENGE_HEADERS" | grep -qi '^payment-required:'; then
+  pass "402 carries the v2 PAYMENT-REQUIRED challenge header"
+else
+  fail "402 has no PAYMENT-REQUIRED header -- v2 clients fall back to v1, and the service cannot name itself for the Bazaar index"
 fi
 
 # A null payTo is worse than no x402 at all: it tells a paying agent to send

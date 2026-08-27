@@ -180,8 +180,8 @@ def test_payment_required_body_advertises_real_address_when_configured(monkeypat
     assert body["price"] == "$0.03"
 
     entry = module.accepts_entry(price="$0.03")
-    assert entry["protocol"] == "x402"
-    assert entry["pay_to"] == VALID_PAY_TO
+    assert entry["scheme"] == "exact"
+    assert entry["payTo"] == VALID_PAY_TO, "the spec spells it payTo; pay_to is unreadable"
 
 
 @pytest.mark.parametrize(

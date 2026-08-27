@@ -293,6 +293,21 @@ def _bazaar_extension_for_path(path: Optional[str]) -> dict:
     )
 
 
+def _route_description(path: Optional[str]) -> str:
+    """One line naming what this specific route sells.
+
+    Goes into the payment challenge, where it is the only human-readable clue
+    an agent's operator gets about what a signature is about to buy. Taken
+    from the catalog so it cannot describe something the route does not do.
+    """
+    if path:
+        resolved = _CATALOG_ALIASES.get(path, path)
+        entry = next((e for e in _CATALOG if e["path"] == resolved), None)
+        if entry is not None:
+            return entry["description"]
+    return "HubVibe site audit"
+
+
 def _payment_required_response(
     host: Optional[str] = None, price_usd: float = 0.03, path: Optional[str] = None
 ) -> JSONResponse:
@@ -310,25 +325,37 @@ def _payment_required_response(
     by the MPP core spec on every 402.
     """
     price = f"${price_usd:.2f}"
+    resource_url = f"{PUBLIC_BASE_URL}{path}" if path else PUBLIC_BASE_URL
 
-    # `accepts` lists only the rails that can actually settle on THIS
-    # deployment, so an agent can pick one programmatically instead of
-    # guessing from prose or trying a method that was never configured.
+    # `accepts` is not ours to design. A conforming x402 client hands this
+    # whole body to the library, which validates EVERY entry in `accepts`
+    # against PaymentRequirementsV1 and raises on the first one that does not
+    # fit -- before it produces any signature. So `accepts` carries x402
+    # entries and nothing else. The other rails live in `other_rails` below;
+    # they lost nothing but the array they were in, and MPP's real channel
+    # was always the WWW-Authenticate headers further down.
+    #
+    # This array previously held our own invented shape plus the MPP and
+    # API-key rails, which made the paid path unpayable twice over. See
+    # x402_payments.accepts_entry for what that cost.
     accepts = []
-    x402_entry = x402_payments.accepts_entry(price=price)
+    x402_entry = x402_payments.accepts_entry(
+        price=price, resource_url=resource_url, description=_route_description(path)
+    )
     if x402_entry:
         accepts.append(x402_entry)
-    accepts.extend(mpp_payments.accepts_entries(price_usd=price_usd))
-    # The API-key rail belongs in `accepts` too. It was listed in
-    # /.well-known/agent.json's payment.methods and described in
-    # `alternative` below, but not here -- and `accepts` is the array an
-    # agent iterates. A CI pipeline holding a pre-funded key had no way to
-    # discover from the challenge alone that its key is spendable here; it
-    # had to parse prose. Gated on billing.is_configured() like every other
-    # rail: with no Stripe configured, no key can be issued or metered, so
-    # advertising it would be advertising a rail that cannot settle.
+
+    other_rails = list(mpp_payments.accepts_entries(price_usd=price_usd))
+    # The API-key rail belongs in the machine-readable rail list too. It was
+    # listed in /.well-known/agent.json's payment.methods and described in
+    # `alternative` below, but nowhere an agent could iterate. A CI pipeline
+    # holding a pre-funded key had no way to discover from the challenge alone
+    # that its key is spendable here; it had to parse prose. Gated on
+    # billing.is_configured() like every other rail: with no Stripe
+    # configured, no key can be issued or metered, so advertising it would be
+    # advertising a rail that cannot settle.
     if billing.is_configured():
-        accepts.append(
+        other_rails.append(
             {
                 "protocol": "api_key",
                 "method": "stripe_api_key",
@@ -347,7 +374,13 @@ def _payment_required_response(
         "error": "payment_required",
         "price_usd": price_usd,
         "price": price,
+        # x402Version marks this body as a v1 challenge. It is what makes a
+        # client parse `accepts` at all -- the library reads the body only
+        # when it says 1, and otherwise looks for the PAYMENT-REQUIRED header
+        # (which is also sent, below, for v2 clients).
+        "x402Version": 1,
         "accepts": accepts,
+        "other_rails": other_rails,
         "alternative": {
             "header": "X-API-Key",
             "detail": (
@@ -358,11 +391,6 @@ def _payment_required_response(
         },
         "docs": f"{PUBLIC_BASE_URL}/.well-known/agent.json",
     }
-    # Keep x402's standard top-level keys alongside `accepts` when x402 is
-    # live, so off-the-shelf x402 clients that read the canonical shape keep
-    # working unchanged.
-    body.update(x402_payments.payment_required_body(price=price))
-
     # Bazaar discovery. Facilitators catalog x402 resources by reading this
     # off their 402s, and agents shop that index by capability -- without it
     # this endpoint is findable only by someone who already has the URL.
@@ -371,6 +399,20 @@ def _payment_required_response(
         body["extensions"] = bazaar
 
     response = JSONResponse(status_code=402, content=body)
+
+    # The v2 challenge, which does not live in the body at all. A client looks
+    # for this header FIRST and only falls back to parsing the body as v1, so
+    # sending both serves every conforming client from one response. It also
+    # carries `extensions` in the slot v2 actually defines for them, and names
+    # the service for the Bazaar index -- neither of which the v1 body has
+    # anywhere to put.
+    for name, value in x402_payments.payment_required_header(
+        price=price,
+        resource_url=resource_url,
+        description=_route_description(path),
+        extensions=bazaar or None,
+    ).items():
+        response.headers[name] = value
     response.headers["Cache-Control"] = "no-store"
     for header_value in mpp_payments.www_authenticate_headers(realm=host, price_usd=price_usd):
         response.headers.append("WWW-Authenticate", header_value)
@@ -465,9 +507,16 @@ def _authorize_and_rate_limit(
     if not _audit_limiter.check(rate_limit_key):
         return None, _rate_limited_response()
 
+    # x402 v1 clients send X-PAYMENT; v2 clients send PAYMENT-SIGNATURE. The
+    # challenge now offers both protocol versions, so both headers have to be
+    # read -- accepting only X-PAYMENT while advertising v2 would hand a v2
+    # client a challenge it can satisfy and then ignore the signature it sends
+    # back, 402ing it forever. The decoder handles either payload shape.
+    payment_header = x_payment or request.headers.get("PAYMENT-SIGNATURE")
+
     auth = _authenticate(
         x_api_key,
-        x_payment,
+        payment_header,
         authorization,
         host=_mpp_realm(request),
         price_usd=price_usd,
