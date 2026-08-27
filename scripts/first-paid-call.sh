@@ -103,6 +103,7 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH."
 # unbound variable before the wallet message prints is the least useful
 # possible failure here.
 WALLET_FILE="${HUBVIBE_WALLET_FILE:-${HOME:-/tmp}/.hubvibe-wallet-key}"
+export WALLET_FILE
 
 new_wallet() {
   local generated
@@ -133,8 +134,34 @@ ok "x402 client is importable"
 # real key went missing.
 if [ "${1:-}" = "--new-wallet" ]; then
   if [ -r "$WALLET_FILE" ] && [ -z "${HUBVIBE_FORCE_NEW_WALLET:-}" ]; then
-    die "$WALLET_FILE already exists. Refusing to overwrite a key that may hold
-        funds. Set HUBVIBE_FORCE_NEW_WALLET=1 to replace it."
+    # Refusing is right -- overwriting a key that may hold funds destroys them.
+    # Refusing SILENTLY is not: the wallet you already have is the answer to
+    # the question you just asked, and its address is what you need next. Say
+    # it. Stopping without it sends someone hunting for a wallet they own.
+    EXISTING=$(python3 -c '
+import os, sys
+from eth_account import Account
+try:
+    print(Account.from_key(open(os.environ["WALLET_FILE"]).read().strip()).address)
+except Exception as exc:
+    print("UNREADABLE\t%s" % exc)
+' 2>/dev/null)
+    printf '\n  \033[1mYou already have a wallet.\033[0m Not overwriting it.\n\n'
+    case "$EXISTING" in
+      UNREADABLE*|"")
+        printf '  But %s does not contain a readable private key.\n' "$WALLET_FILE"
+        printf '  If it holds no funds, replace it:\n\n'
+        printf '      HUBVIBE_FORCE_NEW_WALLET=1 bash scripts/first-paid-call.sh --new-wallet\n\n'
+        ;;
+      *)
+        printf '      address: \033[1m%s\033[0m\n\n' "$EXISTING"
+        printf '  Send it USDC on Base -- $1 is plenty. NO ETH NEEDED.\n'
+        printf '  Then just run:  bash scripts/first-paid-call.sh\n\n'
+        printf '  (Only if you are certain it holds nothing and want a fresh one:\n'
+        printf '   HUBVIBE_FORCE_NEW_WALLET=1 bash scripts/first-paid-call.sh --new-wallet)\n\n'
+        ;;
+    esac
+    exit 1
   fi
   ADDRESS=$(new_wallet)
   printf '\n  \033[1mNew Base wallet created.\033[0m Key saved to %s (mode 600).\n\n' "$WALLET_FILE"
