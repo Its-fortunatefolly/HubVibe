@@ -51,7 +51,8 @@ def _run(challenge: str):
 GOOD_ADDR = "0x32b08c5e927c69877d0fcab35618c265674922bc"
 
 
-def _challenge(*, pay_to=GOOD_ADDR, protocol="x402", bazaar_input=...):
+def _challenge(*, pay_to=GOOD_ADDR, scheme="exact", bazaar_input=...,
+               x402_version=1, drop_field=None):
     import json
 
     if bazaar_input is ...:
@@ -61,12 +62,18 @@ def _challenge(*, pay_to=GOOD_ADDR, protocol="x402", bazaar_input=...):
             "bodyType": "json",
             "body": {"url": "https://example.com"},
         }
-    body = {
-        "price": "$0.03",
-        "accepts": [
-            {"protocol": protocol, "pay_to": pay_to, "network": "eip155:8453"}
-        ],
+    entry = {
+        "scheme": scheme,
+        "network": "base",
+        "maxAmountRequired": "30000",
+        "resource": "https://example.test/audit/wcag",
+        "payTo": pay_to,
+        "maxTimeoutSeconds": 300,
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     }
+    if drop_field:
+        entry.pop(drop_field)
+    body = {"price": "$0.03", "x402Version": x402_version, "accepts": [entry]}
     if bazaar_input is not None:
         body["extensions"] = {"bazaar": {"info": {"input": bazaar_input}}}
     return json.dumps(body)
@@ -81,9 +88,29 @@ def test_a_well_formed_challenge_clears_the_gate():
 def test_no_x402_rail_means_nothing_is_paid():
     """There is no rail to pay on. Attempting anyway would burn a call for a
     402 that repeats itself."""
-    verdict, detail = _run(_challenge(protocol="mpp-stripe"))
+    verdict, detail = _run(_challenge(scheme="something-else"))
     assert verdict == "FAIL"
-    assert "does not advertise x402" in detail
+    assert "no payable x402 entry" in detail
+
+
+def test_a_pre_61_challenge_is_refused_by_name():
+    """The shape this script was originally written against. accepts[] with no
+    x402Version means no v1 client reads it -- and the preflight itself read
+    the pre-#61 field names for a while, so it reported "does not advertise
+    x402" about a node that did. Name the real cause instead."""
+    verdict, detail = _run(_challenge(x402_version=None))
+    assert verdict == "FAIL"
+    assert "x402Version:1" in detail
+    assert "repair-and-deploy" in detail
+
+
+def test_an_accepts_entry_missing_spec_fields_is_refused():
+    """A client validates every entry and raises before signing. Paying into
+    that spends nothing and proves nothing."""
+    verdict, detail = _run(_challenge(drop_field="asset"))
+    assert verdict == "FAIL"
+    assert "asset" in detail
+    assert "before" in detail
 
 
 def test_the_zero_address_is_refused_before_any_signature():
@@ -159,13 +186,42 @@ def test_the_script_never_retries_a_payment():
     )
 
 
-def test_the_wallet_key_is_required_before_anything_runs(tmp_path):
-    """Fail closed at the top, with nothing attempted, rather than partway
-    through after the node has already been poked."""
-    env = {"PATH": "/usr/bin:/bin"}
+def test_no_wallet_anywhere_stops_before_the_node_is_touched(tmp_path):
+    """Fail closed at the top rather than partway through, and say the two
+    things that actually unstick someone: the export may simply have been lost
+    (Cloud Shell drops env on reconnect, which is exactly how this presented),
+    and a wallet can be made right here."""
+    env = {"PATH": "/usr/bin:/bin", "HUBVIBE_WALLET_FILE": str(tmp_path / "nope")}
     result = subprocess.run(
         ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, cwd=REPO_ROOT
     )
     assert result.returncode == 1
-    assert "HUBVIBE_WALLET_KEY is not set" in result.stdout
-    assert "Nothing was attempted" in result.stdout
+    assert "No paying wallet" in result.stdout
+    assert "Cloud Shell drops env on" in result.stdout
+    assert "--new-wallet" in result.stdout
+
+
+def test_an_unset_HOME_does_not_crash_before_the_wallet_message(tmp_path):
+    """set -u makes a bare $HOME fatal where HOME is not set. Dying on an
+    unbound variable before the wallet message prints is the least useful
+    failure this script could have."""
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True,
+        env={"PATH": "/usr/bin:/bin"}, cwd=REPO_ROOT,
+    )
+    assert "unbound variable" not in result.stderr
+    assert "No paying wallet" in result.stdout
+
+
+def test_the_wallet_file_is_used_when_the_env_var_is_empty(tmp_path):
+    """The whole point of the file: an export that did not survive a reconnect
+    must not look like having no wallet at all."""
+    key_file = tmp_path / "key"
+    key_file.write_text("0x" + "1" * 63 + "2")
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, cwd=REPO_ROOT,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+             "HUBVIBE_WALLET_FILE": str(key_file), "BASE": "http://127.0.0.1:9"},
+    )
+    assert "wallet key from" in result.stdout
+    assert "No paying wallet" not in result.stdout
