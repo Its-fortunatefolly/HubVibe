@@ -521,19 +521,165 @@ def bazaar_extension_for_mcp_tool(
         return {}
 
 
-def accepts_entry(price: Optional[str] = None) -> Optional[dict]:
-    """This method's entry for the 402's machine-readable `accepts` list, or
-    None when x402 isn't configured."""
+# CAIP-2 -> the legacy name v1 clients register their schemes under. A v1
+# body naming "eip155:8453" resolves to no registered scheme and the client
+# gives up with NoMatchingRequirementsError, which looks like "this client
+# can't do Base" rather than "this server used the wrong vocabulary".
+_V1_NETWORK_NAMES = {
+    "eip155:8453": "base",
+    "eip155:84532": "base-sepolia",
+    "eip155:1": "ethereum",
+    "eip155:137": "polygon",
+    "eip155:43114": "avalanche",
+}
+
+# How long a signed authorization stays valid. The x402 spec requires the
+# server to state this; clients bake it into the EIP-712 payload they sign.
+_MAX_TIMEOUT_SECONDS = 300
+
+# Names this service by in the Bazaar. `service_name` and `tags` are the
+# fields an agent shopping the index by capability actually matches on, and
+# the facilitator validates them (printable ASCII, <=32 chars, <=5 tags).
+_SERVICE_NAME = "HubVibe Site Audits"
+_SERVICE_TAGS = ["accessibility", "wcag", "seo", "security", "performance"]
+
+
+def _priced_asset(price: str):
+    """Resolve "$0.03" to the concrete asset, atomic amount and EIP-712 extra.
+
+    Done locally through the scheme's own price parser rather than through the
+    facilitator, so building a challenge never depends on the facilitator being
+    reachable at that instant. The numbers are the same ones the facilitator
+    will check the signature against, because they come from the same library.
+    """
+    from x402.mechanisms.evm.exact import ExactEvmServerScheme
+
+    return ExactEvmServerScheme().parse_price(price, _NETWORK)
+
+
+def accepts_entry(price: Optional[str] = None, resource_url: Optional[str] = None,
+                  description: Optional[str] = None) -> Optional[dict]:
+    """One spec-shaped x402 v1 `accepts[]` entry, or None when x402 is off.
+
+    This used to return a dict of our own invention -- `protocol`, `price`,
+    `pay_to`, `send_via_header` -- and that made the paid rail **unpayable by
+    any conforming client**. A client hands the 402 body to the x402 library,
+    which validates `accepts[]` against `PaymentRequirementsV1`; ours was
+    missing four required fields (`maxAmountRequired`, `resource`,
+    `maxTimeoutSeconds`, `asset`) and spelled `payTo` as `pay_to`. The client
+    raised a ValidationError before producing any signature, so the failure
+    never even reached the facilitator: nothing to reject, nothing logged,
+    nothing to see from this side. `verify-live.sh` was green throughout,
+    because it asked whether the 402 mentions x402, not whether the 402 can
+    be paid.
+
+    That is the whole reason revenue is zero and it is not a demand problem:
+    any agent that ever tried to buy would have bounced in the client library.
+
+    `network` is the legacy name here, not CAIP-2. v1 clients register their
+    schemes under "base"; a v1 body naming "eip155:8453" matches nothing.
+    """
     if not is_configured():
         return None
+    resolved = price or _PRICE
+    try:
+        priced = _priced_asset(resolved)
+    except Exception as exc:
+        # Fail closed: an entry we cannot price correctly is an entry no
+        # client can pay, and advertising it is the thing this module exists
+        # to never do.
+        _warn_unpayable_challenge(exc)
+        return None
+    network = _V1_NETWORK_NAMES.get(_NETWORK)
+    if network is None:
+        return None
     return {
-        "protocol": "x402",
         "scheme": "exact",
-        "network": _NETWORK,
-        "price": price or _PRICE,
-        "pay_to": _PAY_TO_ADDRESS,
-        "send_via_header": "X-PAYMENT",
+        "network": network,
+        "maxAmountRequired": priced.amount,
+        "resource": resource_url or "",
+        "description": description or "HubVibe site audit",
+        "mimeType": "application/json",
+        "payTo": _PAY_TO_ADDRESS,
+        "maxTimeoutSeconds": _MAX_TIMEOUT_SECONDS,
+        "asset": priced.asset,
+        "extra": priced.extra,
     }
+
+
+_unpayable_warned = False
+
+
+def _warn_unpayable_challenge(exc: Exception) -> None:
+    global _unpayable_warned
+    if _unpayable_warned:
+        return
+    _unpayable_warned = True
+    logging.getLogger(__name__).error(
+        "x402 is configured but a payable challenge could not be built (%s: "
+        "%s). x402 will be omitted from the 402 rather than advertised in a "
+        "shape no client can pay.",
+        type(exc).__name__,
+        exc,
+    )
+
+
+def payment_required_header(
+    price: Optional[str] = None,
+    resource_url: Optional[str] = None,
+    description: Optional[str] = None,
+    extensions: Optional[dict] = None,
+) -> dict:
+    """The x402 **v2** challenge, as the `PAYMENT-REQUIRED` header, or `{}`.
+
+    v2 does not put the challenge in the body at all. The client checks for
+    this header first and only falls back to parsing the body as v1 -- so
+    without it, every v2 client is served the v1 path whether or not it wants
+    it, and the v2 `extensions` slot (where the Bazaar discovery record
+    actually belongs in v2) has nowhere to live.
+
+    This is also the only place a service can name itself for the index:
+    `ResourceInfo.service_name` and `.tags` are what an agent shopping the
+    Bazaar by capability matches against. In the v1 body there is no field
+    for either, so a v1-only node is at best an anonymous row.
+    """
+    if not is_configured():
+        return {}
+    resolved = price or _PRICE
+    try:
+        from x402.http.utils import encode_payment_required_header
+        from x402.schemas import PaymentRequired, PaymentRequirements, ResourceInfo
+
+        priced = _priced_asset(resolved)
+        challenge = PaymentRequired(
+            x402Version=2,
+            error="payment_required",
+            resource=ResourceInfo(
+                url=resource_url or "",
+                description=description or "HubVibe site audit",
+                mimeType="application/json",
+                serviceName=_SERVICE_NAME,
+                tags=list(_SERVICE_TAGS),
+            ),
+            accepts=[
+                PaymentRequirements(
+                    scheme="exact",
+                    network=_NETWORK,
+                    asset=priced.asset,
+                    amount=priced.amount,
+                    payTo=_PAY_TO_ADDRESS,
+                    maxTimeoutSeconds=_MAX_TIMEOUT_SECONDS,
+                    extra=priced.extra,
+                )
+            ],
+            extensions=extensions or None,
+        )
+        return {"PAYMENT-REQUIRED": encode_payment_required_header(challenge)}
+    except Exception as exc:
+        # Same trade as the Bazaar extension: never let the richer path break
+        # the challenge. A v1 body still goes out and is still payable.
+        _warn_unpayable_challenge(exc)
+        return {}
 
 
 class PendingPayment:

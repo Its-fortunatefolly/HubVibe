@@ -37,6 +37,7 @@ as the test that outranks everything else.
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0 active; `server.json` on main is **1.1.2** and not yet republished |
 | Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
 | x402 | **Live per #58** — `verify-live.sh` reported 34 passed / 0 failed against the deployed node on 2026-08-25. **Do not re-derive this from the advertised-methods list.** On 2026-08-18 the deployed pay-to address was `0x` + 40 ZEROS: shape-valid, so it passed the #46 guard, the preflight, and every verify-live run, while `address(0)` is unownable and USDC reverts transfers to it — the rail was advertised and unpayable for days and nothing said so. A shape check proves shape; shape is not payability. `scripts/go-live-x402.sh` now replaces zeros explicitly, and the app and preflight both reject them. To know the current recipient, read it: `gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format=json` and look at `X402_PAY_TO_ADDRESS`. |
+| x402 payability | **The 402 was unpayable by any conforming client until 2026-08-27** — `accepts[]` was a shape of our own invention missing four required fields, so the x402 library raised before signing. See the 2026-08-27 entry. Now both v1 body and v2 `PAYMENT-REQUIRED` header go out and both are proven payable against the real client. |
 | x402 settle side | Facilitator is now **xpay.sh** (keyless, Base mainnet, zero fee) — CDP is abandoned, not pending: its review wants proof of a DBA that does not exist. The CDP key pair may stay mounted; since #55 those credentials only go to a Coinbase host. Settlement itself is still unproven until the first real agent payment — nothing has ever been attempted. |
 
 ### Stripe price IDs (verified against the live account)
@@ -196,6 +197,112 @@ have to infer.
 
 **Every guard above was proved by reintroducing the bug and watching the test
 go red, then restoring** — 12 new tests, 12 proven, per the rule below.
+
+## 2026-08-27: the rail was live and UNPAYABLE. This is why revenue is zero.
+
+Read this before concluding anything about demand.
+
+**No conforming x402 client could ever have paid this service.** Not "payments
+were rejected" — no payment could be *constructed*. A client hands the 402 to
+the x402 library, which validates `accepts[]` against `PaymentRequirementsV1`
+and raises before producing any signature:
+
+```
+ValidationError: 4 validation errors for PaymentRequiredV1
+  accepts.0.maxAmountRequired  Field required
+  accepts.0.resource           Field required
+  accepts.0.maxTimeoutSeconds  Field required
+  accepts.0.asset              Field required
+```
+
+`accepts[]` carried a shape of our own invention — `protocol`, `price`,
+`pay_to`, `send_via_header` — and `pay_to` is not how the spec spells `payTo`.
+The array also held the MPP and API-key rails, and the client validates *every*
+entry, so those broke the challenge a second time on their own.
+
+The failure happens **inside the caller's process**. It never reaches the
+facilitator, so there is nothing to reject, nothing to log, and nothing on this
+side to see. An agent that found us, wanted the audit, and had a funded wallet
+would bounce with a client-side error — and from here that is pixel-identical
+to nobody showing up.
+
+**So "the constraint is demand, not plumbing" was wrong.** Both were broken.
+Every discovery fix shipped so far was pointing traffic at a booth with no
+coin slot.
+
+### How it stayed invisible
+
+`verify-live.sh` was green — 34/34 — the whole time. Every check asked whether
+the 402 *mentions* x402. None asked whether it can be *paid*. Same shape as the
+Bazaar bug from #52 (grep for the word `"bazaar"`), and the same shape as the
+zero-address (a check that proves form, not function). Third time. **When a
+surface exists to be consumed by someone else's parser, test it with their
+parser** — that is now three separate bugs teaching one lesson.
+
+### What was actually wrong, and what fixed it
+
+The library's own parser accepts exactly two shapes:
+
+```python
+header = get_header(PAYMENT_REQUIRED_HEADER)          # v2 path
+if header: return decode_payment_required_header(header)
+if body and body.get("x402Version") == 1:             # v1 path
+    return PaymentRequiredV1.model_validate(body)
+raise ValueError("Invalid payment required response")
+```
+
+We emitted neither. Now both go out on every paid route:
+
+- **v1 body** — `accepts[]` holds spec-shaped x402 entries only, with
+  `maxAmountRequired`, `resource`, `mimeType`, `maxTimeoutSeconds`, `asset`,
+  `extra`, and `payTo`. Note `network` is the **legacy name** (`base`, not
+  `eip155:8453`): v1 clients register schemes by legacy name, and CAIP-2 there
+  resolves to no scheme and fails as `NoMatchingRequirementsError`.
+- **v2 `PAYMENT-REQUIRED` header** — where v2 puts the challenge. A client
+  reads it first. It also carries `ResourceInfo.serviceName` and `.tags`,
+  which are what an agent shopping the Bazaar *by capability* matches on;
+  the v1 body has no field for either, so a v1-only node is at best an
+  anonymous row.
+- MPP and the API-key rail moved to `other_rails`. They lost nothing but the
+  array they were in — MPP's real channel was always its `WWW-Authenticate`
+  headers.
+- The server now reads **`PAYMENT-SIGNATURE`** as well as `X-PAYMENT`. v2
+  clients answer with the former; advertising v2 while reading only the latter
+  would hand a client a challenge it can satisfy and then ignore the answer.
+
+Proved by driving the real `x402HTTPClientSync` against every paid route: all
+six now yield a signature, on both protocol versions. Restoring the shipped
+code turns 10 tests red.
+
+### Bazaar: item 3 was the wrong question
+
+The open item asked whether a keyless facilitator exists that also serves
+`/discovery/resources`. **Finding one would not have indexed us**, because
+that is not how anything gets indexed. From the spec:
+
+> When a facilitator receives a `PaymentPayload` containing the `bazaar`
+> extension, it should: 1. Validate the `info` field against the provided
+> `schema`  2. Extract the discovery information
+
+That is the only ingestion path — no registration endpoint, no crawler.
+`/discovery/resources` is read-only; it lists what payments have already
+taught the facilitator. The client library does its half automatically
+(`client_base._merge_extensions` copies the server's declared extensions into
+the payload).
+
+So: **a resource nobody has paid is a resource nobody can find, on every
+facilitator.** Zero payments ⇒ zero index entries ⇒ zero discovery ⇒ zero
+payments. Nobody breaks that from outside.
+
+`scripts/first-paid-call.sh` breaks it from inside for $0.03: it pays our own
+endpoint once, which proves the settle side (still never exercised) and
+registers the resource wherever it settles. It refuses to spend if the live 402
+is not payable or the Bazaar record would be discarded — there is no point
+burning the bootstrap on a stale revision.
+
+**Still unproven and only a real payment can prove it:** verify-then-settle
+against the live facilitator. Building a signature is now certain; the
+facilitator accepting it is not.
 
 ## 2026-08-25: the rail is live, and why it was not
 

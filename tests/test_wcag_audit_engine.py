@@ -227,19 +227,28 @@ def test_402_never_advertises_x402_when_it_cannot_settle(monkeypatch):
 def test_402_advertises_x402_when_it_is_configured(monkeypatch):
     from fastapi.testclient import TestClient
 
+    addr = "0x32b08c5e927c69877d0fcab35618c265674922bc"
     module = _load_main(monkeypatch)
     monkeypatch.setattr(module.x402_payments, "is_configured", lambda: True)
-    monkeypatch.setattr(module.x402_payments, "_PAY_TO_ADDRESS", "0xabc")
+    monkeypatch.setattr(module.x402_payments, "_PAY_TO_ADDRESS", addr)
 
     client = TestClient(module.app)
-    body = client.post("/audit", json={"url": "https://example.com"}).json()
+    response = client.post("/audit", json={"url": "https://example.com"})
+    body = response.json()
 
-    assert body["payTo"] == "0xabc"
-    assert body["accepted_payment_header"] == "X-PAYMENT"
-    x402_entries = [e for e in body["accepts"] if e["protocol"] == "x402"]
-    assert len(x402_entries) == 1
-    assert x402_entries[0]["pay_to"] == "0xabc"
-    assert x402_entries[0]["price"] == "$0.03"
+    # `accepts` is the x402 spec's array, not ours: a client validates every
+    # entry in it against PaymentRequirementsV1 and raises on the first that
+    # does not fit, before signing anything. So it holds x402 entries only,
+    # in the spec's field names.
+    assert len(body["accepts"]) == 1
+    entry = body["accepts"][0]
+    assert entry["payTo"] == addr
+    assert entry["scheme"] == "exact"
+    assert entry["network"] == "base", "v1 clients register schemes by legacy name"
+    assert entry["maxAmountRequired"] == "30000", "$0.03 in USDC atomic units"
+    assert entry["asset"].startswith("0x")
+    assert entry["maxTimeoutSeconds"] > 0
+    assert body["x402Version"] == 1, "without this a client will not read the body"
 
 
 def test_402_bundle_price_is_carried_everywhere(monkeypatch):
@@ -1541,7 +1550,8 @@ def test_bazaar_failure_never_blocks_a_payment_challenge(monkeypatch, load_main_
     assert response.status_code == 402
     body = response.json()
     assert body["price_usd"] == 0.10
-    assert any(e["protocol"] == "x402" for e in body["accepts"])
+    assert body["accepts"], "the challenge lost its payable rail"
+    assert body["accepts"][0]["scheme"] == "exact"
     assert "extensions" not in body
 
 
@@ -2467,8 +2477,15 @@ def test_the_api_key_rail_appears_in_accepts_when_it_can_settle(
     from fastapi.testclient import TestClient
 
     body = TestClient(module.app).post("/audit/bundle", json={"url": "https://x"}).json()
-    rail = next((a for a in body["accepts"] if a["protocol"] == "api_key"), None)
-    assert rail is not None, "a configured key rail is missing from accepts"
+    # Not in `accepts` -- that array belongs to the x402 spec and a non-x402
+    # entry in it makes the whole challenge fail client-side validation. The
+    # rail is still machine-readable, one key over.
+    rail = next((a for a in body["other_rails"] if a["protocol"] == "api_key"), None)
+    assert rail is not None, "a configured key rail is missing from other_rails"
+    assert not any(a.get("protocol") == "api_key" for a in body["accepts"]), (
+        "a non-x402 rail in accepts[] makes the 402 unpayable by every "
+        "conforming client"
+    )
     assert rail["send_via_header"] == "X-API-Key"
     assert rail["price_usd"] == body["price_usd"], "the rail must quote this route's price"
 
@@ -2683,3 +2700,131 @@ def test_one_version_number_across_every_surface_that_publishes_one(monkeypatch)
               "params": {"protocolVersion": "2025-06-18"}},
     ).json()
     assert handshake["result"]["serverInfo"]["version"] == registry
+
+
+# --- The challenge must be payable by a real client, not merely well-meant ---
+#
+# Every x402 test in this repo, and every check in verify-live.sh, asked
+# whether the 402 MENTIONS x402. None asked whether an agent could pay it. It
+# could not: `accepts[]` was a shape of our own invention, missing four fields
+# PaymentRequirementsV1 requires and spelling payTo as pay_to, so the x402
+# client library raised a ValidationError before producing any signature. The
+# failure never reached the facilitator -- nothing to reject, nothing logged,
+# and from this side indistinguishable from nobody wanting to buy. The rail
+# was advertised as live, and was structurally unpayable, for as long as it
+# had been advertised.
+#
+# So these drive the real client against the real routes. The assertion is not
+# "the body looks right" -- it always looked right -- but "a paying agent gets
+# a signature out of this".
+
+def _paying_client():
+    from eth_account import Account
+    from x402 import max_amount, x402ClientSync
+    from x402.http import x402HTTPClientSync
+    from x402.mechanisms.evm import EthAccountSigner
+    from x402.mechanisms.evm.exact import register_exact_evm_client
+
+    # A throwaway key. Signing is local and offline; nothing is broadcast and
+    # the account needs no funds for the client to build a payment.
+    account = Account.from_key("0x" + "1" * 63 + "2")
+    client = x402ClientSync()
+    register_exact_evm_client(
+        client, EthAccountSigner(account), policies=[max_amount(1_000_000)]
+    )
+    return x402HTTPClientSync(client)
+
+
+@pytest.mark.parametrize(
+    "route,price",
+    [
+        ("/audit", 0.03),
+        ("/audit/wcag", 0.03),
+        ("/audit/seo", 0.03),
+        ("/audit/security", 0.03),
+        ("/audit/performance", 0.03),
+        ("/audit/bundle", 0.10),
+    ],
+)
+def test_every_paid_route_returns_a_402_a_real_client_can_pay(
+    monkeypatch, load_main_fresh, route, price
+):
+    from fastapi.testclient import TestClient
+
+    _x402_env(monkeypatch)
+    module = load_main_fresh(f"wcag_main_payable_{route.replace('/', '_')}")
+    response = TestClient(module.app).post(route, json={"url": "https://example.com"})
+    assert response.status_code == 402
+
+    headers, _payload = _paying_client().handle_402_response(
+        dict(response.headers), response.content
+    )
+    assert headers, f"{route} produced no payment header"
+    assert {k.upper() for k in headers} & {"X-PAYMENT", "PAYMENT-SIGNATURE"}
+
+
+def test_a_v1_only_client_can_still_pay_from_the_body(monkeypatch, load_main_fresh):
+    """The v2 header is preferred, but a v1 client never looks at it. Strip it
+    and the body alone must still yield a signature, or every client that
+    predates v2 is quietly locked out."""
+    from fastapi.testclient import TestClient
+
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_main_v1_only")
+    response = TestClient(module.app).post("/audit/wcag", json={"url": "https://x"})
+
+    body_only = {
+        k: v for k, v in response.headers.items() if k.lower() != "payment-required"
+    }
+    headers, _ = _paying_client().handle_402_response(body_only, response.content)
+    assert "X-PAYMENT" in {k.upper() for k in headers}
+
+
+def test_the_402_carries_the_v2_challenge_header(monkeypatch, load_main_fresh):
+    """v2 does not put the challenge in the body at all -- a client reads this
+    header first and only falls back to the body. Without it there is nowhere
+    to put the v2 `extensions` slot or the service name the Bazaar indexes."""
+    from fastapi.testclient import TestClient
+
+    from x402.http.utils import decode_payment_required_header
+
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_main_v2_header")
+    response = TestClient(module.app).post("/audit/wcag", json={"url": "https://x"})
+
+    raw = response.headers.get("payment-required")
+    assert raw, "no PAYMENT-REQUIRED header -- every v2 client falls back to v1"
+    challenge = decode_payment_required_header(raw)
+    assert challenge.x402_version == 2
+    assert challenge.accepts, "a v2 challenge with no requirements is unpayable"
+    # service_name and tags are what an agent shopping the Bazaar by
+    # capability matches on. The v1 body has no field for either.
+    assert challenge.resource.service_name
+    assert challenge.resource.tags
+
+
+def test_a_v2_payment_signature_header_is_actually_read(monkeypatch, load_main_fresh):
+    """A v2 client answers with PAYMENT-SIGNATURE, not X-PAYMENT. Advertising
+    v2 while reading only X-PAYMENT would hand a client a challenge it can
+    satisfy and then ignore the answer, 402ing it forever."""
+    from fastapi.testclient import TestClient
+
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_main_v2_read")
+
+    seen = {}
+
+    def _capture(header, price=None):
+        seen["header"] = header
+        return None  # still unpaid; we only care that it was looked at
+
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", _capture)
+
+    TestClient(module.app).post(
+        "/audit/wcag",
+        json={"url": "https://x"},
+        headers={"PAYMENT-SIGNATURE": "c2lnbmF0dXJl"},
+    )
+    assert seen.get("header") == "c2lnbmF0dXJl", (
+        "the v2 payment header never reached verification"
+    )
