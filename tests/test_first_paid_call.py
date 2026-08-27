@@ -225,3 +225,40 @@ def test_the_wallet_file_is_used_when_the_env_var_is_empty(tmp_path):
     )
     assert "wallet key from" in result.stdout
     assert "No paying wallet" not in result.stdout
+
+
+def test_refusing_to_overwrite_still_shows_the_wallet_you_have(tmp_path):
+    """Refusing is right -- overwriting a key that may hold funds destroys
+    them. Refusing silently is not. The wallet you already own is the answer
+    to the question just asked, and its address is the next thing needed; a
+    STOP without it sends someone hunting for a wallet they already have."""
+    key_file = tmp_path / "key"
+    key_file.write_text("0x" + "1" * 63 + "2")
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "--new-wallet"], capture_output=True, text=True,
+        cwd=REPO_ROOT,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+             "HUBVIBE_WALLET_FILE": str(key_file)},
+    )
+    assert result.returncode == 1
+    assert "already have a wallet" in result.stdout
+    # The address the existing key actually signs for, not a placeholder.
+    from eth_account import Account
+    assert Account.from_key(key_file.read_text()).address in result.stdout
+    assert "USDC on Base" in result.stdout
+    assert key_file.read_text() == "0x" + "1" * 63 + "2", "the key was modified"
+
+
+def test_an_unreadable_key_file_says_so_instead_of_printing_nothing(tmp_path):
+    """A truncated or garbage file is not a wallet. Falling through to a blank
+    address would be worse than the silent stop it replaced."""
+    key_file = tmp_path / "key"
+    key_file.write_text("not-a-key")
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "--new-wallet"], capture_output=True, text=True,
+        cwd=REPO_ROOT,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+             "HUBVIBE_WALLET_FILE": str(key_file)},
+    )
+    assert "does not contain a readable private key" in result.stdout
+    assert "HUBVIBE_FORCE_NEW_WALLET=1" in result.stdout
