@@ -4,6 +4,11 @@ Read this first. It is the state of the business and the decisions already
 made, so a new session does not re-litigate them or rebuild traps that were
 already removed.
 
+`docs/SESSION_BRIEF.md` is the companion: the standing rules and the facts
+that do not move. It deliberately holds no numbers — every count and commit
+is read from here or from a live run, because a brief that froze them went
+stale in a chat paste and cost several sessions.
+
 ## What this is
 
 A machine-payable site auditing service. Software agents call an HTTP
