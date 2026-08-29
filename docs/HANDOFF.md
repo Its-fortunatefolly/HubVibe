@@ -130,6 +130,68 @@ service implements MPP directly in Python because there is no Python SDK —
 and it multiplies by 100 an amount that is already in cents, which would
 charge $3.00 and $10.00 rather than 3c and 10c.)
 
+## 2026-08-29: the Bazaar blocker is the FACILITATOR, and it is now measurable
+
+Two weeks in, revenue is zero, and the reason is narrower than "demand": the
+node is payable and **invisible**, because the facilitator it pays through
+keeps no Bazaar index.
+
+Established from the x402 spec repo (`coinbase/x402`, cloned and read, not
+recalled):
+
+- A facilitator catalogs a resource **when it receives a `PaymentPayload`
+  carrying the bazaar extension** (`specs/extensions/bazaar.md`, "Facilitator
+  Behavior"). How it stores and exposes that is explicitly an implementation
+  detail — so whether any given facilitator indexes at all is a fact to be
+  measured, not assumed.
+- The index is read back at `GET /discovery/resources`
+  (`specs/x402-specification-v2.md` §8.1), answering with an `items[]` array.
+- **The protocol is permissionless.** From the FAQ, verbatim: *"Multiple
+  organizations operate production facilitators. The protocol is
+  **permissionless**—anyone can run a facilitator."* Community-run
+  facilitators are listed alongside private ones "for enterprises that need
+  custom KYT / KYC flows". **x402 is not gated on a business account.** CDP's
+  DBA review is one facilitator's policy, not the protocol's, and treating it
+  as the protocol's cost this project weeks.
+- The ecosystem list is at `https://www.x402.org/ecosystem?filter=facilitators`
+  (not reachable from the build sandbox; reachable from Cloud Shell).
+
+So the question that decides Bazaar listing is: **which facilitator both
+settles Base mainnet AND keeps an index?** `facilitator.xpay.sh` settles and
+does not index — that combination is precisely why this node is payable and
+uncatalogued.
+
+`scripts/probe-facilitators.sh` answers it with evidence. GETs only, no
+wallet, no money moved; run it from Cloud Shell:
+
+```bash
+bash scripts/probe-facilitators.sh
+```
+
+It reports, per candidate, whether `/supported` offers Base mainnet (CAIP-2
+`eip155:8453` **or** the legacy name `base` — v1 clients use the latter) and
+whether `/discovery/resources` returns a real `items[]` index. It names the
+winner and prints the one command to switch to it.
+
+**The trap it exists to avoid:** xpay.sh answers `/discovery/resources` with
+**HTTP 200** and `{"message":"Not Found"}`. A status-code check calls that an
+index and sends the next session chasing a listing that can never appear —
+the same form-not-function error as the zero address, the Bazaar record, and
+the unpayable 402. The probe reads the body; a test proves it by reverting to
+a status-only check and watching it go red.
+
+Add candidates from the ecosystem page as arguments (they are appended to the
+built-in list, not substituted):
+
+```bash
+bash scripts/probe-facilitators.sh https://candidate-one https://candidate-two
+```
+
+A facilitator that answers 401/403 is reported as needing credentials rather
+than as a failure — permissionless means such a facilitator may still hand
+out credentials without a business review, and
+`X402_FACILITATOR_AUTH_HEADERS` already exists to carry them.
+
 ## 2026-08-29: OWNER DECISION — one rail per network. MPP is Stripe. Base is x402.
 
 Stated by the owner, and it settles an architecture question rather than a
