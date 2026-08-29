@@ -54,6 +54,14 @@ def _run_block(tmp_path, status, body='{"error":"x"}', api_key="k"):
     )
     (stub_dir / "curl").chmod(0o755)
 
+    # Stub gcloud to fail. lib-api-key.sh resolves a key out of Secret Manager
+    # when HUBVIBE_API_KEY is unset, so on a real Cloud Shell the api_key=None
+    # case below silently becomes "a key WAS found" and the skip-path test
+    # fails there while passing in CI. Whether a key exists has to be a fact of
+    # the test, not of the machine it runs on.
+    (stub_dir / "gcloud").write_text("#!/usr/bin/env bash\nexit 1\n")
+    (stub_dir / "gcloud").chmod(0o755)
+
     harness = tmp_path / "block.sh"
     harness.write_text(_HARNESS_PREAMBLE + _paid_path_block())
     # The block resolves the API key via lib-api-key.sh, found relative to

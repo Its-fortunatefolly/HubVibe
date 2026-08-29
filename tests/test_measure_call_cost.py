@@ -16,10 +16,39 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "measure-call-cost.sh"
 
 
-def _run(args, env=None, **kwargs):
+import pytest
+
+
+@pytest.fixture(scope="module")
+def _no_key_env(tmp_path_factory):
+    """A PATH where no API key can be resolved, on ANY machine.
+
+    Clearing HUBVIBE_API_KEY is not enough: scripts/lib-api-key.sh falls back
+    to reading the key out of Secret Manager via gcloud, so on a real Cloud
+    Shell the "no way to pay" premise these tests rest on quietly evaporates
+    and they fail there while passing in CI. That is the same
+    environment-dependent green this repo has been bitten by before, just
+    pointed the other way: here the test depended on gcloud being ABSENT.
+
+    Stubbing gcloud to fail makes "no key is available" a fact of the test
+    rather than a fact of the machine.
+    """
     import os
 
-    full_env = dict(os.environ)
+    bin_dir = tmp_path_factory.mktemp("nokey_bin")
+    (bin_dir / "gcloud").write_text("#!/usr/bin/env bash\nexit 1\n")
+    (bin_dir / "gcloud").chmod(0o755)
+
+    env = dict(os.environ)
+    env.pop("HUBVIBE_API_KEY", None)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    return env
+
+
+def _run(args, env=None, base_env=None, **kwargs):
+    import os
+
+    full_env = dict(base_env if base_env is not None else os.environ)
     full_env.pop("HUBVIBE_API_KEY", None)
     if env:
         full_env.update(env)
@@ -37,11 +66,11 @@ def test_the_script_exists_and_is_valid_bash():
     assert result.returncode == 0, result.stderr
 
 
-def test_it_refuses_to_run_without_a_way_to_pay():
+def test_it_refuses_to_run_without_a_way_to_pay(_no_key_env):
     """Without a key every call 402s, no audit runs, and the script would
     report the cost of serving a payment challenge -- a plausible-looking
     number that answers the wrong question."""
-    result = _run(["--calls", "1"])
+    result = _run(["--calls", "1"], base_env=_no_key_env)
     assert result.returncode != 0
     assert "HUBVIBE_API_KEY" in result.stderr
 
