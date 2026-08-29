@@ -130,6 +130,77 @@ service implements MPP directly in Python because there is no Python SDK —
 and it multiplies by 100 an amount that is already in cents, which would
 charge $3.00 and $10.00 rather than 3c and 10c.)
 
+## 2026-08-29: the x402 recipient is RESOLVED — a self-custody Base wallet
+
+The owner created a Base wallet: `0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd`.
+Verified 0x + 40 hex, not the zero address, and it appears nowhere in this
+repo (so it is not a test constant recycled by accident — the fault that had
+just been found in the tempo recipient).
+
+**This replaces the unidentified `0x2b3b…0256` and unblocks the x402 rail.**
+It does not identify that address, and does not need to: the rail now points
+somewhere the owner holds the key to. Leave `0x2b3b…` off the service. If the
+Stripe deposit-address list ever explains it, that is bookkeeping, not a
+blocker.
+
+Turning it on is one command — `go-live-x402.sh` shape-checks the address,
+sets it with the facilitator, and hands off to `repair-and-deploy.sh` for the
+source deploy:
+
+```bash
+cd ~/HubVibe-deploy4 && git fetch origin main && git reset --hard origin/main
+X402_PAY_TO_ADDRESS=0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd bash scripts/go-live-x402.sh
+```
+
+**One consequence to internalise: x402 revenue will NOT appear in Stripe.**
+The #47 PaymentIntent mirroring only fires for a *Stripe-custodied* deposit
+address, because Stripe verifies the transaction against its own address. A
+self-custody wallet settles on-chain and stays there. "Is the Stripe balance
+going up" stops being the measure of x402 income; the wallet is. That is a
+fair trade for a recipient whose key the owner actually holds, but it must not
+be mistaken later for payments failing.
+
+### Rejected: verifying x402 payments with the Basescan API
+
+A plan arrived to accept "direct USDC payments to the Base wallet, verified
+via the Basescan API" with the key in Secret Manager as `basescan-api-key`.
+**Do not build this.** Three reasons, in order of severity:
+
+1. **It is not x402, so no conforming client could pay it.** x402's exact-EVM
+   scheme has the client sign an EIP-3009 `transferWithAuthorization`
+   *off-chain* and send the signature in `X-PAYMENT` / `PAYMENT-SIGNATURE`;
+   the facilitator verifies it and submits it, paying the gas. A client never
+   broadcasts a transfer and hands over a tx hash, so there would be nothing
+   for a Basescan lookup to find. This is exactly the #61 failure —
+   advertised, unpayable, and invisible from this side — rebuilt on purpose.
+2. **It is replay-vulnerable.** "A transfer of the right amount to the right
+   address exists on-chain" is not proof that *this request* was paid for.
+   Without binding the payment to a per-request challenge and keeping a spent
+   ledger, one real payment authorises unlimited calls, by anyone who can read
+   a block explorer. The MPP tempo path does this correctly
+   (`_verify_challenge_binding` + `_receipt_matches` + `_used_credentials`);
+   a hand-rolled Basescan check would have none of it.
+3. **It puts a third-party block-explorer index on the paid path**, with its
+   rate limits and its indexing lag, in place of the facilitator whose entire
+   job this is.
+
+Verification is the facilitator's role by design — that is what makes a bug in
+our code able to wrongly *reject* a payment but never wrongly *accept* one.
+`facilitator.xpay.sh` is keyless, Base mainnet, zero fee, and already
+configured. **The `basescan-api-key` secret is therefore unused, and nothing
+mounts it.** It is a fine tool for out-of-band ops (confirming a settlement
+hash landed, watching the wallet balance); it is not a payment gate. Leave it
+in Secret Manager, unmounted, rather than wiring a credential the service has
+no honest use for.
+
+### Also rejected: a `Stripe-Payment-Credential` header
+
+MPP's wire format is `Authorization: Payment <credential>`, answering a
+`WWW-Authenticate: Payment` challenge — that is what `mppx validate` exercised
+75/0 against this service. A bespoke `Stripe-Payment-Credential` header would
+be understood by nothing. Same class of error as the invented `accepts[]`
+shape in #61.
+
 ## 2026-08-29: the tempo recipient is a TRUNCATED TEST ADDRESS, and nothing guarded it
 
 The reference validator, run against the live node, found what none of our
