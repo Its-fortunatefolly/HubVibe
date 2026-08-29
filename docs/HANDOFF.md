@@ -9,6 +9,158 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-08-29: the x402 recipient is UNIDENTIFIED. Turn the rail off.
+
+Read this before touching anything about x402.
+
+The deployed `X402_PAY_TO_ADDRESS` is
+`0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256`, **and the owner does not
+recognise it.** It appears nowhere in this repo. It was not minted by
+`scripts/x402-setup.py` against Stripe (that account exposes only
+`source_type: card`). Nobody knows who holds the key.
+
+Nothing has been lost — zero payments have ever been made — so this is
+entirely prospective risk. It is also the worst possible shape of risk: the
+node was advertising a payable rail pointing at an address the operator
+cannot claim. Advertising a rail that cannot settle is the rule this codebase
+exists around; advertising one that settles *to a stranger* is worse.
+
+**The rail is off until the recipient is identified.** One command, from
+Cloud Shell, and it takes effect on the next revision:
+
+```bash
+gcloud run services update hubvibe --project=resolver-time --region=us-south1 --remove-env-vars=X402_PAY_TO_ADDRESS,X402_FACILITATOR_URL
+```
+
+Both variables, not just the address. `is_configured()` needs both, so
+removing either one turns the rail off — but `repair-and-deploy.sh` preflight
+*fails the deploy* when a facilitator is set with no pay-to address (it reads
+as a half-configured rail, which is normally exactly right). Removing the
+pair leaves the preflight saying `x402 is not configured` and deploys.
+
+Read the whole env before and after, rather than a grep of it:
+
+```bash
+gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format='yaml(spec.template.spec.containers[0].env)'
+```
+
+**Check `MPP_TEMPO_RECIPIENT_ADDRESS` in that output too.** It is the other
+variable on this service that names a crypto recipient. If it holds the same
+unrecognised address, the tempo rail is pointing at the stranger as well and
+has to come off in the same breath; if it holds a Stripe crypto deposit
+address, that is money landing in the Stripe balance and it stays.
+
+### What `verify-live.sh` should show afterwards
+
+`36 passed, 0 failed` — the same total as before, with four lines changed in
+wording, not in colour. x402 being off is now a state the checker knows how
+to assert rather than one it reports as failure (that change is in this
+branch; an older checkout will show two red lines instead):
+
+```
+  x402 rail per the manifest: off
+  PASS  x402 is OFF and accepts[] is empty -- no unsettleable rail is advertised
+  PASS  x402 is off and no v2 PAYMENT-REQUIRED header is sent
+  PASS  402 does not advertise an unpayable x402 rail
+  PASS  x402 is off and the 402 carries no Bazaar record (nothing to index, correctly)
+```
+
+and under "Live payment rails advertised by the manifest", **no `x402`**.
+
+Before the branch is merged and deployed, the same thing is visible directly:
+
+```bash
+curl -sS -D- -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag -H 'Content-Type: application/json' -d '{"url":"https://example.com"}'
+```
+
+`"accepts":[]`, no `payment-required:` header, no `"extensions"`.
+
+The checker now fails, loudly, if any *one* of those surfaces still sells
+x402 while the manifest says it is off — an orphaned v2 header alone is
+enough to keep the rail live for a v2 client, since it reads that header
+before it reads the body.
+
+### To settle who owns the address
+
+One question, to Stripe support: *"Does account `acct_1U28tvDA21T9EAQB` own
+or custody the address `0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256` — as a
+crypto deposit address, an onramp/payout destination, or anything else — and
+if so, when and by which API call was it created?"*
+
+Faster, and worth doing first: the account **does** have stablecoins enabled
+(confirmed in the Dashboard on 2026-08-29), so the crypto deposit-address API
+is live for it and lists what it has minted:
+
+```bash
+curl -sS https://api.stripe.com/v1/crypto/deposit_addresses -u "$(gcloud secrets versions access latest --secret=SECRET_STRIPE_KEY):" -H "Stripe-Version: 2026-07-29.preview"
+```
+
+If `0x2b3b...` is in that list, it is Stripe-custodied, the money was always
+going to the Stripe balance, and the rail can go back on unchanged. If it is
+not, it stays off.
+
+## 2026-08-29: mpp-stripe cannot serve a 3-cent call, and now says so
+
+`MPP_STRIPE_NETWORK_PROFILE_ID` is
+`profile_61VBesDFKefGw7DD7A6VBesDRXSQjgSvGV9E4a316JTc` (the account's Stripe
+profile ID). Setting it is *not* enough to make the rail live, and this is
+the useful finding: **Stripe requires a minimum 0.50 USD charge for card
+payments made with a Shared Payment Token.** Every route here is $0.03 or
+$0.10. Confirmed twice over — Stripe's own MPP docs, and Stripe's Dashboard
+assistant on this account, which also gives the way around it: stablecoin
+payments through MPP have a **1 cent** minimum, and stablecoins are enabled
+on this account.
+
+So the SPT rail is now gated on the amount, not just on configuration
+(`stripe_available_for`, floor `MPP_STRIPE_MIN_CENTS`, default 50). Below the
+floor it is not challenged, not in `accepts`, not in `payment.methods`, and a
+stale under-floor challenge is refused before a caller's single-use token is
+spent on it. Set the profile ID anyway — it costs nothing and the rail is
+ready the moment something here is priced at 50c+ — but do not expect it to
+appear in the manifest at today's prices. That absence is the fail-closed
+rule working, not a misconfiguration.
+
+**The rail that can take $0.03 through Stripe is the stablecoin one**: the
+MPP `tempo` method with `MPP_TEMPO_RECIPIENT_ADDRESS` set to a Stripe crypto
+deposit address, which Stripe offramps into the Stripe balance. See
+`wcag-audit-engine/README.md` for the deposit-address call.
+
+(The Node snippet the Dashboard assistant offers is not usable here — this
+service implements MPP directly in Python because there is no Python SDK —
+and it multiplies by 100 an amount that is already in cents, which would
+charge $3.00 and $10.00 rather than 3c and 10c.)
+
+## 2026-08-29: API-key calls metered a third of what they charge
+
+`billing.record_usage` reported **one meter unit per call** against a Price
+of **$0.01 per unit**. A $0.03 audit metered $0.01; the $0.10 bundle sent 3
+units and metered $0.03. Every invoice this would ever have produced was for
+roughly a third of the money owed.
+
+It has cost nothing so far, for the same reason it was invisible: the human
+plans are `licensed` flat Prices with no metered item on the subscription, so
+the events were accepted, aggregated, and charged to nobody. It would have
+started under-billing on the day someone attached that Price — which is
+exactly the moment nobody is auditing the arithmetic.
+
+Fixed by metering the price rather than the call: `record_usage` now takes
+`price_cents`, and routes pass their own rate (`_bill(auth, price_usd=...)`,
+no default, so a route cannot forget). Two Stripe-side facts it depends on
+are now variables rather than assumptions, because getting either wrong is a
+silent uniform mis-bill:
+
+- `STRIPE_METER_UNIT_CENTS` (default `1`) — what one unit costs on the
+  attached Price. **Reconcile the Price before attaching it.**
+- `STRIPE_METER_AGGREGATION` (default `count`) — `count` ignores the event
+  value, so N units means N events; `sum` reads the value, so it is one
+  event. A meter's formula cannot be edited after creation. The live meter is
+  `mtr_61VBfeoxeQjPttsXD41DA21T9EAQBOA4` behind Price
+  `price_1U2Hqm...` ($0.01/unit, billed daily); this session could not read
+  its formula (the Stripe connector does not expose the meters API), so the
+  default follows what `README.md` says it was created with. Check it and set
+  the variable to match — under `count` the code sends 3 events for a $0.03
+  audit, which is correct but chatty; a `sum` meter makes it one call.
+
 ## What this is
 
 A machine-payable site auditing service. Software agents call an HTTP
@@ -40,8 +192,8 @@ as the test that outranks everything else.
 | Payouts | daily → SUTTON BANK ····1444 |
 | Webhook | `/billing/webhook`, enabled, `checkout.session.completed` |
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0 active; `server.json` on main is **1.1.2** and not yet republished |
-| Payment rails live | `x402`, `mpp-stripe`, `mpp-tempo`, `stripe_api_key` |
-| x402 | **Live per #58** — `verify-live.sh` reported 34 passed / 0 failed against the deployed node on 2026-08-25. **Do not re-derive this from the advertised-methods list.** On 2026-08-18 the deployed pay-to address was `0x` + 40 ZEROS: shape-valid, so it passed the #46 guard, the preflight, and every verify-live run, while `address(0)` is unownable and USDC reverts transfers to it — the rail was advertised and unpayable for days and nothing said so. A shape check proves shape; shape is not payability. `scripts/go-live-x402.sh` now replaces zeros explicitly, and the app and preflight both reject them. To know the current recipient, read it: `gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format=json` and look at `X402_PAY_TO_ADDRESS`. |
+| Payment rails live | **`x402` is OFF as of 2026-08-29** — unidentified recipient, see the entry at the top. `mpp-stripe` is configured but below Stripe's 0.50 USD SPT floor, so it is deliberately not advertised either. That leaves `mpp-tempo` and `stripe_api_key`. |
+| x402 | **OFF since 2026-08-29** (unidentified pay-to recipient — see the top of this file). Everything below is the history of how it got to being live, and stays accurate about the code; it is no longer a description of the running node. **Live per #58** — `verify-live.sh` reported 34 passed / 0 failed against the deployed node on 2026-08-25. **Do not re-derive this from the advertised-methods list.** On 2026-08-18 the deployed pay-to address was `0x` + 40 ZEROS: shape-valid, so it passed the #46 guard, the preflight, and every verify-live run, while `address(0)` is unownable and USDC reverts transfers to it — the rail was advertised and unpayable for days and nothing said so. A shape check proves shape; shape is not payability. `scripts/go-live-x402.sh` now replaces zeros explicitly, and the app and preflight both reject them. To know the current recipient, read it: `gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format=json` and look at `X402_PAY_TO_ADDRESS`. |
 | x402 payability | **The 402 was unpayable by any conforming client until 2026-08-27** — `accepts[]` was a shape of our own invention missing four required fields, so the x402 library raised before signing. See the 2026-08-27 entry. Now both v1 body and v2 `PAYMENT-REQUIRED` header go out and both are proven payable against the real client. |
 | x402 settle side | Facilitator is now **xpay.sh** (keyless, Base mainnet, zero fee) — CDP is abandoned, not pending: its review wants proof of a DBA that does not exist. The CDP key pair may stay mounted; since #55 those credentials only go to a Coinbase host. Settlement itself is still unproven until the first real agent payment — nothing has ever been attempted. |
 

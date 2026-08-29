@@ -121,6 +121,26 @@ CHALLENGE=$(curl -sS -m 30 -X POST "$BASE/audit/wcag" \
 CHALLENGE_HEADERS=$(curl -sS -m 30 -D - -o /dev/null -X POST "$BASE/audit/wcag" \
   -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
 
+# The manifest's payment.methods is this node's own statement of which rails it
+# believes it can settle, and it is read BEFORE the x402 checks below because
+# every one of them is a different question depending on the answer. A node with
+# x402 deliberately switched off must carry no x402 anywhere; a node with it on
+# must carry all of it. Asserting only the "on" half turns a correct, deliberate
+# shutdown into two red lines, and a red line that is supposed to be red is how
+# a checker teaches people to ignore it -- or worse, how the next session
+# "fixes" a rail back on that was turned off on purpose.
+MANIFEST=$(curl -sS -m 30 "$BASE/.well-known/agent.json" 2>/dev/null)
+X402_STATE=$(printf '%s' "$MANIFEST" | python3 -c '
+import json, sys
+try:
+    methods = json.load(sys.stdin)["payment"]["methods"]
+except Exception:
+    print("unknown"); sys.exit()
+print("on" if "x402" in methods else "off")
+' 2>/dev/null)
+[ -n "$X402_STATE" ] || X402_STATE=unknown
+echo "  x402 rail per the manifest: $X402_STATE"
+
 if printf '%s' "$CHALLENGE" | grep -q '"price_usd"'; then
   pass "402 body carries price_usd"
 else
@@ -146,10 +166,33 @@ fi
 # drive the real client; this catches the shape regressing in production.
 PAYABLE=$(printf '%s' "$CHALLENGE" | python3 -c '
 import json, sys
+state = sys.argv[1]
 try:
     body = json.load(sys.stdin)
 except Exception:
     print("FAIL|the 402 body is not JSON"); sys.exit()
+
+if state == "unknown":
+    print("FAIL|could not read payment.methods from /.well-known/agent.json, so "
+          "there is no way to tell whether the x402 rail is meant to be on -- "
+          "and every x402 check below asks a different question depending on it")
+    sys.exit()
+
+if state == "off":
+    # The fail-closed half, asserted rather than assumed. Turning the rail off
+    # is a config change on a container that was built to advertise it, so the
+    # question "did it actually stop advertising" is exactly as live as "can it
+    # be paid", and nothing was asking it.
+    accepts = body.get("accepts")
+    if accepts is None:
+        print("FAIL|402 body has no accepts[] key at all"); sys.exit()
+    if accepts:
+        print("FAIL|the manifest says x402 is OFF but the 402 still carries %d "
+              "accepts[] entr%s -- the node is advertising a rail it does not "
+              "claim it can settle" % (len(accepts), "y" if len(accepts) == 1 else "ies"))
+        sys.exit()
+    print("OK|x402 is OFF and accepts[] is empty -- no unsettleable rail is advertised")
+    sys.exit()
 
 if body.get("x402Version") != 1:
     print("FAIL|402 body does not say x402Version:1 -- a v1 client will not read "
@@ -174,7 +217,7 @@ for i, entry in enumerate(accepts):
         sys.exit()
 print("OK|accepts[] is spec-shaped: %d payable x402 entr%s"
       % (len(accepts), "y" if len(accepts) == 1 else "ies"))
-')
+' "$X402_STATE")
 case "$PAYABLE" in
   OK*)   pass "$(printf '%s' "$PAYABLE" | cut -d'|' -f2)" ;;
   *)     fail "$(printf '%s' "$PAYABLE" | cut -d'|' -f2)" ;;
@@ -185,7 +228,13 @@ esac
 # has nowhere to put the v2 extensions slot or the service name the Bazaar
 # indexes by.
 if printf '%s' "$CHALLENGE_HEADERS" | grep -qi '^payment-required:'; then
-  pass "402 carries the v2 PAYMENT-REQUIRED challenge header"
+  if [ "$X402_STATE" = "off" ]; then
+    fail "x402 is off per the manifest, but the 402 still carries a v2 PAYMENT-REQUIRED challenge -- a v2 client reads that header FIRST, so it would still be told to pay"
+  else
+    pass "402 carries the v2 PAYMENT-REQUIRED challenge header"
+  fi
+elif [ "$X402_STATE" = "off" ]; then
+  pass "x402 is off and no v2 PAYMENT-REQUIRED header is sent"
 else
   fail "402 has no PAYMENT-REQUIRED header -- v2 clients fall back to v1, and the service cannot name itself for the Bazaar index"
 fi
@@ -203,7 +252,6 @@ fi
 # -- the array an agent actually iterates -- omitted it, so a CI pipeline
 # holding a pre-funded key could not learn from the challenge that its key
 # was spendable here.
-MANIFEST=$(curl -sS -m 30 "$BASE/.well-known/agent.json" 2>/dev/null)
 if printf '%s' "$MANIFEST" | grep -q 'stripe_api_key'; then
   if printf '%s' "$CHALLENGE" | grep -q '"api_key"'; then
     pass "402 accepts[] offers the API-key rail the manifest advertises"
@@ -386,15 +434,22 @@ except Exception:
 # mcp-type records carry no method by design; only body records need one.
 sys.exit(0 if info.get("type") != "http" or info.get("method") else 1)
 ' 2>/dev/null; then
-    pass "402 carries x402 Bazaar discovery data (indexable by facilitators)"
+    if [ "$X402_STATE" = "off" ]; then
+      fail "x402 is off per the manifest, but the 402 still carries a Bazaar discovery record -- it would advertise this node to facilitators as a payable resource it cannot settle"
+    else
+      pass "402 carries x402 Bazaar discovery data (indexable by facilitators)"
+    fi
   else
     fail "402 carries a Bazaar record that names no HTTP method -- a validating facilitator discards it, so this node is not indexable by capability"
   fi
+elif [ "$X402_STATE" = "off" ]; then
+  # Counted, not a NOTE. A branch that only prints is a branch that cannot go
+  # red, and this file already learned that a silent skip reads as a pass.
+  pass "x402 is off and the 402 carries no Bazaar record (nothing to index, correctly)"
+  echo "        Agents can only find this node via the MCP registry and the"
+  echo "        crawler surfaces while the rail is off, not by capability."
 else
-  echo "  NOTE  no Bazaar discovery on the 402 -- expected while x402 is off."
-  echo "        Set X402_FACILITATOR_URL and X402_PAY_TO_ADDRESS to turn on"
-  echo "        both the x402 rail and Bazaar indexing. Until then agents can"
-  echo "        only find this node via the MCP registry, not by capability."
+  fail "the manifest advertises x402 but the 402 carries no Bazaar record -- a payable node that no facilitator can index by capability"
 fi
 
 # /audit is the shortest and most guessable paid path on this service. It is

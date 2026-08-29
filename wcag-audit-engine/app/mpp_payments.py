@@ -91,6 +91,23 @@ _STRIPE_NETWORK_PROFILE_ID = os.environ.get("MPP_STRIPE_NETWORK_PROFILE_ID")
 _STRIPE_PRICE_CENTS = os.environ.get("MPP_STRIPE_PRICE_CENTS", "3")
 _STRIPE_CURRENCY = os.environ.get("MPP_STRIPE_CURRENCY", "usd")
 
+# Stripe's own minimum for a card payment made with a Shared Payment Token:
+# "Stripe requires a minimum 0.50 USD charge (or the equivalent amount) for
+# card payments made with SPT" -- https://docs.stripe.com/payments/machine/mpp
+#
+# This is the whole reason this rail cannot simply be switched on. Every route
+# here is priced at $0.03 or $0.10, all of them under the floor, so a caller
+# that took the mpp-stripe challenge and issued an SPT for it would have the
+# PaymentIntent rejected by Stripe on amount alone -- a rail advertised and
+# unable to settle, which is the exact failure that made the x402 rail
+# unpayable for months. The floor is enforced here rather than discovered at
+# charge time so the rail is simply not offered where it cannot work.
+#
+# Overridable because it is Stripe's number, not ours, and it is stated in USD
+# for card SPTs; a deployment charging in another currency or reading a revised
+# minimum should not have to edit code to say so.
+_STRIPE_MIN_CENTS = int(os.environ.get("MPP_STRIPE_MIN_CENTS", "50"))
+
 # Defaults below are Tempo mainnet's real, official values (chain ID, RPC,
 # and the actual USDC.e token contract) -- pulled directly from Tempo's own
 # SDK (the `mppx` package's tempo/internal/defaults.ts), not a placeholder.
@@ -119,7 +136,29 @@ def _secret_key() -> Optional[bytes]:
 
 
 def stripe_configured() -> bool:
+    """Whether this deployment holds everything the SPT rail needs.
+
+    Configuration only. Whether the rail can settle a PARTICULAR charge also
+    depends on the amount -- see stripe_available_for.
+    """
     return bool(_secret_key() and stripe.api_key and _STRIPE_NETWORK_PROFILE_ID)
+
+
+def stripe_available_for(price_cents: int) -> bool:
+    """Whether the SPT rail can actually settle a charge of this size.
+
+    Configured is not the same as usable. Stripe rejects a card SPT charge
+    below its minimum outright, so offering the rail at $0.03 would hand an
+    agent a challenge, take its token, and fail at the API -- the caller
+    cannot buy and we cannot sell. Splitting this out of stripe_configured()
+    keeps "the operator set the variables" and "money can move" as separate
+    facts, which is the distinction the zero-address and the unpayable-402
+    bugs both turned on.
+    """
+    try:
+        return stripe_configured() and int(price_cents) >= _STRIPE_MIN_CENTS
+    except (TypeError, ValueError):
+        return False
 
 
 def tempo_configured() -> bool:
@@ -218,7 +257,7 @@ def www_authenticate_headers(realm: Optional[str] = None, price_usd: Optional[fl
         str(round(price_usd * 1_000_000)) if price_usd is not None else _TEMPO_PRICE_BASE_UNITS
     )
     headers = []
-    if stripe_configured():
+    if stripe_available_for(stripe_price_cents):
         challenge = _build_challenge(
             realm,
             "stripe",
@@ -260,15 +299,16 @@ def accepts_entries(price_usd: Optional[float] = None) -> list:
     credential, so it deliberately carries no HMAC binding or opaque token.
     """
     entries = []
-    if stripe_configured():
+    stripe_price_cents = (
+        str(round(price_usd * 100)) if price_usd is not None else _STRIPE_PRICE_CENTS
+    )
+    if stripe_available_for(stripe_price_cents):
         entries.append(
             {
                 "protocol": "mpp",
                 "method": "stripe",
                 "asset": _STRIPE_CURRENCY,
-                "amount_minor_units": (
-                    str(round(price_usd * 100)) if price_usd is not None else _STRIPE_PRICE_CENTS
-                ),
+                "amount_minor_units": stripe_price_cents,
                 "send_via_header": "Authorization: Payment ...",
                 "challenge_in": "WWW-Authenticate",
             }
@@ -326,6 +366,12 @@ def _verify_stripe(challenge: dict, payload: dict) -> bool:
         return False
     try:
         request_obj = json.loads(_b64url_decode(challenge["request"]))
+        # Re-checked here, not just where the challenge is built: a challenge
+        # minted by an older revision (or by a deployment with a lower floor)
+        # stays valid for its whole TTL, and burning a caller's single-use SPT
+        # on a charge Stripe will reject is worse than refusing it outright.
+        if not stripe_available_for(int(request_obj["amount"])):
+            return False
         intent = stripe.PaymentIntent.create(
             amount=int(request_obj["amount"]),
             currency=request_obj["currency"],

@@ -41,6 +41,21 @@ _WEBHOOK_SECRET = (os.environ.get("STRIPE_WEBHOOK_SECRET") or "").strip() or Non
 _METERED_PRICE_ID = os.environ.get("STRIPE_METERED_PRICE_ID")
 _METER_EVENT_NAME = os.environ.get("STRIPE_METER_EVENT_NAME", "wcag_audit_call")
 
+# How the Stripe Meter behind that Price aggregates events. `count` ignores
+# the event's value and counts events; `sum` adds the values up. It is not
+# editable after the meter is created, so it is configuration here, not an
+# assumption. Default `count`, which is what this account's meter was created
+# with -- see record_usage for what each one means for how usage is reported.
+_METER_AGGREGATION = (os.environ.get("STRIPE_METER_AGGREGATION") or "count").strip().lower()
+
+# What one unit on the metered Price is worth, in cents. The live Price
+# (price_1U2Hqm...) is $0.01 per unit, so a $0.03 audit is 3 units and a $0.10
+# bundle is 10. See record_usage: the meter counts cents, not calls, and this
+# is the one number that ties the two together. If the Price is ever changed,
+# change it here in the same breath -- a mismatch here is a silent, uniform
+# mis-bill, which is the worst kind.
+_METER_UNIT_CENTS = int(os.environ.get("STRIPE_METER_UNIT_CENTS", "1"))
+
 # Stripe secret keys are sk_/rk_ prefixed -- live, test, or restricted.
 # https://docs.stripe.com/keys
 _STRIPE_KEY_PREFIXES = ("sk_", "rk_")
@@ -367,33 +382,82 @@ def save_lead(url: str, email: Optional[str], violation_count: int) -> None:
     )
 
 
-def record_usage(customer_id: str, units: int = 1) -> None:
-    """Bill a completed audit call.
+def record_usage(customer_id: str, price_cents: int) -> None:
+    """Bill a completed audit call, for what the call actually costs.
 
     Only call this after a real audit ran -- never for requests that errored
     out before producing a result. Uses a fresh idempotency identifier per
     call so a retried request can't double-bill.
 
-    A higher-priced route (the $0.10 /audit/bundle) reports `units` separate
-    events rather than requiring a second Stripe meter and price just for
-    it.
+    **The meter counts cents, not calls.** That is the whole fix. This used to
+    report one event per "unit", where a unit was a call ($0.03) or a third of
+    a bundle -- and the metered Price on the account is $0.01 per unit, so a
+    $0.03 audit metered $0.01 and a $0.10 bundle metered $0.03. Every invoice
+    this ever produced would have been for roughly a third of the money owed.
+    It was invisible because the human plans are `licensed` flat prices with
+    no metered item on the subscription: the events were accepted by Stripe,
+    aggregated by the meter, and charged to nobody. A silent 3x undercharge
+    waiting for the day someone attached the Price.
 
-    What these events are actually worth is NOT $0.03 each. The metered
-    Price on the account is $0.01 per unit, so a single audit meters $0.01
-    and a bundle $0.03 -- nowhere near the $0.03/$0.10 those routes charge.
-    That does not currently mis-bill anyone, because the human plans are
-    `licensed` flat prices with no metered item on the subscription, so
-    these events are recorded and never charged. It would start mis-billing
-    the moment that metered Price is attached to a subscription, so if
-    metered billing is ever revived, fix the Price first: reconcile it with
-    the real per-call rate rather than trusting this call count.
+    Reporting the price in cents against a $0.01/unit Price makes the two
+    reconcile exactly -- 3 units for $0.03, 10 for $0.10 -- with no second
+    meter, no second Price, and no per-route arithmetic anywhere else.
+
+    Two facts live on the Stripe side, which is why both are variables here
+    rather than literals. Getting either wrong is a silent, uniform mis-bill,
+    so the code states what it assumes instead of hoping:
+
+    1. `STRIPE_METER_UNIT_CENTS` -- what one unit costs on the Price that gets
+       attached to the metered subscription item ($0.01 today). Change the
+       Price, change the variable, in that order: reconcile BEFORE attaching.
+    2. `STRIPE_METER_AGGREGATION` -- how the Meter adds events up, and it
+       decides how usage has to be reported:
+         * `count` (the default, and what this account's meter was created
+           with): the event's `value` is IGNORED and each event counts as one
+           unit, so N units means N events.
+         * `sum`: one event carrying `value: N`.
+       Reporting `value: 3` to a `count` meter bills one unit -- the same
+       undercharge this function exists to fix, wearing a different hat. A
+       meter's formula cannot be edited after creation, so moving to `sum`
+       (one API call per audit instead of three) means a new Meter, a new
+       Price reconciled against it, and then this variable.
+
+    Raises rather than guessing when the price is not a whole number of meter
+    units: silently rounding is how a rate becomes wrong by a few percent
+    forever. The caller turns that into a visible billing_warning on the
+    response rather than failing the audit the customer already received.
     """
-    for _ in range(max(1, units)):
+    if _METER_UNIT_CENTS <= 0:
+        raise ValueError("STRIPE_METER_UNIT_CENTS must be a positive number of cents")
+    if _METER_AGGREGATION not in ("count", "sum"):
+        raise ValueError(
+            f"STRIPE_METER_AGGREGATION is {_METER_AGGREGATION!r}; it must be "
+            "'count' or 'sum' -- the two shapes a Stripe Meter can aggregate. "
+            "Guessing would mis-bill every call."
+        )
+    units, remainder = divmod(int(price_cents), _METER_UNIT_CENTS)
+    if remainder or units < 1:
+        raise ValueError(
+            f"{price_cents} cents is not a whole number of "
+            f"{_METER_UNIT_CENTS}-cent meter units; refusing to meter an "
+            "amount that would not reconcile with the attached Price"
+        )
+
+    def _send(value: int) -> None:
         stripe.billing.MeterEvent.create(
             event_name=_METER_EVENT_NAME,
-            payload={"value": "1", "stripe_customer_id": customer_id},
+            # A fresh identifier per event: Stripe dedupes on it, so reusing
+            # one across the N events of a single bundle would collapse them
+            # into one unit and undercharge by 90%.
+            payload={"value": str(value), "stripe_customer_id": customer_id},
             identifier=str(uuid.uuid4()),
         )
+
+    if _METER_AGGREGATION == "sum":
+        _send(units)
+        return
+    for _ in range(units):
+        _send(1)
 
 
 def check_and_increment_quota(customer_id: str, plan: Optional[str] = None) -> bool:

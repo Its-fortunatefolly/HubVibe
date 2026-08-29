@@ -528,8 +528,17 @@ def _authorize_and_rate_limit(
     return auth, None
 
 
-def _bill(auth, units: int = 1) -> Optional[str]:
+def _bill(auth, price_usd: float) -> Optional[str]:
     """Collect payment for an audit that actually produced a result.
+
+    `price_usd` is this route's real rate, and it is passed through to the
+    meter rather than converted into "units" here. Routes used to hand this
+    function a unit count -- 1 for an audit, 3 for the bundle -- against a
+    $0.01/unit Price, which metered a third of what the route charged. The
+    price is the fact each route already knows; a unit count is a derived
+    number that was derived wrongly, in the wrong place. It has no default
+    for the same reason: a route that forgets to say what it charges should
+    not quietly bill whatever the cheapest route happens to cost.
 
     Called only on the success path, which is the whole point: every route
     returns 502 without reaching here when an audit fails to run, so a failed
@@ -551,7 +560,7 @@ def _bill(auth, units: int = 1) -> Optional[str]:
     if not auth.stripe_billable:
         return None
     try:
-        billing.record_usage(auth.customer_id, units=units)
+        billing.record_usage(auth.customer_id, price_cents=round(price_usd * 100))
         return None
     except Exception as exc:
         return f"usage recording failed: {exc}"
@@ -870,6 +879,15 @@ def _schema_for(prose_input: dict) -> dict:
 _CATALOG_ALIASES = {"/audit": "/audit/wcag"}
 
 
+def _max_catalog_price_cents() -> int:
+    """The dearest single call this node sells, in cents.
+
+    Used to answer whether a rail with a minimum charge has anything at all it
+    could settle here.
+    """
+    return max(round(entry["price_usd"] * 100) for entry in _CATALOG)
+
+
 def _payment_methods_live() -> list:
     """Only the rails that can actually settle on this deployment.
 
@@ -879,7 +897,13 @@ def _payment_methods_live() -> list:
     methods = []
     if x402_payments.is_configured():
         methods.append("x402")
-    if mpp_payments.stripe_configured():
+    # The SPT rail is listed only if SOME sellable route clears Stripe's
+    # minimum card charge. This list is deployment-wide while the floor is
+    # per-amount, so the honest question is "is there anything here this rail
+    # could ever settle" -- and with the catalog priced at $0.03-$0.10, the
+    # answer today is no. Listing it anyway would put a method in the array an
+    # agent picks from that fails at the Stripe API every single time.
+    if mpp_payments.stripe_available_for(_max_catalog_price_cents()):
         methods.append("mpp-stripe")
     if mpp_payments.tempo_configured():
         methods.append("mpp-tempo")
@@ -1558,7 +1582,7 @@ def mcp_streamable_http(
             # Not billed: _bill only runs on success, same as the REST routes.
             return _mcp_tool_error(request_id, f"Audit could not complete: {exc}")
 
-        warning = _bill(auth, units=3 if name == "audit_bundle" else 1)
+        warning = _bill(auth, price_usd=price)
         if warning:
             result["billing_warning"] = warning
 
@@ -1757,7 +1781,7 @@ def audit(
         ],
     }
 
-    warning = _bill(auth)
+    warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
 
@@ -1810,7 +1834,7 @@ def audit_wcag(
             for v in violations
         ],
     }
-    warning = _bill(auth)
+    warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
     return result
@@ -1839,7 +1863,7 @@ def audit_seo(
             content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
         )
 
-    warning = _bill(auth)
+    warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
     return result
@@ -1865,7 +1889,7 @@ def audit_security(
             content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
         )
 
-    warning = _bill(auth)
+    warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
     return result
@@ -1891,7 +1915,7 @@ def audit_performance(
             content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
         )
 
-    warning = _bill(auth)
+    warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
     return result
@@ -1953,10 +1977,7 @@ def audit_bundle(
         "security": security_result,
         "performance": performance_result,
     }
-    # 3 units against the existing $0.03 meter (~$0.09) for Stripe
-    # subscribers -- see billing.record_usage's docstring for why this is
-    # an approximation of the $0.10 price rather than exact.
-    warning = _bill(auth, units=3)
+    warning = _bill(auth, price_usd=0.10)
     if warning:
         result["billing_warning"] = warning
     return result
