@@ -628,16 +628,19 @@ def test_bundle_failure_is_atomic_and_unbilled(monkeypatch):
     assert calls == []
 
 
-def test_bundle_success_reports_three_billing_units(monkeypatch):
-    # Approximates the $0.10 bundle price against the existing $0.03 flat
-    # meter -- see billing.record_usage's docstring for why this is 3, not 1.
+def test_bundle_success_meters_the_price_it_charges(monkeypatch):
+    # The bundle charges $0.10, so it must meter 10 cents -- not the 3 "units"
+    # it used to report, which at $0.01/unit invoiced $0.03 for a $0.10 call.
+    # See billing.record_usage.
     from fastapi.testclient import TestClient
     from unittest.mock import patch
 
     module = _load_main(monkeypatch, api_key="test-key")
     recorded = []
     monkeypatch.setattr(
-        module.billing, "record_usage", lambda customer_id, units=1: recorded.append(units)
+        module.billing,
+        "record_usage",
+        lambda customer_id, price_cents: recorded.append(price_cents),
     )
     # Force the internal key path to look Stripe-billable so _bill() actually
     # calls record_usage -- the internal key itself is normally unbilled.
@@ -671,7 +674,198 @@ def test_bundle_success_reports_three_billing_units(monkeypatch):
             "/audit/bundle", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
         )
     assert response.status_code == 200
-    assert recorded == [3]
+    assert recorded == [10]
+
+
+def _capture_meter_events(monkeypatch, module):
+    """Collect what would have been sent to Stripe's meter."""
+    events = []
+
+    class _MeterEvent:
+        @staticmethod
+        def create(**kwargs):
+            events.append(kwargs)
+
+    monkeypatch.setattr(module.billing.stripe.billing, "MeterEvent", _MeterEvent)
+    return events
+
+
+def test_record_usage_meters_the_price_not_the_call(monkeypatch):
+    """The metered Price is $0.01 per unit, so a $0.03 call owes 3 units.
+
+    It used to report exactly one unit per call, which invoiced a third of the
+    money on every single call -- and nothing said so, because the Price was
+    never attached to a subscription. This account's meter aggregates by
+    `count`, where the event value is ignored, so 3 units means 3 events.
+    """
+    module = _load_main(monkeypatch)
+    events = _capture_meter_events(monkeypatch, module)
+
+    module.billing.record_usage("cus_test", price_cents=3)
+    assert len(events) == 3
+
+    events.clear()
+    module.billing.record_usage("cus_test", price_cents=10)
+    assert len(events) == 10
+
+    assert {event["payload"]["stripe_customer_id"] for event in events} == {"cus_test"}
+    # Distinct identifiers, or Stripe dedupes the ten events of a bundle down
+    # to one and the 90% undercharge comes straight back.
+    assert len({event["identifier"] for event in events}) == 10
+
+
+def test_a_sum_meter_bills_the_same_money_in_one_call(monkeypatch):
+    """The same 10 cents, reported the way a `sum` meter reads it. A meter's
+    formula cannot be edited after creation, so this is the shape a NEW meter
+    would take -- and it must bill identically, or moving to it silently
+    changes every invoice."""
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.billing, "_METER_AGGREGATION", "sum")
+    events = _capture_meter_events(monkeypatch, module)
+
+    module.billing.record_usage("cus_test", price_cents=10)
+
+    assert [event["payload"]["value"] for event in events] == ["10"]
+
+
+def test_record_usage_refuses_an_unknown_meter_aggregation(monkeypatch):
+    """A typo here is a uniform mis-bill, not an error anyone would notice."""
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.billing, "_METER_AGGREGATION", "average")
+    events = _capture_meter_events(monkeypatch, module)
+
+    with pytest.raises(ValueError):
+        module.billing.record_usage("cus_test", price_cents=3)
+    assert events == []
+
+
+def test_record_usage_follows_the_price_when_the_meter_unit_changes(monkeypatch):
+    """The unit is a fact about the Stripe Price, not a constant. If the Price
+    goes to $0.05/unit, a $0.10 bundle is 2 units."""
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.billing, "_METER_UNIT_CENTS", 5)
+    monkeypatch.setattr(module.billing, "_METER_AGGREGATION", "sum")
+    events = _capture_meter_events(monkeypatch, module)
+
+    module.billing.record_usage("cus_test", price_cents=10)
+
+    assert events[0]["payload"]["value"] == "2"
+
+
+def test_record_usage_refuses_a_price_that_does_not_reconcile(monkeypatch):
+    """Rounding here would mis-bill by a few percent on every single call and
+    never show up anywhere. Refusing is loud and costs one audit's revenue."""
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.billing, "_METER_UNIT_CENTS", 5)
+    events = _capture_meter_events(monkeypatch, module)
+
+    with pytest.raises(ValueError):
+        module.billing.record_usage("cus_test", price_cents=3)
+    assert events == []
+
+
+def test_a_failed_meter_call_warns_but_never_withholds_the_audit(monkeypatch):
+    """The customer already has the result in hand. A billing fault is a
+    warning on the response, not a 500."""
+    module = _load_main(monkeypatch)
+    auth = module.AuthContext(stripe_billable=True, customer_id="cus_test")
+
+    def _explode(*args, **kwargs):
+        raise ValueError("meter rejected it")
+
+    monkeypatch.setattr(module.billing, "record_usage", _explode)
+    assert "meter rejected it" in module._bill(auth, price_usd=0.03)
+
+
+def test_each_route_meters_its_own_price(monkeypatch):
+    """A single audit is 3 cents and the bundle is 10. _bill takes the price
+    rather than a unit count precisely so these cannot drift apart."""
+    module = _load_main(monkeypatch)
+    auth = module.AuthContext(stripe_billable=True, customer_id="cus_test")
+    metered = []
+    monkeypatch.setattr(
+        module.billing,
+        "record_usage",
+        lambda customer_id, price_cents: metered.append(price_cents),
+    )
+
+    assert module._bill(auth, price_usd=0.03) is None
+    assert module._bill(auth, price_usd=0.10) is None
+    assert metered == [3, 10]
+
+
+def _openapi_with_tempo(monkeypatch):
+    """The served OpenAPI doc, with the tempo rail live.
+
+    Patched on the shared mpp_payments module (like the manifest tests above)
+    rather than via env vars: its config constants were baked at ITS import,
+    which predates this test."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: True)
+    monkeypatch.setattr(
+        module.mpp_payments,
+        "_TEMPO_RECIPIENT_ADDRESS",
+        "0x32b08c5e927c69877d0fcab35618c265674922bc",
+    )
+    return module, TestClient(module.app).get("/openapi.json").json()
+
+
+def test_openapi_marks_every_paid_route_with_x_payment_info(monkeypatch):
+    """MPP's reference tooling discovers paid endpoints from openapi.json:
+    an operation is payable iff it carries x-payment-info. Without the
+    extension `mppx validate` reported `endpoints: []` and skipped its whole
+    challenge suite -- this node's own directory said "no tolls here"."""
+    module, doc = _openapi_with_tempo(monkeypatch)
+
+    paid_paths = [e["path"] for e in module._CATALOG] + list(module._CATALOG_ALIASES)
+    for path in paid_paths:
+        operation = doc["paths"][path]["post"]
+        info = operation.get("x-payment-info")
+        assert info and info["offers"], f"{path} is not discoverable as payable"
+        assert all(o["amount"].isdigit() for o in info["offers"])
+        # The discovery spec: an operation with x-payment-info MUST declare
+        # a 402 response. mppx validate fails the whole document otherwise.
+        assert "402" in operation["responses"], f"{path} declares no 402"
+        # The validator derives its 402 probe body from the example; against
+        # the html-or-url anyOf its schema-generated guess fails validation
+        # and the route reads as broken (422 forever) when it is merely
+        # under-documented.
+        example = operation["requestBody"]["content"]["application/json"]["example"]
+        assert "url" in example, f"{path} has no probe-able body example"
+
+    # The bundle's offer must carry the bundle's price, not the flat rate.
+    bundle = doc["paths"]["/audit/bundle"]["post"]["x-payment-info"]["offers"]
+    assert bundle[0]["amount"] == "100000"  # $0.10 in USDC base units
+
+    assert "docs" in doc["x-service-info"]
+
+
+def test_openapi_carries_no_x_payment_info_when_no_mpp_rail_exists(monkeypatch):
+    """Fail closed on the discovery surface too: a node that cannot settle
+    an MPP payment must not tell MPP tooling that its routes are payable."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)  # no Stripe, no tempo
+    doc = TestClient(module.app).get("/openapi.json").json()
+    for path_item in doc["paths"].values():
+        for operation in path_item.values():
+            assert "x-payment-info" not in operation
+
+
+def test_openapi_annotation_follows_a_rail_change(monkeypatch):
+    """The base document is cached by FastAPI; the annotation must not be.
+    A frozen copy would keep advertising a rail past the config turning it
+    off -- the same staleness bug as every other cached surface here."""
+    from fastapi.testclient import TestClient
+
+    module, doc = _openapi_with_tempo(monkeypatch)
+    assert "x-payment-info" in doc["paths"]["/audit/wcag"]["post"]
+
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    doc = TestClient(module.app).get("/openapi.json").json()
+    assert "x-payment-info" not in doc["paths"]["/audit/wcag"]["post"]
 
 
 def test_agent_manifest_lists_all_five_audit_routes(monkeypatch):
@@ -1105,7 +1299,10 @@ def test_mcp_handshake_names_only_rails_that_can_settle(monkeypatch):
 
     module = _load_main(monkeypatch)
     monkeypatch.setattr(module.x402_payments, "is_configured", lambda: False)
-    monkeypatch.setattr(module.mpp_payments, "stripe_configured", lambda: True)
+    # stripe_available_for, not stripe_configured: the manifest lists the SPT
+    # rail only where the price clears Stripe's minimum card charge, and every
+    # route in the catalog is priced below it.
+    monkeypatch.setattr(module.mpp_payments, "stripe_available_for", lambda cents: True)
     monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
     monkeypatch.setattr(module.billing, "is_configured", lambda: False)
 
@@ -1151,7 +1348,10 @@ def test_endpoint_auth_prose_does_not_contradict_its_own_method_list(monkeypatch
 
     module = _load_main(monkeypatch)
     monkeypatch.setattr(module.x402_payments, "is_configured", lambda: False)
-    monkeypatch.setattr(module.mpp_payments, "stripe_configured", lambda: True)
+    # stripe_available_for, not stripe_configured: the manifest lists the SPT
+    # rail only where the price clears Stripe's minimum card charge, and every
+    # route in the catalog is priced below it.
+    monkeypatch.setattr(module.mpp_payments, "stripe_available_for", lambda cents: True)
     monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
     monkeypatch.setattr(module.billing, "is_configured", lambda: False)
 

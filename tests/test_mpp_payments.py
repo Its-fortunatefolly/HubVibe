@@ -28,20 +28,102 @@ def test_not_configured_offers_no_challenges(monkeypatch):
     assert module.www_authenticate_headers(realm="api.example.com") == []
 
 
-def test_configured_offers_both_method_challenges(monkeypatch):
-    module = _load_mpp(
+def _both_rails(monkeypatch, **extra):
+    return _load_mpp(
         monkeypatch,
         STRIPE_SECRET_KEY="sk_test_fake",
         MPP_STRIPE_NETWORK_PROFILE_ID="profile_test123",
         MPP_TEMPO_RPC_URL="https://tempo-rpc.example.com",
         MPP_TEMPO_TOKEN_ADDRESS="0x20c0000000000000000000000000000000000000",
         MPP_TEMPO_RECIPIENT_ADDRESS="0x742d35Cc6634C0532925a3b844Bc9e7595f8fE00",
+        **extra,
     )
-    headers = module.www_authenticate_headers(realm="api.example.com")
+
+
+def test_configured_offers_both_method_challenges(monkeypatch):
+    module = _both_rails(monkeypatch)
+    headers = module.www_authenticate_headers(realm="api.example.com", price_usd=0.50)
     assert len(headers) == 2
     assert any('method="stripe"' in h for h in headers)
     assert any('method="tempo"' in h for h in headers)
     assert all('realm="api.example.com"' in h for h in headers)
+
+
+def test_the_spt_rail_is_not_offered_below_stripes_minimum(monkeypatch):
+    """Stripe rejects a card SPT charge under 0.50 USD outright.
+
+    Every route here is priced at $0.03-$0.10, so offering this rail on them
+    would hand an agent a challenge, take its single-use token, and fail at
+    the API every time -- a rail advertised and unable to settle, which is the
+    exact shape of the bug that made the x402 rail unpayable for months. Tempo
+    has no such floor and is unaffected.
+    """
+    module = _both_rails(monkeypatch)
+    headers = module.www_authenticate_headers(realm="api.example.com", price_usd=0.03)
+    assert len(headers) == 1
+    assert 'method="tempo"' in headers[0]
+
+    entries = module.accepts_entries(price_usd=0.10)
+    assert [entry["method"] for entry in entries] == ["tempo"]
+
+
+def test_the_spt_floor_is_stripes_number_not_ours(monkeypatch):
+    """A deployment whose Stripe account carries a different minimum says so
+    with a variable, not a patch."""
+    module = _both_rails(monkeypatch, MPP_STRIPE_MIN_CENTS="3")
+    headers = module.www_authenticate_headers(realm="api.example.com", price_usd=0.03)
+    assert any('method="stripe"' in h for h in headers)
+
+
+def test_discovery_offers_mirror_the_challenge_gating(monkeypatch):
+    """x-payment-info offers come from here, and they must obey the same
+    fail-closed rules as the WWW-Authenticate challenges: tempo at any amount,
+    stripe only at or above its SPT floor."""
+    module = _both_rails(monkeypatch)
+
+    offers = module.discovery_offers(0.03, description="d")
+    assert [o["method"] for o in offers] == ["tempo"]
+    assert offers[0]["amount"] == "30000"  # base units, not cents
+    assert offers[0]["currency"] == "0x20c0000000000000000000000000000000000000"
+    assert offers[0]["intent"] == "charge"
+
+    offers = module.discovery_offers(0.50)
+    assert [o["method"] for o in offers] == ["stripe", "tempo"]
+    assert offers[0]["amount"] == "50"  # cents for stripe
+
+    # The reference schema requires amount to be an integer string.
+    for offer in offers:
+        assert offer["amount"].isdigit()
+
+
+def test_discovery_offers_are_empty_when_no_rail_is_configured(monkeypatch):
+    """No rails -> no offers -> no x-payment-info anywhere. Advertising a
+    paid endpoint with no way to pay is the exact thing this codebase
+    exists to never do."""
+    module = _load_mpp(monkeypatch)
+    assert module.discovery_offers(0.03) == []
+
+
+def test_a_stale_challenge_under_the_minimum_is_not_charged(monkeypatch):
+    """Challenges live for their whole TTL, so one minted before the floor
+    existed can still arrive. Burning a caller's single-use SPT on a charge
+    Stripe will reject is worse than refusing it."""
+    module = _both_rails(monkeypatch)
+    challenge = module._build_challenge(
+        "api.example.com", "stripe", "charge", {"amount": "3", "currency": "usd"}
+    )
+
+    # Recorded rather than raised: _verify_stripe catches every exception and
+    # fails closed, so an AssertionError in here would be swallowed and the
+    # test would pass whether or not Stripe was called.
+    calls = []
+    monkeypatch.setattr(
+        module.stripe.PaymentIntent,
+        "create",
+        lambda **kwargs: calls.append(kwargs) or {"status": "succeeded"},
+    )
+    assert module._verify_stripe(challenge, {"spt": "spt_123"}) is False
+    assert calls == [], "a charge under Stripe's own minimum was sent anyway"
 
 
 def test_challenge_binding_rejects_tampered_id(monkeypatch):

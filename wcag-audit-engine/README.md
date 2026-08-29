@@ -171,11 +171,21 @@ you — it needs your Stripe account):
    (-> `STRIPE_PRICE_ONEOFF_REPORT`). A tier with no Price ID set is not
    offered: it is omitted from `/.well-known/agent.json` and its checkout
    refuses, rather than half-working.
-2. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`,
-   aggregation = count).
+2. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`).
+   Note its aggregation -> `STRIPE_METER_AGGREGATION` (`count` or `sum`,
+   default `count`). It cannot be changed after the meter is created.
 3. **Product catalog**: create a recurring Price with `usage_type: metered`
-   attached to that meter (e.g. $0.03 per unit). Note the Price ID ->
-   `STRIPE_METERED_PRICE_ID`.
+   attached to that meter. Note the Price ID -> `STRIPE_METERED_PRICE_ID`,
+   **and what one unit costs** -> `STRIPE_METER_UNIT_CENTS` (default `1`,
+   i.e. $0.01/unit).
+
+   These two are not bookkeeping. Usage is reported as **the price of the
+   call in meter units** — a $0.03 audit is 3 units of a $0.01 Price, a
+   $0.10 bundle is 10 — so a Price or an aggregation that disagrees with
+   these variables invoices the wrong amount on every call, uniformly and
+   invisibly. Reconcile the Price BEFORE attaching it to a subscription;
+   an unattached metered Price charges nobody, which is exactly why a
+   mismatch here can sit unnoticed indefinitely.
 4. **Developers > Webhooks**: add an endpoint at
    `https://<your-service>/billing/webhook` subscribed to
    `checkout.session.completed`. Note the signing secret.
@@ -324,11 +334,22 @@ Until each method's vars are set, it isn't offered (no `WWW-Authenticate`
 header on a 402 for that method) and stays inert:
 
 - **stripe** method needs `MPP_STRIPE_NETWORK_PROFILE_ID` (your Stripe
-  Business Network Profile ID -- Dashboard → "Stripe profile" → Get
-  started, in **live** mode; no Product/Price needed, unlike the
-  subscription flow above). `MPP_STRIPE_PRICE_CENTS` (default `3`, i.e.
-  $0.03), `MPP_STRIPE_CURRENCY` (default `usd`), and
-  `MPP_STRIPE_API_VERSION` (default `2026-05-27.preview`) are optional.
+  profile ID, `profile_...` -- Dashboard → "Stripe profile" → Get started,
+  in **live** mode; no Product/Price needed, unlike the subscription flow
+  above). `MPP_STRIPE_PRICE_CENTS` (default `3`, i.e. $0.03),
+  `MPP_STRIPE_CURRENCY` (default `usd`), and `MPP_STRIPE_API_VERSION`
+  (default `2026-05-27.preview`) are optional.
+
+  **It carries a floor: Stripe requires a minimum 0.50 USD charge for card
+  payments made with a Shared Payment Token.** This rail is therefore not
+  offered on any route priced below `MPP_STRIPE_MIN_CENTS` (default `50`) --
+  no `WWW-Authenticate` challenge, no `accepts` entry, not listed in
+  `payment.methods` -- and a stale challenge under the floor is refused
+  before an SPT is spent on it. Configured is not the same as usable: at the
+  $0.03/$0.10 machine rates this rail stays dark on purpose, because
+  advertising it would take a caller's single-use token and then fail at the
+  Stripe API every time. For sub-50c machine payments through Stripe, use
+  stablecoins (below) — their minimum is 1 cent — or price a route at 50c+.
 - **tempo** method needs only `MPP_TEMPO_RECIPIENT_ADDRESS` -- everything
   else defaults to Tempo mainnet's real values (sourced from Tempo's own
   SDK, not guessed): `MPP_TEMPO_RPC_URL` defaults to
