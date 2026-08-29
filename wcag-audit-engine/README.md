@@ -379,11 +379,15 @@ header on a 402 for that method) and stays inert:
   with; that is the validator's convenience feature not applying to a Base
   mainnet config, not a fault in the server.)
 
-  **Confirm the token address before deploying it.** A wrong
-  `MPP_TEMPO_TOKEN_ADDRESS` makes `_receipt_matches` reject every real
-  payment -- fail-closed, but silently unsellable, which is this repo's most
-  expensive failure mode. Read it off the chain rather than trusting a
-  written-down constant (USDC exposes `symbol()`, selector `0x95d89b41`):
+  USDC on Base is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` — the value
+  Stripe's Dashboard assistant gives for this account, matching the one this
+  configuration was validated against.
+
+  **Confirm it against the chain anyway before deploying it.** Two documents
+  agreeing is not the chain agreeing, and a wrong `MPP_TEMPO_TOKEN_ADDRESS`
+  makes `_receipt_matches` reject every real payment -- fail-closed, but
+  silently unsellable, which is this repo's most expensive failure mode. USDC
+  exposes `symbol()`, selector `0x95d89b41`:
 
   ```bash
   curl -s https://mainnet.base.org -H 'Content-Type: application/json' \
