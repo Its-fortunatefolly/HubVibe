@@ -73,7 +73,9 @@ import calendar
 import hashlib
 import hmac
 import json
+import logging
 import os
+import re
 import time
 from typing import Optional
 
@@ -161,9 +163,65 @@ def stripe_available_for(price_cents: int) -> bool:
         return False
 
 
+_tempo_recipient_warned = False
+
+
+def _warn_tempo_recipient(reason: str) -> None:
+    """Say so, once and loudly. A silent fail-closed here reads as "tempo was
+    never configured", which sends the next person hunting for a missing
+    variable that is in fact present and merely wrong."""
+    global _tempo_recipient_warned
+    if _tempo_recipient_warned:
+        return
+    _tempo_recipient_warned = True
+    logging.getLogger(__name__).error(
+        "MPP_TEMPO_RECIPIENT_ADDRESS is set but %s. The tempo rail will NOT be "
+        "advertised until this is corrected -- advertising it would invite "
+        "agents to pay into an address that cannot receive.",
+        reason,
+    )
+
+
+def _tempo_recipient_is_usable() -> bool:
+    """Shape-check the tempo recipient before the rail is ever advertised.
+
+    `bool(_TEMPO_RECIPIENT_ADDRESS)` was the whole test, so any truthy string
+    turned the rail on. That is not hypothetical twice over: the x402 rail
+    shipped a 16-hex address and later the zero address through exactly this
+    gap, and on 2026-08-29 `mppx validate` -- the protocol's own reference
+    client -- reported `Valid recipient address` FAILING on all six routes
+    against a recipient of 39 hex characters, a truncated paste of the
+    test-suite constant. Every one of our own checks was green at the time,
+    because none of them looked.
+
+    A shape check proves shape, and shape is not payability -- so the zero
+    address is rejected explicitly, as it is for x402: it satisfies every
+    format gate and can never receive a transfer.
+    """
+    address = _TEMPO_RECIPIENT_ADDRESS
+    if not address:
+        return False
+    if not re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
+        _warn_tempo_recipient(
+            "is not a valid EVM address (needs 0x + exactly 40 hex characters; "
+            "this one has %d)" % max(len(address) - 2, 0)
+        )
+        return False
+    if set(address[2:].lower()) == {"0"}:
+        _warn_tempo_recipient(
+            "is the zero address (0x + 40 zeros): well-formed but unownable, "
+            "so no payment could ever arrive"
+        )
+        return False
+    return True
+
+
 def tempo_configured() -> bool:
     return bool(
-        _secret_key() and _TEMPO_RPC_URL and _TEMPO_TOKEN_ADDRESS and _TEMPO_RECIPIENT_ADDRESS
+        _secret_key()
+        and _TEMPO_RPC_URL
+        and _TEMPO_TOKEN_ADDRESS
+        and _tempo_recipient_is_usable()
     )
 
 

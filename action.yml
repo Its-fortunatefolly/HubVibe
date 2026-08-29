@@ -45,6 +45,30 @@ inputs:
       https://hubvibe-831480473793.us-south1.run.app/billing/checkout
     required: false
     default: ""
+  wallet-key:
+    description: >-
+      EVM private key (a repo secret) funded with USDC on Base, used to pay the
+      402 per call via x402 -- no account, no checkout, no subscription. Costs
+      $0.03 a run ($0.10 for the bundle) and settles in seconds.
+
+      This exists because requiring a subscription before the first useful run
+      is an adoption wall: a CI step whose first execution fails and asks for
+      $29.99 gets deleted on the next push. With a wallet the pipeline funds
+      itself once and simply works, which is the whole point of a machine-payable
+      API.
+
+      Never hardcode this. Use `${{ secrets.HUBVIBE_WALLET_KEY }}` and fund the
+      address with only what you intend to spend -- treat it as a petty-cash
+      float, not a treasury. `max-price-usd` caps any single call.
+    required: false
+    default: ""
+  max-price-usd:
+    description: >-
+      Hard ceiling on what one call may spend when paying with wallet-key. The
+      client refuses to sign above it, so a misconfigured or hostile price in a
+      402 cannot drain the wallet -- it fails the step instead.
+    required: false
+    default: "0.15"
   endpoint:
     description: "Which audit to run: wcag, seo, security, performance, or bundle (all four, billed once)."
     required: false
@@ -92,6 +116,8 @@ runs:
       shell: bash
       env:
         HUBVIBE_API_KEY: ${{ inputs.api-key }}
+        HUBVIBE_WALLET_KEY: ${{ inputs.wallet-key }}
+        MAX_PRICE_USD: ${{ inputs.max-price-usd }}
         TARGET_URL: ${{ inputs.url }}
         AUDIT_ENDPOINT: ${{ inputs.endpoint }}
         FAIL_ON_VIOLATION: ${{ inputs.fail-on-violation }}
@@ -121,6 +147,29 @@ runs:
           auth_args=(-H "X-API-Key: $HUBVIBE_API_KEY")
         fi
 
+        # --- x402: pay the 402 per call, with no account and no checkout ------
+        #
+        # Taken before the plain request rather than as a fallback after a 402,
+        # because the x402 client performs the unpaid request itself, reads the
+        # challenge, signs, and retries. Issuing our own 402 first would just
+        # spend a round trip to learn what the client is about to learn anyway.
+        #
+        # A hard per-call ceiling is enforced twice: once as an x402 spend
+        # policy (the signer refuses above it) and once by this action reading
+        # the advertised price first. One of those is the library's promise and
+        # one is ours; a rail that spends someone else's money in their CI
+        # should not rest on a single check.
+        if [ -z "$HUBVIBE_API_KEY" ] && [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
+          echo "Paying with x402 (cap \$$MAX_PRICE_USD per call). No account needed."
+          python3 -m pip install --quiet --disable-pip-version-check \
+            "x402[evm]" eth-account httpx 2>/dev/null \
+            || { echo "::error::could not install the x402 client extras"; exit 1; }
+
+          http_code=$(python3 "$GITHUB_ACTION_PATH/scripts/x402_pay.py") || http_code="000"
+
+          echo "Paid via x402 from $(python3 -c 'import os;from eth_account import Account;print(Account.from_key(os.environ["HUBVIBE_WALLET_KEY"].strip()).address)' 2>/dev/null || echo 'the configured wallet')"
+        else
+
         http_code="000"
         attempt=0
         while :; do
@@ -144,6 +193,8 @@ runs:
             *) break ;;
           esac
         done
+        fi
+        # --- end of the api-key / x402 branch --------------------------------
 
         echo "http-status=$http_code" >> "$GITHUB_OUTPUT"
         echo "HTTP status: $http_code"

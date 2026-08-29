@@ -358,6 +358,53 @@ header on a 402 for that method) and stays inert:
   `MPP_TEMPO_CHAIN_ID` defaults to `4217`. `MPP_TEMPO_PRICE_BASE_UNITS`
   defaults to `30000` ($0.03 at USDC's 6 decimals).
 
+  **This method is not actually Tempo-specific — it runs on any EVM chain.**
+  Verification is `eth_getTransactionReceipt` over JSON-RPC plus standard
+  ERC-20 `Transfer` log matching, so only the four values above tie it to a
+  chain. To take direct USDC on **Base** into a self-custody wallet, point
+  them at Base and the same code verifies Base:
+
+  ```
+  MPP_TEMPO_RPC_URL=https://mainnet.base.org
+  MPP_TEMPO_CHAIN_ID=8453
+  MPP_TEMPO_TOKEN_ADDRESS=<USDC on Base -- verify, see below>
+  MPP_TEMPO_RECIPIENT_ADDRESS=<your Base wallet>
+  ```
+
+  Verified against the reference implementation: `npx mppx@latest validate`
+  against a node configured this way passes every server-side check --
+  including `Valid recipient address` and `Valid currency address (mainnet)`,
+  with chain 8453 correctly read as mainnet. (Its payment-roundtrip phase
+  still fails, because it auto-provisions a *Tempo testnet* wallet to pay
+  with; that is the validator's convenience feature not applying to a Base
+  mainnet config, not a fault in the server.)
+
+  USDC on Base is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` — the value
+  Stripe's Dashboard assistant gives for this account, matching the one this
+  configuration was validated against.
+
+  **Confirm it against the chain anyway before deploying it.** Two documents
+  agreeing is not the chain agreeing, and a wrong `MPP_TEMPO_TOKEN_ADDRESS`
+  makes `_receipt_matches` reject every real payment -- fail-closed, but
+  silently unsellable, which is this repo's most expensive failure mode. USDC
+  exposes `symbol()`, selector `0x95d89b41`:
+
+  ```bash
+  curl -s https://mainnet.base.org -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"<candidate address>","data":"0x95d89b41"},"latest"]}'
+  ```
+
+  The result hex-decodes to `USDC` for the right contract, and to nothing for
+  a wrong one.
+
+  **A caveat worth knowing:** the challenge still advertises `method="tempo"`
+  while naming chain 8453 in `methodDetails.chainId`. The reference validator
+  reads the chain id and accepts it, and any client that reads the challenge
+  rather than assuming defaults will too -- but it is an off-label
+  configuration. For Base specifically, **x402 is the native rail** and is
+  already implemented here; this is the option for callers that would rather
+  broadcast their own transfer and hand over a hash.
+
   The simplest way to get `MPP_TEMPO_RECIPIENT_ADDRESS`: let Stripe custody
   and auto-convert the funds instead of running your own wallet, via
   Stripe's crypto deposit-address API (needs your live `STRIPE_SECRET_KEY`,

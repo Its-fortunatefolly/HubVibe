@@ -130,6 +130,309 @@ service implements MPP directly in Python because there is no Python SDK —
 and it multiplies by 100 an amount that is already in cents, which would
 charge $3.00 and $10.00 rather than 3c and 10c.)
 
+## 2026-08-29: the Bazaar blocker is the FACILITATOR, and it is now measurable
+
+Two weeks in, revenue is zero, and the reason is narrower than "demand": the
+node is payable and **invisible**, because the facilitator it pays through
+keeps no Bazaar index.
+
+Established from the x402 spec repo (`coinbase/x402`, cloned and read, not
+recalled):
+
+- A facilitator catalogs a resource **when it receives a `PaymentPayload`
+  carrying the bazaar extension** (`specs/extensions/bazaar.md`, "Facilitator
+  Behavior"). How it stores and exposes that is explicitly an implementation
+  detail — so whether any given facilitator indexes at all is a fact to be
+  measured, not assumed.
+- The index is read back at `GET /discovery/resources`
+  (`specs/x402-specification-v2.md` §8.1), answering with an `items[]` array.
+- **The protocol is permissionless.** From the FAQ, verbatim: *"Multiple
+  organizations operate production facilitators. The protocol is
+  **permissionless**—anyone can run a facilitator."* Community-run
+  facilitators are listed alongside private ones "for enterprises that need
+  custom KYT / KYC flows". **x402 is not gated on a business account.** CDP's
+  DBA review is one facilitator's policy, not the protocol's, and treating it
+  as the protocol's cost this project weeks.
+- The ecosystem list is at `https://www.x402.org/ecosystem?filter=facilitators`
+  (not reachable from the build sandbox; reachable from Cloud Shell).
+
+So the question that decides Bazaar listing is: **which facilitator both
+settles Base mainnet AND keeps an index?** `facilitator.xpay.sh` settles and
+does not index — that combination is precisely why this node is payable and
+uncatalogued.
+
+`scripts/probe-facilitators.sh` answers it with evidence. GETs only, no
+wallet, no money moved; run it from Cloud Shell:
+
+```bash
+bash scripts/probe-facilitators.sh
+```
+
+It reports, per candidate, whether `/supported` offers Base mainnet (CAIP-2
+`eip155:8453` **or** the legacy name `base` — v1 clients use the latter) and
+whether `/discovery/resources` returns a real `items[]` index. It names the
+winner and prints the one command to switch to it.
+
+**The trap it exists to avoid:** xpay.sh answers `/discovery/resources` with
+**HTTP 200** and `{"message":"Not Found"}`. A status-code check calls that an
+index and sends the next session chasing a listing that can never appear —
+the same form-not-function error as the zero address, the Bazaar record, and
+the unpayable 402. The probe reads the body; a test proves it by reverting to
+a status-only check and watching it go red.
+
+Add candidates from the ecosystem page as arguments (they are appended to the
+built-in list, not substituted):
+
+```bash
+bash scripts/probe-facilitators.sh https://candidate-one https://candidate-two
+```
+
+A facilitator that answers 401/403 is reported as needing credentials rather
+than as a failure — permissionless means such a facilitator may still hand
+out credentials without a business review, and
+`X402_FACILITATOR_AUTH_HEADERS` already exists to carry them.
+
+## 2026-08-29: OWNER DECISION — one rail per network. MPP is Stripe. Base is x402.
+
+Stated by the owner, and it settles an architecture question rather than a
+preference, so do not re-propose the alternative:
+
+> the mpp is not base. that was stripe. base is strictly for the crypto.
+
+So:
+
+- **MPP = Stripe.** Both of its methods, and this is the part an earlier
+  draft of this entry got wrong by implying `tempo` was something other than
+  Stripe. MPP was co-authored by Stripe and Tempo, and Stripe's own MPP stack
+  uses Tempo for its stablecoin half — Stripe mints the deposit address,
+  offramps the USDC, and settles it into the Stripe balance:
+
+  | method | rail | minimum | lands in |
+  |---|---|---|---|
+  | `stripe` | SPT / cards | **50c** | Stripe balance |
+  | `tempo` | USDC on Tempo | **1c** | Stripe balance (auto-offramp) |
+
+  At $0.03–$0.10, `stripe` is below its floor and `tempo` is the Stripe rail
+  that works. `MPP_TEMPO_RECIPIENT_ADDRESS` must therefore be a
+  **Stripe-managed Tempo deposit address** (`/v1/crypto/deposit_addresses`,
+  `network=tempo`) — not a self-custody wallet, or the offramp-into-Stripe
+  property is lost. Every other tempo default in the code is already correct
+  for Tempo mainnet; the recipient is the only value to set.
+
+- **Base = x402 only.** Self-custody wallet, USDC stays USDC, facilitator
+  settles, money stays on-chain.
+
+**A previous suggestion in this file to point the MPP `tempo` method at Base
+is withdrawn.** It validated (75 server-side checks passed against chain
+8453) and the code genuinely is chain-agnostic, so the note stays as a
+technical fact — but it is NOT the chosen architecture. It advertises
+`method="tempo"` while naming a Base chain id, which is off-label, and it
+duplicates on Base what x402 already does natively there. Nothing enables it
+unless someone sets those env vars. Do not set them.
+
+**Base being a Coinbase-built L2 does not drag Coinbase CDP back in.** That
+distinction matters, because the CDP review is what blocked this project for
+weeks. `facilitator.xpay.sh` is keyless and settles on Base mainnet with no
+Coinbase account, no API key, and no business verification. Using the Base
+*chain* requires nothing from Coinbase the *company*.
+
+## 2026-08-29: the x402 recipient is RESOLVED — a self-custody Base wallet
+
+The owner created a Base wallet: `0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd`.
+Verified 0x + 40 hex, not the zero address, and it appears nowhere in this
+repo (so it is not a test constant recycled by accident — the fault that had
+just been found in the tempo recipient).
+
+**This replaces the unidentified `0x2b3b…0256` and unblocks the x402 rail.**
+It does not identify that address, and does not need to: the rail now points
+somewhere the owner holds the key to. Leave `0x2b3b…` off the service. If the
+Stripe deposit-address list ever explains it, that is bookkeeping, not a
+blocker.
+
+Turning it on is one command — `go-live-x402.sh` shape-checks the address,
+sets it with the facilitator, and hands off to `repair-and-deploy.sh` for the
+source deploy:
+
+```bash
+cd ~/HubVibe-deploy4 && git fetch origin main && git reset --hard origin/main
+X402_PAY_TO_ADDRESS=0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd bash scripts/go-live-x402.sh
+```
+
+**One consequence to internalise: x402 revenue will NOT appear in Stripe.**
+The #47 PaymentIntent mirroring only fires for a *Stripe-custodied* deposit
+address, because Stripe verifies the transaction against its own address. A
+self-custody wallet settles on-chain and stays there. "Is the Stripe balance
+going up" stops being the measure of x402 income; the wallet is. That is a
+fair trade for a recipient whose key the owner actually holds, but it must not
+be mistaken later for payments failing.
+
+### On-chain verification: the pattern is right, the Basescan API is not
+
+The plan (from Stripe's own Dashboard assistant, and its strategy is sound —
+a 3-10c call genuinely cannot go through Stripe cards, whose SPT floor is
+50c) was: accept direct USDC to the Base wallet, verify it on-chain, return a
+receipt. Secret `basescan_etherscan` holds a Basescan API key for it.
+
+**The pattern is legitimate and already implemented here.** The MPP `tempo`
+push-mode path is exactly "caller broadcasts a transfer and hands over the
+hash, server verifies it and returns a receipt" — with the two things a
+hand-rolled version would omit: an HMAC-bound per-request challenge
+(`_verify_challenge_binding`) and a spent-hash ledger (`_used_credentials`).
+
+**And it is not Tempo-specific.** Verification is `eth_getTransactionReceipt`
+over JSON-RPC plus standard ERC-20 `Transfer` log matching; four env vars are
+all that tie it to a chain. Pointed at Base (chain 8453, RPC
+`https://mainnet.base.org`, USDC on Base, the owner's wallet) the reference
+validator passes every server-side check on all six routes — 75 passed,
+including `Valid currency address (mainnet)`. See `wcag-audit-engine/README.md`
+for the exact configuration and the `eth_call` that confirms the token
+address. Its 6 payment-phase failures are the validator auto-provisioning a
+*Tempo testnet* wallet to pay with, which a Base mainnet config cannot use;
+not a server fault.
+
+**What must NOT be built is the Basescan API as the payment gate.** Three
+reasons, in order of severity — and note the first two are about a *bespoke
+explorer check*, not about on-chain verification as such, which the RPC path
+above does correctly:
+
+1. **Bolting it onto x402 specifically would make x402 unpayable.** x402's
+   exact-EVM scheme has the client sign an EIP-3009
+   `transferWithAuthorization` *off-chain* and send the signature in
+   `X-PAYMENT` / `PAYMENT-SIGNATURE`; the facilitator verifies and submits
+   it, paying the gas. An x402 client never broadcasts a transfer, so there
+   would be nothing for an explorer lookup to find — the #61 failure
+   (advertised, unpayable, invisible from this side) rebuilt on purpose. The
+   caller-broadcasts flow belongs to MPP, where it is already implemented.
+2. **It is replay-vulnerable.** "A transfer of the right amount to the right
+   address exists on-chain" is not proof that *this request* was paid for.
+   Without binding the payment to a per-request challenge and keeping a spent
+   ledger, one real payment authorises unlimited calls, by anyone who can read
+   a block explorer. The MPP tempo path does this correctly
+   (`_verify_challenge_binding` + `_receipt_matches` + `_used_credentials`);
+   a hand-rolled Basescan check would have none of it.
+3. **It puts a third-party block-explorer index on the paid path**, with its
+   rate limits and its indexing lag, in place of the facilitator whose entire
+   job this is.
+
+**CORRECTION (same day, after reading the spec instead of asserting):** an
+earlier version of this entry said "verification is the facilitator's role by
+design." **That is wrong, and it was repeated three times before being
+checked.** The x402 docs are explicit — `docs/core-concepts/facilitator.md`:
+
+> The facilitator is an **optional but recommended** service…
+
+and the interaction flow makes both halves optional, step by step:
+
+> 5. `Resource server` verifies the `Payment Payload` is valid **either via
+>    local verification** or by POSTing … to `/verify`
+> 8. `Resource server` **either settles the payment by interacting with a
+>    blockchain directly**, or by POSTing … to `/settle`
+
+So a merchant can verify and settle entirely on its own. What self-settlement
+actually involves, from `specs/schemes/exact/scheme_exact_evm.md`: the
+settling party calls `transferWithAuthorization` on the USDC contract with the
+client's signature and **pays the gas** — "they serve only as the transaction
+broadcaster." That means a hot private key on Cloud Run and ETH on Base for
+gas, and it means the spec's duplicate-detection requirement becomes ours
+(EIP-3009 nonces are one-time-use at the contract, which covers it).
+
+**And it gives an explorer read a legitimate job.** Once *we* broadcast, there
+is a transaction hash, and confirming it landed is step 10 of the flow. That
+is a real use for `basescan_etherscan` — confirming a transaction we
+submitted. What an explorer cannot do is find a payment a client sent
+unprompted: in `exact` the client transmits a *signature*, never a broadcast
+transfer, so before settlement there is nothing on-chain to look up. The
+distinction is confirmation-after-broadcast versus discovery-before, not
+"explorers are wrong."
+
+**The tension that decides the choice, and it is sharp:** Bazaar cataloging
+happens when a **facilitator** receives the `PaymentPayload`
+(`specs/extensions/bazaar.md`). Self-settling means no facilitator sees the
+payload, so **self-settlement forfeits the Bazaar listing entirely.** The two
+goals pull opposite ways:
+
+| | facilitator | self-settle |
+|---|---|---|
+| gas | facilitator pays | **you pay** (ETH on Base) |
+| private key on Cloud Run | none | **required** (hot key) |
+| Bazaar listing | yes, *if it indexes* | **never** |
+| blocked on | finding one that indexes | nothing |
+
+A hybrid exists: call a facilitator's `/verify` (which puts the payload in
+front of it, so it can catalog) while settling directly. It keeps the listing
+and the custody, at the cost of the gas and the hot key.
+
+So `basescan_etherscan` stays unmounted **only while the facilitator path is
+the chosen one** — on that path nothing broadcasts locally, so there is no
+hash of ours to confirm. Choose self-settlement and the secret gets a real
+job on day one.
+
+### Also rejected: a `Stripe-Payment-Credential` header
+
+MPP's wire format is `Authorization: Payment <credential>`, answering a
+`WWW-Authenticate: Payment` challenge — that is what `mppx validate` exercised
+75/0 against this service. A bespoke `Stripe-Payment-Credential` header would
+be understood by nothing. Same class of error as the invented `accepts[]`
+shape in #61.
+
+## 2026-08-29: the tempo recipient is a TRUNCATED TEST ADDRESS, and nothing guarded it
+
+The reference validator, run against the live node, found what none of our
+own checks did. `npx mppx@latest validate` reported, on all six paid routes:
+
+```
+✗ Valid recipient address (Got: 0x32b08c5e927c69877d0fcab35618c265674922b)
+  → Set request.recipient to a valid 0x-prefixed 40-hex-char address.
+Summary: 69 passed, 6 failed, 6 skipped
+```
+
+That value is **39 hex characters**, and it is the test-suite constant from
+this file with the trailing `c` dropped — a truncated paste. Two separate
+faults, both bad:
+
+1. **It is a test address, not a recipient.** Even at full length,
+   `0x32b08c...22bc` is the shape-valid placeholder used to make the rail
+   inspectable in local tests. Nobody holds its key. It must never be a
+   deployed recipient.
+2. **Nothing on this side checked.** `tempo_configured()` was
+   `bool(_TEMPO_RECIPIENT_ADDRESS)` — any truthy string turned the rail on.
+   The x402 rail shipped a 16-hex address, and later the zero address,
+   through exactly this gap; the guard added after those incidents was never
+   extended to the tempo recipient, which carries real money too. `mppx
+   validate` caught in one run what three of our own green runs could not.
+
+**Fourth instance of the same lesson: test it with the consumer's parser.**
+The Bazaar record, the unpayable 402, the zero address, and now this.
+
+Fixed in both places the x402 address is already guarded:
+
+- `mpp_payments._tempo_recipient_is_usable()` — 0x + exactly 40 hex, zero
+  address rejected explicitly, logged at ERROR once. Verified: booted with
+  the truncated value, the node emits **no** WWW-Authenticate challenge, no
+  `x-payment-info`, and `payment.methods` drops to `["stripe_api_key"]`.
+- `repair-and-deploy.sh` preflight — same check as the x402 address, blocks
+  the deploy rather than shipping a rail that cannot settle.
+
+**Consequence, and it is the honest one: this node currently advertises NO
+machine payment rail.** x402 is off (unidentified recipient), mpp-stripe is
+below Stripe's 50c SPT floor, and tempo now fails closed on the truncated
+address. That is correct — every rail it could advertise is one that cannot
+settle — and it is also the whole remaining blocker to a first paid call.
+
+**To take money again, mint a real Stripe crypto deposit address** (stablecoins
+are enabled on the account; Stripe custodies it and offramps into the Stripe
+balance, so there is no wallet to run and no key to lose):
+
+```bash
+curl -sS https://api.stripe.com/v1/crypto/deposit_addresses -u "$(gcloud secrets versions access latest --secret=SECRET_STRIPE_KEY):" -H "Stripe-Version: 2026-07-29.preview" -d network=tempo
+```
+
+Set the returned `address` as `MPP_TEMPO_RECIPIENT_ADDRESS`, deploy with
+`repair-and-deploy.sh` (its preflight now refuses a malformed one), and
+re-run `mppx validate` against the deployed node. That same GET, without
+`-d network=tempo`, also lists addresses the account already holds — which
+is how to settle whether `0x2b3b…0256` was Stripe-custodied all along.
+
 ## 2026-08-29: the MPP rail was invisible to MPP's own tooling — now validated 75/0 against the reference implementation
 
 The rail the first paid call must now ride (MPP tempo — see the mpp-stripe
