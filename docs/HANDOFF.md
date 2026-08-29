@@ -139,11 +139,26 @@ preference, so do not re-propose the alternative:
 
 So:
 
-- **MPP = Stripe only.** The `mpp-stripe` method (Shared Payment Tokens,
-  fiat, profile `profile_61VBes…316JTc`). It stays dark at today's prices
-  because of Stripe's 50c SPT floor, which is correct and not a fault.
+- **MPP = Stripe.** Both of its methods, and this is the part an earlier
+  draft of this entry got wrong by implying `tempo` was something other than
+  Stripe. MPP was co-authored by Stripe and Tempo, and Stripe's own MPP stack
+  uses Tempo for its stablecoin half — Stripe mints the deposit address,
+  offramps the USDC, and settles it into the Stripe balance:
+
+  | method | rail | minimum | lands in |
+  |---|---|---|---|
+  | `stripe` | SPT / cards | **50c** | Stripe balance |
+  | `tempo` | USDC on Tempo | **1c** | Stripe balance (auto-offramp) |
+
+  At $0.03–$0.10, `stripe` is below its floor and `tempo` is the Stripe rail
+  that works. `MPP_TEMPO_RECIPIENT_ADDRESS` must therefore be a
+  **Stripe-managed Tempo deposit address** (`/v1/crypto/deposit_addresses`,
+  `network=tempo`) — not a self-custody wallet, or the offramp-into-Stripe
+  property is lost. Every other tempo default in the code is already correct
+  for Tempo mainnet; the recipient is the only value to set.
+
 - **Base = x402 only.** Self-custody wallet, USDC stays USDC, facilitator
-  settles.
+  settles, money stays on-chain.
 
 **A previous suggestion in this file to point the MPP `tempo` method at Base
 is withdrawn.** It validated (75 server-side checks passed against chain
