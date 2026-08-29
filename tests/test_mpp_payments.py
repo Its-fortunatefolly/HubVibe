@@ -75,6 +75,48 @@ def test_the_spt_floor_is_stripes_number_not_ours(monkeypatch):
     assert any('method="stripe"' in h for h in headers)
 
 
+def test_a_malformed_tempo_recipient_turns_the_rail_off(monkeypatch):
+    """39 hex characters is what `mppx validate` actually caught on
+    2026-08-29, on all six paid routes, while every check here was green:
+    `tempo_configured()` only asked whether the variable was non-empty. The
+    x402 rail shipped a 16-hex address and later the zero address through
+    exactly this gap. Nothing may be advertised -- not the challenge, not the
+    accepts entry, not the discovery offer."""
+    module = _load_mpp(
+        monkeypatch,
+        STRIPE_SECRET_KEY="sk_test_fake",
+        MPP_TEMPO_RECIPIENT_ADDRESS="0x32b08c5e927c69877d0fcab35618c265674922b",
+    )
+    assert module.tempo_configured() is False
+    assert module.www_authenticate_headers(realm="api.example.com") == []
+    assert module.accepts_entries(price_usd=0.03) == []
+    assert module.discovery_offers(0.03) == []
+
+
+def test_a_zero_tempo_recipient_turns_the_rail_off(monkeypatch):
+    """0x + 40 zeros passes every format gate and can never receive a
+    transfer -- the canonical way to satisfy a shape check with a value that
+    answers "no" to the only question that matters."""
+    module = _load_mpp(
+        monkeypatch,
+        STRIPE_SECRET_KEY="sk_test_fake",
+        MPP_TEMPO_RECIPIENT_ADDRESS="0x" + "0" * 40,
+    )
+    assert module.tempo_configured() is False
+    assert module.www_authenticate_headers(realm="api.example.com") == []
+
+
+def test_a_well_formed_tempo_recipient_keeps_the_rail_on(monkeypatch):
+    """The guard must not be so eager it kills a working rail."""
+    module = _load_mpp(
+        monkeypatch,
+        STRIPE_SECRET_KEY="sk_test_fake",
+        MPP_TEMPO_RECIPIENT_ADDRESS="0x742d35Cc6634C0532925a3b844Bc9e7595f8fE00",
+    )
+    assert module.tempo_configured() is True
+    assert len(module.www_authenticate_headers(realm="api.example.com")) == 1
+
+
 def test_discovery_offers_mirror_the_challenge_gating(monkeypatch):
     """x-payment-info offers come from here, and they must obey the same
     fail-closed rules as the WWW-Authenticate challenges: tempo at any amount,

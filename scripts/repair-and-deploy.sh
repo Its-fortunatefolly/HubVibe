@@ -230,6 +230,47 @@ else
   ok "x402 is not configured (no rail advertised, nothing to check)"
 fi
 
+# 3b. The MPP tempo recipient. Same check, same reason, and it was missing
+#     here for exactly as long as it was missing in the app: on 2026-08-29
+#     `mppx validate` (the protocol's own reference client) reported "Valid
+#     recipient address" FAILING on all six paid routes against a recipient
+#     of 39 hex characters -- a truncated paste of the test-suite constant --
+#     while every check on this side was green. The x402 address has had this
+#     guard since the 16-hex incident; the tempo one carries real money too.
+TEMPO_TO=$(python3 -c '
+import json
+try:
+    svc = json.load(open("/tmp/hv_svc.json"))
+except Exception:
+    raise SystemExit
+spec = svc.get("spec", {}).get("template", {}).get("spec", {})
+container = (spec.get("containers") or [{}])[0]
+for entry in container.get("env") or []:
+    if entry.get("name") == "MPP_TEMPO_RECIPIENT_ADDRESS":
+        print(entry["value"] if "value" in entry else "__FROM_SECRET__")
+        break
+' 2>/dev/null)
+
+if [ "$TEMPO_TO" = "__FROM_SECRET__" ]; then
+  warn "MPP_TEMPO_RECIPIENT_ADDRESS comes from Secret Manager, so its shape was"
+  warn "NOT checked here. Verify by hand that it is 0x + 40 hex characters."
+elif [ -n "$TEMPO_TO" ]; then
+  if [ "$TEMPO_TO" = "0x0000000000000000000000000000000000000000" ]; then
+    warn "MPP_TEMPO_RECIPIENT_ADDRESS is the ZERO ADDRESS. Well-formed and"
+    warn "unownable: no payment could ever arrive. Set a real recipient."
+    PREFLIGHT_FAILED=1
+  elif printf '%s' "$TEMPO_TO" | grep -qiE '^0x[0-9a-f]{40}$'; then
+    ok "MPP_TEMPO_RECIPIENT_ADDRESS is a well-formed EVM address"
+  else
+    warn "MPP_TEMPO_RECIPIENT_ADDRESS is NOT a valid EVM address (needs 0x +"
+    warn "exactly 40 hex chars; this one has $(( ${#TEMPO_TO} - 2 ))). The MPP"
+    warn "tempo rail would be advertised and every settlement would fail."
+    PREFLIGHT_FAILED=1
+  fi
+else
+  ok "the MPP tempo rail is not configured (nothing to check)"
+fi
+
 # 4. Idle billing. Not fatal, but it is pure loss at low volume and nothing
 #    else reports it.
 MIN_SCALE=$(gcloud run services describe "$SERVICE" --region="$REGION" \

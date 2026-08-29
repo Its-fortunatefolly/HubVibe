@@ -130,6 +130,64 @@ service implements MPP directly in Python because there is no Python SDK —
 and it multiplies by 100 an amount that is already in cents, which would
 charge $3.00 and $10.00 rather than 3c and 10c.)
 
+## 2026-08-29: the tempo recipient is a TRUNCATED TEST ADDRESS, and nothing guarded it
+
+The reference validator, run against the live node, found what none of our
+own checks did. `npx mppx@latest validate` reported, on all six paid routes:
+
+```
+✗ Valid recipient address (Got: 0x32b08c5e927c69877d0fcab35618c265674922b)
+  → Set request.recipient to a valid 0x-prefixed 40-hex-char address.
+Summary: 69 passed, 6 failed, 6 skipped
+```
+
+That value is **39 hex characters**, and it is the test-suite constant from
+this file with the trailing `c` dropped — a truncated paste. Two separate
+faults, both bad:
+
+1. **It is a test address, not a recipient.** Even at full length,
+   `0x32b08c...22bc` is the shape-valid placeholder used to make the rail
+   inspectable in local tests. Nobody holds its key. It must never be a
+   deployed recipient.
+2. **Nothing on this side checked.** `tempo_configured()` was
+   `bool(_TEMPO_RECIPIENT_ADDRESS)` — any truthy string turned the rail on.
+   The x402 rail shipped a 16-hex address, and later the zero address,
+   through exactly this gap; the guard added after those incidents was never
+   extended to the tempo recipient, which carries real money too. `mppx
+   validate` caught in one run what three of our own green runs could not.
+
+**Fourth instance of the same lesson: test it with the consumer's parser.**
+The Bazaar record, the unpayable 402, the zero address, and now this.
+
+Fixed in both places the x402 address is already guarded:
+
+- `mpp_payments._tempo_recipient_is_usable()` — 0x + exactly 40 hex, zero
+  address rejected explicitly, logged at ERROR once. Verified: booted with
+  the truncated value, the node emits **no** WWW-Authenticate challenge, no
+  `x-payment-info`, and `payment.methods` drops to `["stripe_api_key"]`.
+- `repair-and-deploy.sh` preflight — same check as the x402 address, blocks
+  the deploy rather than shipping a rail that cannot settle.
+
+**Consequence, and it is the honest one: this node currently advertises NO
+machine payment rail.** x402 is off (unidentified recipient), mpp-stripe is
+below Stripe's 50c SPT floor, and tempo now fails closed on the truncated
+address. That is correct — every rail it could advertise is one that cannot
+settle — and it is also the whole remaining blocker to a first paid call.
+
+**To take money again, mint a real Stripe crypto deposit address** (stablecoins
+are enabled on the account; Stripe custodies it and offramps into the Stripe
+balance, so there is no wallet to run and no key to lose):
+
+```bash
+curl -sS https://api.stripe.com/v1/crypto/deposit_addresses -u "$(gcloud secrets versions access latest --secret=SECRET_STRIPE_KEY):" -H "Stripe-Version: 2026-07-29.preview" -d network=tempo
+```
+
+Set the returned `address` as `MPP_TEMPO_RECIPIENT_ADDRESS`, deploy with
+`repair-and-deploy.sh` (its preflight now refuses a malformed one), and
+re-run `mppx validate` against the deployed node. That same GET, without
+`-d network=tempo`, also lists addresses the account already holds — which
+is how to settle whether `0x2b3b…0256` was Stripe-custodied all along.
+
 ## 2026-08-29: the MPP rail was invisible to MPP's own tooling — now validated 75/0 against the reference implementation
 
 The rail the first paid call must now ride (MPP tempo — see the mpp-stripe

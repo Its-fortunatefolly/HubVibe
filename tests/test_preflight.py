@@ -123,6 +123,54 @@ def test_the_zero_address_blocks_the_deploy(tmp_path):
     assert "DEPLOY_INVOKED" not in result.stdout
 
 
+def test_a_short_tempo_recipient_blocks_the_deploy(tmp_path):
+    """The MPP tempo rail carries real money and had no shape guard at all.
+
+    Found by the protocol's own reference client on 2026-08-29: `mppx
+    validate` reported "Valid recipient address" FAILING on all six paid
+    routes against a 39-hex recipient -- a truncated paste of the test-suite
+    constant -- while every check on this side was green. The x402 address
+    has had this guard since the 16-hex incident.
+    """
+    env = _PAY_TO_GOOD + [
+        {"name": "MPP_TEMPO_RECIPIENT_ADDRESS", "value": SHORT_ADDR}
+    ]
+    result = _run(tmp_path, env=env)
+    assert "MPP_TEMPO_RECIPIENT_ADDRESS is NOT a valid EVM address" in result.stdout
+    assert "39" in result.stdout
+    assert "DEPLOY_INVOKED" not in result.stdout
+
+
+def test_a_zero_tempo_recipient_blocks_the_deploy(tmp_path):
+    """Shape-valid and unownable, same as it is for x402."""
+    env = _PAY_TO_GOOD + [
+        {
+            "name": "MPP_TEMPO_RECIPIENT_ADDRESS",
+            "value": "0x0000000000000000000000000000000000000000",
+        }
+    ]
+    result = _run(tmp_path, env=env)
+    assert "ZERO ADDRESS" in result.stdout
+    assert "DEPLOY_INVOKED" not in result.stdout
+
+
+def test_a_well_formed_tempo_recipient_passes(tmp_path):
+    env = _PAY_TO_GOOD + [
+        {"name": "MPP_TEMPO_RECIPIENT_ADDRESS", "value": GOOD_ADDR}
+    ]
+    result = _run(tmp_path, env=env)
+    assert "MPP_TEMPO_RECIPIENT_ADDRESS is a well-formed EVM address" in result.stdout
+    assert "DEPLOY_INVOKED" in result.stdout
+
+
+def test_an_absent_tempo_recipient_says_so_rather_than_skipping(tmp_path):
+    """A branch that prints nothing converts "unverified" into "verified" in
+    the reader's head -- this file's oldest lesson."""
+    result = _run(tmp_path, env=_PAY_TO_GOOD)
+    assert "tempo rail is not configured" in result.stdout
+    assert "DEPLOY_INVOKED" in result.stdout
+
+
 def test_a_secret_backed_address_is_reported_as_unchecked(tmp_path):
     """Its value cannot be read here. Claiming a pass would be worse than
     saying nothing, so it says exactly what it did not check."""
