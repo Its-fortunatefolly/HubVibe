@@ -44,6 +44,10 @@ fi
 mkdir -p "$TARGET/scripts"
 cp "$REPO_ROOT/action.yml" "$TARGET/action.yml"
 cp "$REPO_ROOT/scripts/render_audit_summary.py" "$TARGET/scripts/render_audit_summary.py"
+# action.yml calls this by $GITHUB_ACTION_PATH, so a published copy without it
+# turns the wallet path into "No such file or directory" at run time -- on the
+# one code path that spends money.
+cp "$REPO_ROOT/scripts/x402_pay.py" "$TARGET/scripts/x402_pay.py"
 
 cat > "$TARGET/README.md" <<'MARKDOWN'
 # HubVibe WCAG SEO and Security Audit
@@ -145,12 +149,36 @@ curl -i -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
   -d '{"url":"https://example.com"}'
 ```
 
+## Paying per run, without an account
+
+If the deployment you point at advertises a machine-payment rail — check
+[`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json),
+which lists only rails that can actually settle right now — this action can pay
+its own way per call from a funded wallet, with no signup and no checkout:
+
+```yaml
+- uses: Its-fortunatefolly/hubvibe-audit-action@v1
+  with:
+    url: https://your-deploy-preview.example
+    wallet-key: ${{ secrets.HUBVIBE_WALLET_KEY }}
+```
+
+Fund it with what you intend to spend and no more — a float, not a treasury.
+`max-price-usd` (default `0.15`) is a hard per-call ceiling: the run refuses to
+sign above it, so a misquoted price cannot drain the wallet. If no such rail is
+advertised, the run reports the payment challenge instead of spending anything.
+
+Prefer a prepaid key? Set `api-key` and it takes precedence — you are never
+charged twice.
+
 ## Inputs
 
 | Input | Required | Default | |
 |---|---|---|---|
 | `url` | yes | — | The live URL to audit. |
 | `api-key` | no | — | Your key. Without it the run reports the service's 402 and how to pay. |
+| `wallet-key` | no | — | EVM private key (repo secret), funded, used to settle the payment challenge per call when the deployment advertises a crypto rail. |
+| `max-price-usd` | no | `0.15` | Hard ceiling on what one call may spend with `wallet-key`. Above it the run refuses to sign. |
 | `endpoint` | no | `bundle` | `wcag`, `seo`, `security`, `performance`, or `bundle`. |
 | `fail-on-violation` | no | `true` | `false` reports findings without failing the build. |
 | `fail-on-error` | no | `true` | `false` makes infrastructure failures a warning. |

@@ -82,7 +82,14 @@ def test_the_generated_marketplace_repo_has_no_workflow_files(tmp_path):
         check=True, capture_output=True, text=True,
     )
     files = {p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file()}
-    assert files == {"action.yml", "README.md", "scripts/render_audit_summary.py"}
+    assert files == {
+        "action.yml",
+        "README.md",
+        "scripts/render_audit_summary.py",
+        # The wallet payment path; action.yml calls it by $GITHUB_ACTION_PATH,
+        # so a published copy without it fails on the one path that spends money.
+        "scripts/x402_pay.py",
+    }
     assert not list(target.rglob(".github/workflows/*"))
 
 
@@ -204,6 +211,11 @@ def test_the_documented_inputs_exist_with_stable_names(action):
     assert set(action["inputs"]) == {
         "url",
         "api-key",
+        # Added when the action learned to pay its own 402 from a funded
+        # wallet, so a pipeline no longer needs a bought subscription before
+        # its first useful run.
+        "wallet-key",
+        "max-price-usd",
         "endpoint",
         "fail-on-violation",
         "fail-on-error",
