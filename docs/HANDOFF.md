@@ -160,19 +160,43 @@ going up" stops being the measure of x402 income; the wallet is. That is a
 fair trade for a recipient whose key the owner actually holds, but it must not
 be mistaken later for payments failing.
 
-### Rejected: verifying x402 payments with the Basescan API
+### On-chain verification: the pattern is right, the Basescan API is not
 
-A plan arrived to accept "direct USDC payments to the Base wallet, verified
-via the Basescan API" with the key in Secret Manager as `basescan-api-key`.
-**Do not build this.** Three reasons, in order of severity:
+The plan (from Stripe's own Dashboard assistant, and its strategy is sound —
+a 3-10c call genuinely cannot go through Stripe cards, whose SPT floor is
+50c) was: accept direct USDC to the Base wallet, verify it on-chain, return a
+receipt. Secret `basescan_etherscan` holds a Basescan API key for it.
 
-1. **It is not x402, so no conforming client could pay it.** x402's exact-EVM
-   scheme has the client sign an EIP-3009 `transferWithAuthorization`
-   *off-chain* and send the signature in `X-PAYMENT` / `PAYMENT-SIGNATURE`;
-   the facilitator verifies it and submits it, paying the gas. A client never
-   broadcasts a transfer and hands over a tx hash, so there would be nothing
-   for a Basescan lookup to find. This is exactly the #61 failure —
-   advertised, unpayable, and invisible from this side — rebuilt on purpose.
+**The pattern is legitimate and already implemented here.** The MPP `tempo`
+push-mode path is exactly "caller broadcasts a transfer and hands over the
+hash, server verifies it and returns a receipt" — with the two things a
+hand-rolled version would omit: an HMAC-bound per-request challenge
+(`_verify_challenge_binding`) and a spent-hash ledger (`_used_credentials`).
+
+**And it is not Tempo-specific.** Verification is `eth_getTransactionReceipt`
+over JSON-RPC plus standard ERC-20 `Transfer` log matching; four env vars are
+all that tie it to a chain. Pointed at Base (chain 8453, RPC
+`https://mainnet.base.org`, USDC on Base, the owner's wallet) the reference
+validator passes every server-side check on all six routes — 75 passed,
+including `Valid currency address (mainnet)`. See `wcag-audit-engine/README.md`
+for the exact configuration and the `eth_call` that confirms the token
+address. Its 6 payment-phase failures are the validator auto-provisioning a
+*Tempo testnet* wallet to pay with, which a Base mainnet config cannot use;
+not a server fault.
+
+**What must NOT be built is the Basescan API as the payment gate.** Three
+reasons, in order of severity — and note the first two are about a *bespoke
+explorer check*, not about on-chain verification as such, which the RPC path
+above does correctly:
+
+1. **Bolting it onto x402 specifically would make x402 unpayable.** x402's
+   exact-EVM scheme has the client sign an EIP-3009
+   `transferWithAuthorization` *off-chain* and send the signature in
+   `X-PAYMENT` / `PAYMENT-SIGNATURE`; the facilitator verifies and submits
+   it, paying the gas. An x402 client never broadcasts a transfer, so there
+   would be nothing for an explorer lookup to find — the #61 failure
+   (advertised, unpayable, invisible from this side) rebuilt on purpose. The
+   caller-broadcasts flow belongs to MPP, where it is already implemented.
 2. **It is replay-vulnerable.** "A transfer of the right amount to the right
    address exists on-chain" is not proof that *this request* was paid for.
    Without binding the payment to a per-request challenge and keeping a spent
@@ -184,14 +208,19 @@ via the Basescan API" with the key in Secret Manager as `basescan-api-key`.
    rate limits and its indexing lag, in place of the facilitator whose entire
    job this is.
 
-Verification is the facilitator's role by design — that is what makes a bug in
-our code able to wrongly *reject* a payment but never wrongly *accept* one.
-`facilitator.xpay.sh` is keyless, Base mainnet, zero fee, and already
-configured. **The `basescan-api-key` secret is therefore unused, and nothing
-mounts it.** It is a fine tool for out-of-band ops (confirming a settlement
-hash landed, watching the wallet balance); it is not a payment gate. Leave it
-in Secret Manager, unmounted, rather than wiring a credential the service has
-no honest use for.
+For x402, verification is the facilitator's role by design — that is what
+makes a bug in our code able to wrongly *reject* a payment but never wrongly
+*accept* one. `facilitator.xpay.sh` is keyless, Base mainnet, zero fee, and
+already configured. For MPP, verification is a JSON-RPC receipt lookup, which
+beats an explorer API on every axis that matters: no key, no rate limit, no
+indexing lag, and it reads consensus state rather than a vendor's index of it.
+
+**So the `basescan_etherscan` secret is unused, and nothing mounts it.** Not
+because on-chain verification is wrong, but because neither rail needs a
+block-explorer API to do it. It stays a fine out-of-band ops tool — confirming
+a settlement hash landed, watching the wallet balance — and it is not a
+payment gate. Leave it in Secret Manager, unmounted, rather than wiring a
+credential the service has no honest use for.
 
 ### Also rejected: a `Stripe-Payment-Credential` header
 
