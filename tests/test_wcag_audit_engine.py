@@ -794,6 +794,80 @@ def test_each_route_meters_its_own_price(monkeypatch):
     assert metered == [3, 10]
 
 
+def _openapi_with_tempo(monkeypatch):
+    """The served OpenAPI doc, with the tempo rail live.
+
+    Patched on the shared mpp_payments module (like the manifest tests above)
+    rather than via env vars: its config constants were baked at ITS import,
+    which predates this test."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: True)
+    monkeypatch.setattr(
+        module.mpp_payments,
+        "_TEMPO_RECIPIENT_ADDRESS",
+        "0x32b08c5e927c69877d0fcab35618c265674922bc",
+    )
+    return module, TestClient(module.app).get("/openapi.json").json()
+
+
+def test_openapi_marks_every_paid_route_with_x_payment_info(monkeypatch):
+    """MPP's reference tooling discovers paid endpoints from openapi.json:
+    an operation is payable iff it carries x-payment-info. Without the
+    extension `mppx validate` reported `endpoints: []` and skipped its whole
+    challenge suite -- this node's own directory said "no tolls here"."""
+    module, doc = _openapi_with_tempo(monkeypatch)
+
+    paid_paths = [e["path"] for e in module._CATALOG] + list(module._CATALOG_ALIASES)
+    for path in paid_paths:
+        operation = doc["paths"][path]["post"]
+        info = operation.get("x-payment-info")
+        assert info and info["offers"], f"{path} is not discoverable as payable"
+        assert all(o["amount"].isdigit() for o in info["offers"])
+        # The discovery spec: an operation with x-payment-info MUST declare
+        # a 402 response. mppx validate fails the whole document otherwise.
+        assert "402" in operation["responses"], f"{path} declares no 402"
+        # The validator derives its 402 probe body from the example; against
+        # the html-or-url anyOf its schema-generated guess fails validation
+        # and the route reads as broken (422 forever) when it is merely
+        # under-documented.
+        example = operation["requestBody"]["content"]["application/json"]["example"]
+        assert "url" in example, f"{path} has no probe-able body example"
+
+    # The bundle's offer must carry the bundle's price, not the flat rate.
+    bundle = doc["paths"]["/audit/bundle"]["post"]["x-payment-info"]["offers"]
+    assert bundle[0]["amount"] == "100000"  # $0.10 in USDC base units
+
+    assert "docs" in doc["x-service-info"]
+
+
+def test_openapi_carries_no_x_payment_info_when_no_mpp_rail_exists(monkeypatch):
+    """Fail closed on the discovery surface too: a node that cannot settle
+    an MPP payment must not tell MPP tooling that its routes are payable."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)  # no Stripe, no tempo
+    doc = TestClient(module.app).get("/openapi.json").json()
+    for path_item in doc["paths"].values():
+        for operation in path_item.values():
+            assert "x-payment-info" not in operation
+
+
+def test_openapi_annotation_follows_a_rail_change(monkeypatch):
+    """The base document is cached by FastAPI; the annotation must not be.
+    A frozen copy would keep advertising a rail past the config turning it
+    off -- the same staleness bug as every other cached surface here."""
+    from fastapi.testclient import TestClient
+
+    module, doc = _openapi_with_tempo(monkeypatch)
+    assert "x-payment-info" in doc["paths"]["/audit/wcag"]["post"]
+
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    doc = TestClient(module.app).get("/openapi.json").json()
+    assert "x-payment-info" not in doc["paths"]["/audit/wcag"]["post"]
+
+
 def test_agent_manifest_lists_all_five_audit_routes(monkeypatch):
     from fastapi.testclient import TestClient
 

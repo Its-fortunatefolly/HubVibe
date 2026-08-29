@@ -333,6 +333,54 @@ def accepts_entries(price_usd: Optional[float] = None) -> list:
     return entries
 
 
+def discovery_offers(price_usd: float, description: Optional[str] = None) -> list:
+    """Offers for the `x-payment-info` OpenAPI extension, one per usable method.
+
+    This is MPP's capability-discovery surface: the reference tooling (the
+    `mppx` package -- its validator AND its client-side discovery) walks a
+    service's OpenAPI document and treats an operation as payable only if it
+    carries `x-payment-info`. Without it this node's openapi.json says
+    "nothing paid here" to every MPP-aware agent, however correct the 402s
+    are -- verified directly: `mppx validate` against a booted copy of this
+    service reported `endpoints: []` and skipped its entire challenge and
+    payment validation suite. Same lesson as the Bazaar record: a surface
+    consumed by someone else's parser has to be shaped for their parser.
+
+    Unlike the Bazaar this surface needs no facilitator: it lives in our own
+    OpenAPI document, so making it right is entirely within reach.
+
+    The offer shape mirrors mppx's own `Metadata.paymentOffer` -- `amount`
+    (integer string in the method's own units), `currency`, `description`,
+    `intent`, `method` -- and the same per-method gating as the challenges:
+    a method that cannot settle this amount is not offered. Discovery is
+    advisory (the runtime 402 stays authoritative, mppx's schema says so in
+    its docstring), but advisory does not excuse advertising a dead rail.
+    """
+    offers = []
+    stripe_cents = str(round(price_usd * 100))
+    if stripe_available_for(stripe_cents):
+        offers.append(
+            {
+                "amount": stripe_cents,
+                "currency": _STRIPE_CURRENCY,
+                **({"description": description} if description else {}),
+                "intent": "charge",
+                "method": "stripe",
+            }
+        )
+    if tempo_configured():
+        offers.append(
+            {
+                "amount": str(round(price_usd * 1_000_000)),
+                "currency": _TEMPO_TOKEN_ADDRESS,
+                **({"description": description} if description else {}),
+                "intent": "charge",
+                "method": "tempo",
+            }
+        )
+    return offers
+
+
 def _verify_challenge_binding(challenge: dict, expected_realm: Optional[str] = None) -> bool:
     try:
         expected_id = _challenge_id(

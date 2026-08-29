@@ -75,6 +75,35 @@ def test_the_spt_floor_is_stripes_number_not_ours(monkeypatch):
     assert any('method="stripe"' in h for h in headers)
 
 
+def test_discovery_offers_mirror_the_challenge_gating(monkeypatch):
+    """x-payment-info offers come from here, and they must obey the same
+    fail-closed rules as the WWW-Authenticate challenges: tempo at any amount,
+    stripe only at or above its SPT floor."""
+    module = _both_rails(monkeypatch)
+
+    offers = module.discovery_offers(0.03, description="d")
+    assert [o["method"] for o in offers] == ["tempo"]
+    assert offers[0]["amount"] == "30000"  # base units, not cents
+    assert offers[0]["currency"] == "0x20c0000000000000000000000000000000000000"
+    assert offers[0]["intent"] == "charge"
+
+    offers = module.discovery_offers(0.50)
+    assert [o["method"] for o in offers] == ["stripe", "tempo"]
+    assert offers[0]["amount"] == "50"  # cents for stripe
+
+    # The reference schema requires amount to be an integer string.
+    for offer in offers:
+        assert offer["amount"].isdigit()
+
+
+def test_discovery_offers_are_empty_when_no_rail_is_configured(monkeypatch):
+    """No rails -> no offers -> no x-payment-info anywhere. Advertising a
+    paid endpoint with no way to pay is the exact thing this codebase
+    exists to never do."""
+    module = _load_mpp(monkeypatch)
+    assert module.discovery_offers(0.03) == []
+
+
 def test_a_stale_challenge_under_the_minimum_is_not_charged(monkeypatch):
     """Challenges live for their whole TTL, so one minted before the floor
     existed can still arrive. Burning a caller's single-use SPT on a charge

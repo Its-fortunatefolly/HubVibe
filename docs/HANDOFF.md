@@ -130,6 +130,50 @@ service implements MPP directly in Python because there is no Python SDK —
 and it multiplies by 100 an amount that is already in cents, which would
 charge $3.00 and $10.00 rather than 3c and 10c.)
 
+## 2026-08-29: the MPP rail was invisible to MPP's own tooling — now validated 75/0 against the reference implementation
+
+The rail the first paid call must now ride (MPP tempo — see the mpp-stripe
+floor entry above) had never been checked against anything but our own tests.
+Ran `npx mppx@latest validate` (the protocol's reference implementation)
+against a locally booted node. Two findings:
+
+1. **Discovery was empty.** MPP tooling discovers paid endpoints from
+   openapi.json: an operation is payable iff it carries `x-payment-info`.
+   Ours carried none, so the validator reported `endpoints: []`, skipped its
+   entire challenge suite, and any MPP-aware agent walking our OpenAPI doc
+   saw a service with zero paid endpoints. Same lesson as the Bazaar record —
+   a surface consumed by someone else's parser must be shaped for their
+   parser — but unlike the Bazaar this surface is entirely ours: no
+   facilitator involved. Fixed: every catalog route (+ the /audit alias) now
+   carries `x-payment-info` with offers gated exactly like the challenges
+   (tempo at any amount, stripe only at/above its floor, nothing when no rail
+   is configured), a declared 402 response (the spec requires it), and a
+   body example (the validator derives its probe body from it; without one
+   its schema-generated guess failed the html-or-url anyOf and three routes
+   read as broken). Root `x-service-info` added, relative paths only.
+
+2. **The hand-rolled challenge format is right.** With discovery fixed, the
+   reference validator passes **75/0 across all six paid routes**: challenge
+   parseable, realm binding, expiry, recipient, currency, integer amounts,
+   malformed credential → 402-not-500, fresh challenge on error. First time
+   this implementation has ever been validated against the reference. The 6
+   skips are the live payment roundtrips — sandbox has no wallet.
+
+**The remaining skip is the first-paid-call path for MPP.** In Cloud Shell,
+against the deployed node (after deploy):
+
+```bash
+npx mppx@latest validate https://hubvibe-831480473793.us-south1.run.app
+```
+
+reruns everything above live, and with a funded wallet (`npx mppx@latest
+account create`, fund with USDC on Tempo) completes a real roundtrip — a real
+$0.03 settlement through the tempo rail. That is the MPP equivalent of
+`first-paid-call.sh`, using the protocol authors' own client. Precondition:
+`MPP_TEMPO_RECIPIENT_ADDRESS` must be a Stripe crypto deposit address you
+have verified (see the recipient-audit entry above — do NOT run a paid
+roundtrip at an unverified recipient).
+
 ## 2026-08-29: API-key calls metered a third of what they charge
 
 `billing.record_usage` reported **one meter unit per call** against a Price
