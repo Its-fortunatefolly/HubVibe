@@ -130,6 +130,35 @@ service implements MPP directly in Python because there is no Python SDK —
 and it multiplies by 100 an amount that is already in cents, which would
 charge $3.00 and $10.00 rather than 3c and 10c.)
 
+## 2026-08-29: OWNER DECISION — one rail per network. MPP is Stripe. Base is x402.
+
+Stated by the owner, and it settles an architecture question rather than a
+preference, so do not re-propose the alternative:
+
+> the mpp is not base. that was stripe. base is strictly for the crypto.
+
+So:
+
+- **MPP = Stripe only.** The `mpp-stripe` method (Shared Payment Tokens,
+  fiat, profile `profile_61VBes…316JTc`). It stays dark at today's prices
+  because of Stripe's 50c SPT floor, which is correct and not a fault.
+- **Base = x402 only.** Self-custody wallet, USDC stays USDC, facilitator
+  settles.
+
+**A previous suggestion in this file to point the MPP `tempo` method at Base
+is withdrawn.** It validated (75 server-side checks passed against chain
+8453) and the code genuinely is chain-agnostic, so the note stays as a
+technical fact — but it is NOT the chosen architecture. It advertises
+`method="tempo"` while naming a Base chain id, which is off-label, and it
+duplicates on Base what x402 already does natively there. Nothing enables it
+unless someone sets those env vars. Do not set them.
+
+**Base being a Coinbase-built L2 does not drag Coinbase CDP back in.** That
+distinction matters, because the CDP review is what blocked this project for
+weeks. `facilitator.xpay.sh` is keyless and settles on Base mainnet with no
+Coinbase account, no API key, and no business verification. Using the Base
+*chain* requires nothing from Coinbase the *company*.
+
 ## 2026-08-29: the x402 recipient is RESOLVED — a self-custody Base wallet
 
 The owner created a Base wallet: `0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd`.
