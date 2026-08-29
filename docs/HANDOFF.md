@@ -314,19 +314,58 @@ above does correctly:
    rate limits and its indexing lag, in place of the facilitator whose entire
    job this is.
 
-For x402, verification is the facilitator's role by design — that is what
-makes a bug in our code able to wrongly *reject* a payment but never wrongly
-*accept* one. `facilitator.xpay.sh` is keyless, Base mainnet, zero fee, and
-already configured. For MPP, verification is a JSON-RPC receipt lookup, which
-beats an explorer API on every axis that matters: no key, no rate limit, no
-indexing lag, and it reads consensus state rather than a vendor's index of it.
+**CORRECTION (same day, after reading the spec instead of asserting):** an
+earlier version of this entry said "verification is the facilitator's role by
+design." **That is wrong, and it was repeated three times before being
+checked.** The x402 docs are explicit — `docs/core-concepts/facilitator.md`:
 
-**So the `basescan_etherscan` secret is unused, and nothing mounts it.** Not
-because on-chain verification is wrong, but because neither rail needs a
-block-explorer API to do it. It stays a fine out-of-band ops tool — confirming
-a settlement hash landed, watching the wallet balance — and it is not a
-payment gate. Leave it in Secret Manager, unmounted, rather than wiring a
-credential the service has no honest use for.
+> The facilitator is an **optional but recommended** service…
+
+and the interaction flow makes both halves optional, step by step:
+
+> 5. `Resource server` verifies the `Payment Payload` is valid **either via
+>    local verification** or by POSTing … to `/verify`
+> 8. `Resource server` **either settles the payment by interacting with a
+>    blockchain directly**, or by POSTing … to `/settle`
+
+So a merchant can verify and settle entirely on its own. What self-settlement
+actually involves, from `specs/schemes/exact/scheme_exact_evm.md`: the
+settling party calls `transferWithAuthorization` on the USDC contract with the
+client's signature and **pays the gas** — "they serve only as the transaction
+broadcaster." That means a hot private key on Cloud Run and ETH on Base for
+gas, and it means the spec's duplicate-detection requirement becomes ours
+(EIP-3009 nonces are one-time-use at the contract, which covers it).
+
+**And it gives an explorer read a legitimate job.** Once *we* broadcast, there
+is a transaction hash, and confirming it landed is step 10 of the flow. That
+is a real use for `basescan_etherscan` — confirming a transaction we
+submitted. What an explorer cannot do is find a payment a client sent
+unprompted: in `exact` the client transmits a *signature*, never a broadcast
+transfer, so before settlement there is nothing on-chain to look up. The
+distinction is confirmation-after-broadcast versus discovery-before, not
+"explorers are wrong."
+
+**The tension that decides the choice, and it is sharp:** Bazaar cataloging
+happens when a **facilitator** receives the `PaymentPayload`
+(`specs/extensions/bazaar.md`). Self-settling means no facilitator sees the
+payload, so **self-settlement forfeits the Bazaar listing entirely.** The two
+goals pull opposite ways:
+
+| | facilitator | self-settle |
+|---|---|---|
+| gas | facilitator pays | **you pay** (ETH on Base) |
+| private key on Cloud Run | none | **required** (hot key) |
+| Bazaar listing | yes, *if it indexes* | **never** |
+| blocked on | finding one that indexes | nothing |
+
+A hybrid exists: call a facilitator's `/verify` (which puts the payload in
+front of it, so it can catalog) while settling directly. It keeps the listing
+and the custody, at the cost of the gas and the hot key.
+
+So `basescan_etherscan` stays unmounted **only while the facilitator path is
+the chosen one** — on that path nothing broadcasts locally, so there is no
+hash of ours to confirm. Choose self-settlement and the secret gets a real
+job on day one.
 
 ### Also rejected: a `Stripe-Payment-Credential` header
 
