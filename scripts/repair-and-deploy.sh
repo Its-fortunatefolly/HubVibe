@@ -80,6 +80,24 @@ for entry in container.get("env") or []:
 ' "$SVC_JSON" "$1" 2>/dev/null
 }
 
+# env_value <ENV_VAR> -> its plain value, "__FROM_SECRET__" if it is a secret
+# reference, or empty if unset.
+env_value() {
+  python3 -c '
+import json, sys
+try:
+    svc = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit()
+spec = svc.get("spec", {}).get("template", {}).get("spec", {})
+container = (spec.get("containers") or [{}])[0]
+for entry in container.get("env") or []:
+    if entry.get("name") == sys.argv[2]:
+        print(entry["value"] if "value" in entry else "__FROM_SECRET__")
+        break
+' "$SVC_JSON" "$1" 2>/dev/null
+}
+
 CURRENT_SECRET=$(env_secret STRIPE_SECRET_KEY)
 
 if [ -n "$CURRENT_SECRET" ]; then
@@ -98,14 +116,55 @@ else
   ok "STRIPE_SECRET_KEY already points at $STRIPE_SECRET_NAME"
 fi
 
-STALE_VARS=""
+REMOVE_VARS=""
+add_removal() {
+  case ",$REMOVE_VARS," in
+    *",$1,"*) return ;;
+  esac
+  REMOVE_VARS="${REMOVE_VARS:+$REMOVE_VARS,}$1"
+}
+
 for host in $PLACEHOLDER_HOSTS; do
   if grep -q "$host" "$SVC_JSON"; then
-    STALE_VARS="X402_FACILITATOR_URL,X402_PAY_TO_ADDRESS"
+    add_removal X402_FACILITATOR_URL
+    add_removal X402_PAY_TO_ADDRESS
     warn "found placeholder $host -- will remove the x402 variables"
   fi
 done
-[ -n "$STALE_VARS" ] && UPDATE_ARGS+=("--remove-env-vars=$STALE_VARS")
+
+# A malformed MPP tempo recipient is REPAIRED here, not merely refused in the
+# preflight below.
+#
+# The distinction matters because this script is called repair-and-deploy, and
+# refusing was the wrong half of that: the rail cannot settle with a malformed
+# recipient either way -- the app's own guard already refuses to advertise it,
+# so nothing is lost by stripping it -- and stopping the deploy over a value
+# that has no valid use turned a one-command go-live into "run this other
+# gcloud command first, then start again". That round trip is pure friction on
+# the one path that puts a service back into service.
+#
+# Only a PLAIN env var is repaired. A secret-backed value cannot be read here,
+# so it stays a preflight warning rather than something this silently deletes.
+# And only the tempo recipient: X402_PAY_TO_ADDRESS still stops the deploy,
+# because it is where money lands and a human should choose its replacement
+# rather than have it quietly removed.
+TEMPO_TO_RAW=$(env_value MPP_TEMPO_RECIPIENT_ADDRESS)
+if [ -n "$TEMPO_TO_RAW" ] && [ "$TEMPO_TO_RAW" != "__FROM_SECRET__" ]; then
+  if [ "$TEMPO_TO_RAW" = "0x0000000000000000000000000000000000000000" ]; then
+    add_removal MPP_TEMPO_RECIPIENT_ADDRESS
+    warn "MPP_TEMPO_RECIPIENT_ADDRESS is the zero address -- removing it. The"
+    warn "tempo rail stays off until a real recipient is set."
+  elif ! printf '%s' "$TEMPO_TO_RAW" | grep -qiE '^0x[0-9a-f]{40}$'; then
+    add_removal MPP_TEMPO_RECIPIENT_ADDRESS
+    warn "MPP_TEMPO_RECIPIENT_ADDRESS is not a valid EVM address (needs 0x +"
+    warn "exactly 40 hex chars; this one has $(( ${#TEMPO_TO_RAW} - 2 )) ) --"
+    warn "removing it so the deploy can proceed. The tempo rail was already"
+    warn "unusable with it. To turn that rail on later, mint a Stripe crypto"
+    warn "deposit address and set MPP_TEMPO_RECIPIENT_ADDRESS to it."
+  fi
+fi
+
+[ -n "$REMOVE_VARS" ] && UPDATE_ARGS+=("--remove-env-vars=$REMOVE_VARS")
 
 if [ ${#UPDATE_ARGS[@]} -gt 0 ]; then
   step "Applying the configuration repair"
