@@ -60,7 +60,7 @@ J
   *minScale*) echo "{min_scale}" ;;
   *"run services describe"*)
     printf 'name:  STRIPE_SECRET_KEY\\n  secretKeyRef.name:  SECRET_STRIPE_KEY\\n' ;;
-  *"run services update"*) echo "UPDATE_INVOKED" ;;
+  *"run services update"*) echo "UPDATE_INVOKED $*" ;;
   *"run deploy"*) echo "DEPLOY_INVOKED" ;;
   *) exit 0 ;;
 esac
@@ -123,26 +123,30 @@ def test_the_zero_address_blocks_the_deploy(tmp_path):
     assert "DEPLOY_INVOKED" not in result.stdout
 
 
-def test_a_short_tempo_recipient_blocks_the_deploy(tmp_path):
-    """The MPP tempo rail carries real money and had no shape guard at all.
+def test_a_short_tempo_recipient_is_REPAIRED_not_refused(tmp_path):
+    """The script is called repair-and-deploy, and refusing was the wrong half.
 
-    Found by the protocol's own reference client on 2026-08-29: `mppx
-    validate` reported "Valid recipient address" FAILING on all six paid
-    routes against a 39-hex recipient -- a truncated paste of the test-suite
-    constant -- while every check on this side was green. The x402 address
-    has had this guard since the 16-hex incident.
+    A malformed tempo recipient cannot settle either way -- the app's own guard
+    refuses to advertise it -- so stopping the deploy over it removed nothing
+    and cost a round trip: "run this other gcloud command, then start again".
+    That friction sat on the one path that puts a service back into service.
+    It is stripped as part of the repair instead, and the deploy proceeds.
+
+    The value itself is real: `mppx validate` found a 39-hex recipient live on
+    all six paid routes, a truncated paste of the test-suite constant.
     """
     env = _PAY_TO_GOOD + [
         {"name": "MPP_TEMPO_RECIPIENT_ADDRESS", "value": SHORT_ADDR}
     ]
     result = _run(tmp_path, env=env)
-    assert "MPP_TEMPO_RECIPIENT_ADDRESS is NOT a valid EVM address" in result.stdout
+    assert "not a valid EVM address" in result.stdout
     assert "39" in result.stdout
-    assert "DEPLOY_INVOKED" not in result.stdout
+    # Repaired: the removal is in the update, and the deploy is not blocked.
+    assert "--remove-env-vars=MPP_TEMPO_RECIPIENT_ADDRESS" in result.stdout
 
 
-def test_a_zero_tempo_recipient_blocks_the_deploy(tmp_path):
-    """Shape-valid and unownable, same as it is for x402."""
+def test_a_zero_tempo_recipient_is_also_repaired(tmp_path):
+    """Shape-valid and unownable. Same treatment: nothing can settle to it."""
     env = _PAY_TO_GOOD + [
         {
             "name": "MPP_TEMPO_RECIPIENT_ADDRESS",
@@ -150,8 +154,30 @@ def test_a_zero_tempo_recipient_blocks_the_deploy(tmp_path):
         }
     ]
     result = _run(tmp_path, env=env)
-    assert "ZERO ADDRESS" in result.stdout
+    assert "zero address" in result.stdout
+    assert "--remove-env-vars=MPP_TEMPO_RECIPIENT_ADDRESS" in result.stdout
+
+
+def test_a_malformed_pay_to_address_still_STOPS_the_deploy(tmp_path):
+    """The asymmetry is deliberate. X402_PAY_TO_ADDRESS is where money lands,
+    so a human picks its replacement rather than having it quietly deleted;
+    the tempo recipient has no valid use in that state and no such choice to
+    make."""
+    result = _run(tmp_path, env=_PAY_TO_SHORT)
     assert "DEPLOY_INVOKED" not in result.stdout
+    assert "--remove-env-vars=X402_PAY_TO_ADDRESS" not in result.stdout
+
+
+def test_a_secret_backed_tempo_recipient_is_never_silently_deleted(tmp_path):
+    """Its value cannot be read here, so it cannot be judged malformed.
+    Removing it on a guess would delete a working rail's recipient."""
+    env = _PAY_TO_GOOD + [
+        {"name": "MPP_TEMPO_RECIPIENT_ADDRESS",
+         "valueFrom": {"secretKeyRef": {"name": "s", "key": "latest"}}}
+    ]
+    result = _run(tmp_path, env=env)
+    assert "--remove-env-vars=MPP_TEMPO_RECIPIENT_ADDRESS" not in result.stdout
+    assert "comes from Secret Manager" in result.stdout
 
 
 def test_a_well_formed_tempo_recipient_passes(tmp_path):
