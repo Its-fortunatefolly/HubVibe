@@ -60,8 +60,15 @@ def test_the_spt_rail_is_not_offered_below_stripes_minimum(monkeypatch):
     """
     module = _both_rails(monkeypatch)
     headers = module.www_authenticate_headers(realm="api.example.com", price_usd=0.03)
-    assert len(headers) == 1
-    assert 'method="tempo"' in headers[0]
+
+    # No per-call stripe charge: Stripe would reject it on amount alone.
+    assert not any('intent="charge"' in h and 'method="stripe"' in h for h in headers)
+    assert any('method="tempo"' in h for h in headers)
+
+    # But a TOP-UP is offered, because a block is the only thing this rail can
+    # sell below the floor. Leaving it out would drop the fiat option entirely
+    # rather than offering the one shape of it that can settle.
+    assert any('method="stripe"' in h and 'intent="topup"' in h for h in headers)
 
     entries = module.accepts_entries(price_usd=0.10)
     assert [entry["method"] for entry in entries] == ["tempo"]
@@ -228,3 +235,73 @@ def test_verify_stripe_rejects_non_spt_token(monkeypatch):
     module = _load_mpp(monkeypatch, STRIPE_SECRET_KEY="sk_test_fake", MPP_STRIPE_NETWORK_PROFILE_ID="p")
     assert module._verify_stripe({}, {"spt": "not-an-spt"}) is False
     assert module._verify_stripe({}, {}) is False
+
+
+def test_a_topup_is_not_offered_above_the_floor(monkeypatch):
+    """Above the floor the per-call charge is the better offer, and a top-up
+    beside it is just a second way to pay that nobody asked for."""
+    module = _both_rails(monkeypatch)
+    headers = module.www_authenticate_headers(realm="api.example.com", price_usd=0.50)
+    assert any('method="stripe"' in h and 'intent="charge"' in h for h in headers)
+    assert not any('intent="topup"' in h for h in headers)
+
+
+def test_a_topup_credential_is_not_consumed_as_a_per_call_payment(monkeypatch):
+    """The two intents mean different things. Letting a $0.50 top-up settle
+    through the per-call path would take the money, serve one $0.03 audit, and
+    silently keep the rest."""
+    module = _both_rails(monkeypatch)
+    # Stripe is stubbed to ACCEPT, so the only thing that can refuse this is
+    # the intent check itself. Without the stub the fake key fails at the API
+    # and the test passes whether or not the guard exists -- exactly the
+    # form-not-function trap this file has been bitten by before.
+    monkeypatch.setattr(module, "_verify_stripe", lambda challenge, payload: True)
+    challenge = module._build_challenge(
+        "api.example.com", "stripe", "topup", {"amount": "50", "currency": "usd"}
+    )
+    credential = module._b64url_encode(
+        __import__("json").dumps({"challenge": challenge, "payload": {"spt": "spt_1"}}).encode()
+    )
+    assert module.verify_and_settle_sync(credential, realm="api.example.com") is False
+
+
+def test_a_topup_below_stripes_floor_is_refused(monkeypatch):
+    """A challenge quoting less than Stripe will accept cannot settle, and
+    crediting on it would hand out balance for a charge that never cleared."""
+    module = _both_rails(monkeypatch)
+    challenge = module._build_challenge(
+        "api.example.com", "stripe", "topup", {"amount": "3", "currency": "usd"}
+    )
+    credential = module._b64url_encode(
+        __import__("json").dumps({"challenge": challenge, "payload": {"spt": "spt_1"}}).encode()
+    )
+    assert module.settle_topup_sync(credential, realm="api.example.com") is None
+
+
+def test_a_settled_topup_returns_the_challenge_amount_not_the_callers(monkeypatch):
+    """The amount comes from the HMAC-bound challenge, so an agent cannot claim
+    more credit than it paid for."""
+    module = _both_rails(monkeypatch)
+    monkeypatch.setattr(module, "_verify_stripe", lambda challenge, payload: True)
+    challenge = module._build_challenge(
+        "api.example.com", "stripe", "topup", {"amount": "50", "currency": "usd"}
+    )
+    credential = module._b64url_encode(
+        __import__("json").dumps(
+            {"challenge": challenge, "payload": {"spt": "spt_1", "amount": "99999"}}
+        ).encode()
+    )
+    assert module.settle_topup_sync(credential, realm="api.example.com") == 50
+
+
+def test_a_topup_for_the_wrong_realm_is_refused(monkeypatch):
+    """Same replay protection as every other challenge here."""
+    module = _both_rails(monkeypatch)
+    monkeypatch.setattr(module, "_verify_stripe", lambda challenge, payload: True)
+    challenge = module._build_challenge(
+        "api.example.com", "stripe", "topup", {"amount": "50", "currency": "usd"}
+    )
+    credential = module._b64url_encode(
+        __import__("json").dumps({"challenge": challenge, "payload": {"spt": "spt_1"}}).encode()
+    )
+    assert module.settle_topup_sync(credential, realm="evil.example.com") is None
