@@ -122,6 +122,7 @@ def _run_x402_block(
     v2_header=True,
     bazaar=True,
     manifest_json=None,
+    mpp_header=True,
 ):
     """Drive an x402-aware block against a stubbed node.
 
@@ -147,7 +148,9 @@ def _run_x402_block(
     }
     if bazaar:
         challenge["extensions"] = _BAZAAR
-    headers = "HTTP/2 402\r\nwww-authenticate: Payment realm=stub\r\n"
+    headers = "HTTP/2 402\r\n"
+    if mpp_header:
+        headers += "www-authenticate: Payment realm=stub\r\n"
     if v2_header:
         headers += "payment-required: eyJ4NDAyVmVyc2lvbiI6Mn0=\r\n"
     manifest = (
@@ -375,3 +378,79 @@ def test_every_documented_status_has_a_branch(status):
 
 if __name__ == "__main__":
     sys.exit(subprocess.call([sys.executable, "-m", "pytest", __file__, "-q"]))
+
+
+def test_mpp_off_with_no_challenge_is_green(tmp_path):
+    """mpp-stripe sits below Stripe's 0.50 USD SPT floor at these prices and
+    mpp-tempo has no recipient -- both deliberate. The checker asserted the
+    header unconditionally and went red for the state the operator chose,
+    which is how a checker teaches people to ignore it."""
+    result = _run_x402_block(
+        tmp_path,
+        _challenge_block(),
+        methods=("x402", "stripe_api_key"),
+        accepts=[_SPEC_ENTRY],
+        mpp_header=False,
+    )
+    assert "FAIL|" not in result.stdout, result.stdout
+    assert "MPP is off and no WWW-Authenticate" in result.stdout
+
+
+def test_mpp_advertised_but_no_challenge_still_fails(tmp_path):
+    """MPP's only real channel IS that header. Advertising the method without
+    sending it leaves a rail an agent cannot actually use."""
+    result = _run_x402_block(
+        tmp_path,
+        _challenge_block(),
+        methods=("mpp-tempo", "stripe_api_key"),
+        accepts=[],
+        v2_header=False,
+        mpp_header=False,
+    )
+    assert "FAIL|" in result.stdout
+    assert "sends no WWW-Authenticate challenge" in result.stdout
+
+
+def test_an_orphaned_mpp_challenge_fails(tmp_path):
+    """The other half: a header still going out for a method the manifest no
+    longer lists invites a caller to pay a rail this node says it cannot
+    settle."""
+    result = _run_x402_block(
+        tmp_path,
+        _challenge_block(),
+        methods=("x402", "stripe_api_key"),
+        accepts=[_SPEC_ENTRY],
+        mpp_header=True,
+    )
+    assert "FAIL|" in result.stdout
+    assert "still sends a WWW-Authenticate" in result.stdout
+
+
+def test_at_least_one_machine_rail_must_be_live(tmp_path):
+    """Rails go dark individually for good reasons. All of them dark at once is
+    a tollbooth with no coin slot, and nothing else in the checker says so --
+    the old unconditional MPP assertion was standing in for this question and
+    answering it wrongly."""
+    result = _run_x402_block(
+        tmp_path,
+        _challenge_block(),
+        methods=("stripe_api_key",),
+        accepts=[],
+        v2_header=False,
+        mpp_header=False,
+    )
+    assert "FAIL|" in result.stdout
+    assert "NO machine payment rail" in result.stdout
+
+
+def test_x402_alone_satisfies_the_machine_rail_check(tmp_path):
+    """x402 on its own is a complete autonomous path: no account, no human."""
+    result = _run_x402_block(
+        tmp_path,
+        _challenge_block(),
+        methods=("x402", "stripe_api_key"),
+        accepts=[_SPEC_ENTRY],
+        mpp_header=False,
+    )
+    assert "a machine payment rail is live: x402" in result.stdout
+    assert "FAIL|" not in result.stdout
