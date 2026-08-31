@@ -262,12 +262,60 @@ else
   pass "no API-key rail advertised anywhere (consistent: Stripe is not configured)"
 fi
 
+# The MPP challenge, checked against whether MPP is meant to be on -- the same
+# way the x402 checks above work, and for the same reason.
+#
+# This asserted the header unconditionally, so it went red the moment MPP was
+# deliberately dark: `mpp-stripe` is below Stripe's 0.50 USD SPT floor at these
+# prices and `mpp-tempo` has no recipient. Both of those are the fail-closed
+# rule working exactly as intended, and a checker that calls the intended state
+# a failure is a checker people stop reading.
+#
+# What actually matters is not "MPP specifically" but "SOME machine rail can
+# take money", which the separate check below asserts. Here the question is
+# only whether the header agrees with the manifest.
+MPP_STATE=$(printf '%s' "$MANIFEST" | python3 -c '
+import json, sys
+try:
+    methods = json.load(sys.stdin)["payment"]["methods"]
+except Exception:
+    print("unknown"); sys.exit()
+print("on" if any(str(m).startswith("mpp-") for m in methods) else "off")
+' 2>/dev/null)
+[ -n "$MPP_STATE" ] || MPP_STATE=unknown
+
 if curl -sS -m 30 -D - -o /dev/null -X POST "$BASE/audit/wcag" \
   -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null \
   | grep -qi '^www-authenticate:.*Payment'; then
-  pass "MPP WWW-Authenticate: Payment challenge present"
+  if [ "$MPP_STATE" = "off" ]; then
+    fail "the manifest advertises no mpp-* method, but the 402 still sends a WWW-Authenticate: Payment challenge -- a caller would be invited to pay a rail this node says it cannot settle"
+  else
+    pass "MPP WWW-Authenticate: Payment challenge present"
+  fi
+elif [ "$MPP_STATE" = "off" ]; then
+  pass "MPP is off and no WWW-Authenticate: Payment challenge is sent"
 else
-  fail "no MPP WWW-Authenticate challenge -- no live machine payment rail"
+  fail "the manifest advertises an mpp-* method but the 402 sends no WWW-Authenticate challenge -- MPP's only real channel is that header, so the rail is unusable"
+fi
+
+# The question the check above used to be standing in for, asked directly: can
+# ANY machine rail take money here? Rails go dark individually for good
+# reasons; all of them dark at once is a tollbooth with no coin slot, and
+# nothing else in this checker would say so.
+LIVE_RAILS=$(printf '%s' "$MANIFEST" | python3 -c '
+import json, sys
+try:
+    methods = json.load(sys.stdin)["payment"]["methods"]
+except Exception:
+    sys.exit()
+machine = [m for m in methods if m != "stripe_api_key"]
+print(" ".join(machine))
+' 2>/dev/null)
+
+if [ -n "${LIVE_RAILS// /}" ]; then
+  pass "a machine payment rail is live: $LIVE_RAILS"
+else
+  fail "NO machine payment rail is advertised. An agent that arrives cannot pay by any autonomous means -- only the API-key rail is left, and that needs a human checkout first."
 fi
 
 echo
