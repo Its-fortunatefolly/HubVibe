@@ -3028,3 +3028,152 @@ def test_a_v2_payment_signature_header_is_actually_read(monkeypatch, load_main_f
     assert seen.get("header") == "c2lnbmF0dXJl", (
         "the v2 payment header never reached verification"
     )
+
+
+class _FakeTransaction:
+    """Just enough of a Firestore transaction for the prepaid ledger."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def update(self, ref, changes):
+        self.store[ref.key].update(changes)
+
+
+class _FakeRef:
+    def __init__(self, store, key):
+        self.store = store
+        self.key = key
+
+    def get(self, transaction=None):
+        class _Snap:
+            def __init__(self, data):
+                self.exists = data is not None
+                self._data = data
+
+            def to_dict(self):
+                return dict(self._data or {})
+
+        return _Snap(self.store.get(self.key))
+
+    def set(self, data):
+        self.store[self.key] = dict(data)
+
+
+class _FakeCollection:
+    def __init__(self, store):
+        self.store = store
+
+    def document(self, key):
+        return _FakeRef(self.store, key)
+
+
+class _FakeDb:
+    def __init__(self, store):
+        self.store = store
+
+    def collection(self, name):
+        return _FakeCollection(self.store)
+
+    def transaction(self):
+        return _FakeTransaction(self.store)
+
+
+def _prepaid_billing(monkeypatch, module, store):
+    """Point billing at an in-memory key store, with the transactional
+    decorator reduced to a plain call -- the real one needs a live client."""
+    monkeypatch.setattr(module.billing, "_firestore", lambda: _FakeDb(store))
+    import google.cloud.firestore as fs
+
+    monkeypatch.setattr(fs, "transactional", lambda fn: fn)
+    return store
+
+
+def test_a_prepaid_key_is_issued_with_the_balance_that_was_bought(monkeypatch):
+    module = _load_main(monkeypatch)
+    store = _prepaid_billing(monkeypatch, module, {})
+
+    key = module.billing.issue_prepaid_key(47)
+
+    assert store[key]["prepaid_balance_cents"] == 47
+    assert store[key]["active"] is True
+    # No Stripe Customer: nothing to invoice, nothing to meter.
+    assert store[key]["customer_id"] is None
+
+
+def test_a_prepaid_key_cannot_be_issued_with_no_balance(monkeypatch):
+    """A key worth nothing is a credential that reads as valid and buys
+    nothing -- worse than refusing, because the caller only finds out on the
+    next call."""
+    module = _load_main(monkeypatch)
+    _prepaid_billing(monkeypatch, module, {})
+    with pytest.raises(ValueError):
+        module.billing.issue_prepaid_key(0)
+
+
+def test_spending_draws_the_balance_down_and_stops_at_zero(monkeypatch):
+    module = _load_main(monkeypatch)
+    store = _prepaid_billing(monkeypatch, module, {})
+    key = module.billing.issue_prepaid_key(10)
+
+    assert module.billing.spend_prepaid(key, 3) is True
+    assert store[key]["prepaid_balance_cents"] == 7
+    assert module.billing.spend_prepaid(key, 7) is True
+    assert store[key]["prepaid_balance_cents"] == 0
+    # Empty is empty: no overdraft, no free call.
+    assert module.billing.spend_prepaid(key, 1) is False
+    assert store[key]["prepaid_balance_cents"] == 0
+
+
+def test_spending_more_than_the_balance_takes_nothing(monkeypatch):
+    """A partial debit would leave the caller charged and unserved."""
+    module = _load_main(monkeypatch)
+    store = _prepaid_billing(monkeypatch, module, {})
+    key = module.billing.issue_prepaid_key(5)
+
+    assert module.billing.spend_prepaid(key, 10) is False
+    assert store[key]["prepaid_balance_cents"] == 5
+
+
+def test_spending_fails_closed_when_the_store_is_unreachable(monkeypatch):
+    """Unlike the monthly quota, which fails OPEN so an outage cannot cut off
+    a paid subscriber. A prepaid balance IS the payment, so "don't know"
+    must not mean "serve it"."""
+    module = _load_main(monkeypatch)
+
+    def _boom():
+        raise RuntimeError("firestore is down")
+
+    monkeypatch.setattr(module.billing, "_firestore", _boom)
+    assert module.billing.spend_prepaid("some-key", 3) is False
+
+
+def test_an_unknown_or_inactive_key_spends_nothing(monkeypatch):
+    module = _load_main(monkeypatch)
+    store = _prepaid_billing(monkeypatch, module, {})
+    assert module.billing.spend_prepaid("never-issued", 3) is False
+
+    key = module.billing.issue_prepaid_key(10)
+    store[key]["active"] = False
+    assert module.billing.spend_prepaid(key, 3) is False
+
+
+def test_a_paid_response_hands_back_the_key_it_just_bought(monkeypatch):
+    """The agent has no account and no second channel. If the response does
+    not carry the key, the money was taken and nothing spendable returned."""
+    module = _load_main(monkeypatch)
+    auth = module.AuthContext(
+        stripe_billable=False, payment_method="mpp-topup", issued_key="k_abc"
+    )
+    result = {"status": "ok"}
+    module._attach_issued_key(result, auth)
+    assert result["api_key"] == "k_abc"
+    assert "X-API-Key" in result["api_key_note"]
+
+
+def test_a_response_carries_no_key_when_none_was_issued(monkeypatch):
+    module = _load_main(monkeypatch)
+    auth = module.AuthContext(stripe_billable=False, payment_method="x402")
+    result = {"status": "ok"}
+    module._attach_issued_key(result, auth)
+    assert "api_key" not in result

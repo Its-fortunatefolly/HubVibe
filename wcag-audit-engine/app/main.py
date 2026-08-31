@@ -245,7 +245,16 @@ class ReportCheckoutRequest(BaseModel):
 
 
 class AuthContext:
-    __slots__ = ("stripe_billable", "customer_id", "payment_method", "pending_payment")
+    __slots__ = (
+        "stripe_billable",
+        "customer_id",
+        "payment_method",
+        "pending_payment",
+        # A prepaid key minted by the call that paid for it. The agent has no
+        # account and no second channel, so the response IS the delivery
+        # mechanism -- drop it and the money is taken with nothing handed back.
+        "issued_key",
+    )
 
     def __init__(
         self,
@@ -253,6 +262,7 @@ class AuthContext:
         customer_id: Optional[str] = None,
         payment_method: str = "api_key",
         pending_payment=None,
+        issued_key: Optional[str] = None,
     ):
         self.stripe_billable = stripe_billable
         self.customer_id = customer_id
@@ -260,6 +270,7 @@ class AuthContext:
         # An x402 payment that is verified but deliberately not yet settled --
         # see _bill. None for every other payment method.
         self.pending_payment = pending_payment
+        self.issued_key = issued_key
 
 
 def _bazaar_extension_for_path(path: Optional[str]) -> dict:
@@ -354,6 +365,32 @@ def _payment_required_response(
     # billing.is_configured() like every other rail: with no Stripe
     # configured, no key can be issued or metered, so advertising it would be
     # advertising a rail that cannot settle.
+    # The SPT top-up. Advertised only when a per-call SPT charge is
+    # impossible -- Stripe's 0.50 USD floor against a $0.03 route -- because
+    # that is exactly when buying a block is the only way this rail can
+    # settle at all. An agent iterating `other_rails` sees a fiat option it
+    # can actually use, instead of a rail that is simply missing.
+    if mpp_payments.topup_available() and not mpp_payments.stripe_available_for(
+        round(price_usd * 100)
+    ):
+        other_rails.append(
+            {
+                "protocol": "mpp",
+                "method": "stripe",
+                "intent": "topup",
+                "asset": "usd",
+                "amount_minor_units": str(mpp_payments.topup_cents()),
+                "send_via_header": "Authorization: Payment ...",
+                "challenge_in": "WWW-Authenticate",
+                "detail": (
+                    "Stripe requires a minimum charge above this call's price, "
+                    "so this rail sells prepaid credit rather than one call. "
+                    "Pay it and the response returns an api_key holding the "
+                    "balance, minus this call. No account, no checkout."
+                ),
+            }
+        )
+
     if billing.is_configured():
         other_rails.append(
             {
@@ -449,7 +486,16 @@ def _authenticate(
             return AuthContext(stripe_billable=False, payment_method="internal")
         if billing.is_configured():
             record = billing.lookup_key(x_api_key)
-            if record is not None and billing.check_and_increment_quota(
+            # A prepaid key carries its own money and has no Stripe Customer
+            # behind it, so it is spent rather than metered or quota-checked.
+            if record is not None and record.get("prepaid_balance_cents") is not None:
+                if billing.spend_prepaid(x_api_key, round(price_usd * 100)):
+                    return AuthContext(
+                        stripe_billable=False, payment_method="prepaid"
+                    )
+                # Out of credit: fall through to the 402, which offers a
+                # top-up. Refusing loudly beats serving on an empty balance.
+            elif record is not None and billing.check_and_increment_quota(
                 record["customer_id"], plan=record.get("plan")
             ):
                 return AuthContext(
@@ -470,6 +516,26 @@ def _authenticate(
 
     if authorization and authorization.startswith("Payment "):
         credential = authorization[len("Payment "):].strip()
+        # Top-up first: it is a different intent with a different meaning, and
+        # letting it fall through to the per-call path would consume a $0.50
+        # purchase as payment for one $0.03 audit.
+        if credential:
+            bought_cents = mpp_payments.settle_topup_sync(credential, realm=host)
+            if bought_cents:
+                # This call is served out of the credit just bought, so the
+                # key is issued with the remainder. Charging for it separately
+                # would mean paying twice for one request.
+                call_cents = round(price_usd * 100)
+                remaining = max(bought_cents - call_cents, 0)
+                try:
+                    key = billing.issue_prepaid_key(remaining) if remaining else None
+                except Exception:
+                    key = None
+                return AuthContext(
+                    stripe_billable=False,
+                    payment_method="mpp-topup",
+                    issued_key=key,
+                )
         if credential and mpp_payments.verify_and_settle_sync(credential, realm=host):
             # Already charged/settled (Stripe PaymentIntent or on-chain
             # Tempo transfer) inside verify_and_settle_sync -- nothing
@@ -526,6 +592,30 @@ def _authorize_and_rate_limit(
         return None, auth
 
     return auth, None
+
+
+def _attach_issued_key(result: dict, auth) -> None:
+    """Hand back a prepaid key bought by this very call.
+
+    The agent that paid has no account, no email and no second channel, so
+    this response is the only place the key can be delivered. Dropping it
+    would mean taking the money and returning nothing spendable -- the worst
+    outcome available on a rail whose whole promise is that a machine can pay
+    without a human.
+
+    Named `api_key` because that is the header it goes in, and stated in
+    prose beside it because an agent reading this once should not have to
+    guess whether the value is a receipt or a credential.
+    """
+    key = getattr(auth, "issued_key", None)
+    if not key:
+        return
+    result["api_key"] = key
+    result["api_key_note"] = (
+        "Prepaid credit from your top-up, minus this call. Send it as the "
+        "X-API-Key header on subsequent requests until the balance runs out; "
+        "there is no account and nothing to log in to."
+    )
 
 
 def _bill(auth, price_usd: float) -> Optional[str]:
@@ -1660,6 +1750,7 @@ def mcp_streamable_http(
         warning = _bill(auth, price_usd=price)
         if warning:
             result["billing_warning"] = warning
+        _attach_issued_key(result, auth)
 
         import json as _json
 
@@ -1859,6 +1950,7 @@ def audit(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
+    _attach_issued_key(result, auth)
 
     remediation = _remediation_notes(violations)
     if remediation is not None:
@@ -1912,6 +2004,7 @@ def audit_wcag(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
+    _attach_issued_key(result, auth)
     return result
 
 
@@ -1941,6 +2034,7 @@ def audit_seo(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
+    _attach_issued_key(result, auth)
     return result
 
 
@@ -1967,6 +2061,7 @@ def audit_security(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
+    _attach_issued_key(result, auth)
     return result
 
 
@@ -1993,6 +2088,7 @@ def audit_performance(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
+    _attach_issued_key(result, auth)
     return result
 
 
@@ -2055,4 +2151,5 @@ def audit_bundle(
     warning = _bill(auth, price_usd=0.10)
     if warning:
         result["billing_warning"] = warning
+    _attach_issued_key(result, auth)
     return result

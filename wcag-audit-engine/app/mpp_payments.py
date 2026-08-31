@@ -146,6 +146,25 @@ def stripe_configured() -> bool:
     return bool(_secret_key() and stripe.api_key and _STRIPE_NETWORK_PROFILE_ID)
 
 
+# What one MPP `stripe` top-up buys, in cents. Must clear _STRIPE_MIN_CENTS or
+# Stripe rejects the charge on amount alone.
+#
+# This is the answer to a constraint that cannot be argued with: SPT has a
+# 0.50 USD floor and this service sells $0.03 calls, so the rail can only ever
+# settle if what it sells is a BLOCK of calls rather than one call. The agent
+# pays once, above the floor, and leaves with a prepaid key worth what it paid.
+_STRIPE_TOPUP_CENTS = int(os.environ.get("MPP_STRIPE_TOPUP_CENTS", "50"))
+
+
+def topup_available() -> bool:
+    """Whether the SPT rail can sell a prepaid block on this deployment."""
+    return stripe_configured() and _STRIPE_TOPUP_CENTS >= _STRIPE_MIN_CENTS
+
+
+def topup_cents() -> int:
+    return _STRIPE_TOPUP_CENTS
+
+
 def stripe_available_for(price_cents: int) -> bool:
     """Whether the SPT rail can actually settle a charge of this size.
 
@@ -315,6 +334,29 @@ def www_authenticate_headers(realm: Optional[str] = None, price_usd: Optional[fl
         str(round(price_usd * 1_000_000)) if price_usd is not None else _TEMPO_PRICE_BASE_UNITS
     )
     headers = []
+    # The top-up challenge. Offered whenever the per-call price is BELOW
+    # Stripe's floor -- which is exactly when a per-call SPT charge is
+    # impossible and a block is the only thing the rail can sell. Above the
+    # floor the per-call challenge below is the better offer and this would
+    # just be noise.
+    if topup_available() and not stripe_available_for(stripe_price_cents):
+        headers.append(
+            _www_authenticate_header(
+                _build_challenge(
+                    realm,
+                    "stripe",
+                    "topup",
+                    {
+                        "amount": str(_STRIPE_TOPUP_CENTS),
+                        "currency": _STRIPE_CURRENCY,
+                        "methodDetails": {
+                            "networkId": _STRIPE_NETWORK_PROFILE_ID,
+                            "paymentMethodTypes": ["card", "link"],
+                        },
+                    },
+                )
+            )
+        )
     if stripe_available_for(stripe_price_cents):
         challenge = _build_challenge(
             realm,
@@ -576,6 +618,12 @@ def verify_and_settle_sync(authorization_header: str, realm: Optional[str] = Non
         payload = decoded["payload"]
         if not _verify_challenge_binding(challenge, realm):
             return False
+        # A top-up buys credit, not this call. Refusing it here rather than
+        # letting it read as a per-call payment is the difference between
+        # "you bought $0.50 of credit" and "you paid $0.50 for a $0.03
+        # audit and got nothing back" -- see settle_topup_sync.
+        if challenge.get("intent") == "topup":
+            return False
         method = challenge.get("method")
         if method == "stripe":
             return _verify_stripe(challenge, payload)
@@ -584,3 +632,38 @@ def verify_and_settle_sync(authorization_header: str, realm: Optional[str] = Non
         return False
     except Exception:
         return False
+
+
+def settle_topup_sync(authorization_header: str, realm: Optional[str] = None):
+    """Settle a `topup` credential and return the cents bought, or None.
+
+    Separate from verify_and_settle_sync because the two mean different
+    things to the caller: that one says "this call is paid for", this one says
+    "this much credit was purchased". Collapsing them would let a $0.50 top-up
+    be consumed as payment for one $0.03 audit, silently keeping the other
+    $0.47 -- which is theft dressed as a rounding decision.
+
+    The amount is read from the HMAC-bound challenge rather than from the
+    caller, so an agent cannot claim to have bought more credit than it paid
+    for. Same fail-closed contract as everything else here: any exception, any
+    binding failure, any wrong intent all resolve to None.
+    """
+    try:
+        decoded = json.loads(_b64url_decode(authorization_header))
+        challenge = decoded["challenge"]
+        payload = decoded["payload"]
+        if challenge.get("intent") != "topup":
+            return None
+        if challenge.get("method") != "stripe":
+            return None
+        if not _verify_challenge_binding(challenge, realm):
+            return None
+        request_obj = json.loads(_b64url_decode(challenge["request"]))
+        cents = int(request_obj["amount"])
+        if cents < _STRIPE_MIN_CENTS:
+            return None
+        if not _verify_stripe(challenge, payload):
+            return None
+        return cents
+    except Exception:
+        return None

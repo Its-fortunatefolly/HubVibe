@@ -460,6 +460,102 @@ def record_usage(customer_id: str, price_cents: int) -> None:
         _send(1)
 
 
+def issue_prepaid_key(credit_cents: int) -> str:
+    """Mint an API key carrying a prepaid balance, with no account behind it.
+
+    This is what makes the MPP `stripe` rail usable at all here. Stripe
+    requires a minimum 0.50 USD charge for a card payment made with a Shared
+    Payment Token, and every route on this service is $0.03-$0.10 -- so a
+    per-call SPT charge is rejected by Stripe on amount alone, and no amount
+    of correct protocol work changes that. The rail can only settle if what it
+    sells is a BLOCK, not a call.
+
+    So an agent pays once, above the floor, and receives a key with the
+    balance it just bought. No email, no checkout, no browser, no
+    subscription: the key IS the receipt, returned in the response to the
+    call that paid for it. That keeps the A2A contract intact -- a machine
+    arrives, pays, and leaves with something it can spend -- while satisfying
+    a floor that exists on Stripe's side and not ours.
+
+    `customer_id` is None deliberately: there is no Stripe Customer, nothing
+    to invoice, and no metering. The balance in Firestore is the whole record,
+    and it can only go down.
+    """
+    if credit_cents <= 0:
+        raise ValueError("a prepaid key must be issued with a positive balance")
+    api_key = secrets.token_urlsafe(32)
+    _firestore().collection("api_keys").document(api_key).set(
+        {
+            "customer_id": None,
+            "active": True,
+            "plan": None,
+            "prepaid_balance_cents": int(credit_cents),
+        }
+    )
+    return api_key
+
+
+def spend_prepaid(api_key: str, cents: int) -> bool:
+    """Draw `cents` off a prepaid key. True if it was spent, False otherwise.
+
+    Transactional, because two concurrent calls on the same key must not both
+    read the same balance and both succeed -- that is free audits at exactly
+    the moment a caller is fanning out, which is when it would be worth doing.
+
+    Fails CLOSED, unlike check_and_increment_quota above. That asymmetry is
+    deliberate: a subscriber's monthly cap is a business limit, so a Firestore
+    hiccup there should not cut off someone who has already paid for the
+    month. A prepaid balance is the payment itself, so an error here means we
+    do not know whether there is money left, and serving on "don't know" is
+    serving for free.
+    """
+    if cents <= 0:
+        return False
+
+    from google.cloud import firestore
+
+    try:
+        ref = _firestore().collection("api_keys").document(api_key)
+
+        @firestore.transactional
+        def _debit(transaction):
+            snapshot = ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return False
+            record = snapshot.to_dict()
+            if not record.get("active"):
+                return False
+            balance = record.get("prepaid_balance_cents")
+            if balance is None or balance < cents:
+                return False
+            transaction.update(ref, {"prepaid_balance_cents": balance - cents})
+            return True
+
+        return bool(_debit(_firestore().transaction()))
+    except Exception:
+        _warn_key_store_unavailable_for_prepaid()
+        return False
+
+
+_prepaid_store_warned = False
+
+
+def _warn_prepaid_store_unavailable() -> None:
+    global _prepaid_store_warned
+    if _prepaid_store_warned:
+        return
+    _prepaid_store_warned = True
+    logging.getLogger(__name__).error(
+        "A prepaid balance could not be read or written. Prepaid keys will be "
+        "refused until this is fixed -- a caller who has already paid is being "
+        "turned away, which is visible to them and must not be silent."
+    )
+
+
+def _warn_key_store_unavailable_for_prepaid() -> None:
+    _warn_prepaid_store_unavailable()
+
+
 def check_and_increment_quota(customer_id: str, plan: Optional[str] = None) -> bool:
     """Returns True and increments the counter if this call is within the
     subscription's included monthly quota; returns False if the customer
