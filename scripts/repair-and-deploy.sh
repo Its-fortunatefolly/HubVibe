@@ -124,6 +124,44 @@ add_removal() {
   REMOVE_VARS="${REMOVE_VARS:+$REMOVE_VARS,}$1"
 }
 
+# Recipients that are well-formed and that nobody here can claim.
+#
+# Removing them is deliberately a REPAIR and not a refusal, and the reasoning
+# is the opposite way round from the malformed case: refusing the deploy
+# leaves the running revision advertising the address, so stopping is the
+# option that keeps money pointed at a stranger for longer. Stripping the
+# variables turns the rail off on the next revision, which is exactly the
+# manual command this was written to replace.
+#
+#   0x2b3b... sat deployed here as X402_PAY_TO_ADDRESS and the owner does not
+#             recognise it. It is 0x + 40 hex, so every shape gate said yes.
+#   0x32b0... is the test-suite constant. It exists to make the rail
+#             inspectable on a local boot; nobody holds its key, and a
+#             truncated paste of it once shipped as the tempo recipient.
+UNAFFIRMED_ADDRESSES="
+0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256
+0x32b08c5e927c69877d0fcab35618c265674922bc
+"
+
+is_unaffirmed() {
+  needle=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+  for candidate in $UNAFFIRMED_ADDRESSES; do
+    [ "$needle" = "$(printf '%s' "$candidate" | tr 'A-Z' 'a-z')" ] && return 0
+  done
+  return 1
+}
+
+PAY_TO_RAW=$(env_value X402_PAY_TO_ADDRESS)
+if [ -n "$PAY_TO_RAW" ] && [ "$PAY_TO_RAW" != "__FROM_SECRET__" ] \
+   && is_unaffirmed "$PAY_TO_RAW"; then
+  add_removal X402_PAY_TO_ADDRESS
+  add_removal X402_FACILITATOR_URL
+  warn "X402_PAY_TO_ADDRESS is an address NOBODY HERE HOLDS THE KEY TO."
+  warn "Removing both x402 variables -- the rail goes off rather than settling"
+  warn "to a stranger. Turn it back on with a recipient you control:"
+  warn "  X402_PAY_TO_ADDRESS=0x... bash scripts/go-live.sh"
+fi
+
 for host in $PLACEHOLDER_HOSTS; do
   if grep -q "$host" "$SVC_JSON"; then
     add_removal X402_FACILITATOR_URL
@@ -154,6 +192,11 @@ if [ -n "$TEMPO_TO_RAW" ] && [ "$TEMPO_TO_RAW" != "__FROM_SECRET__" ]; then
     add_removal MPP_TEMPO_RECIPIENT_ADDRESS
     warn "MPP_TEMPO_RECIPIENT_ADDRESS is the zero address -- removing it. The"
     warn "tempo rail stays off until a real recipient is set."
+  elif is_unaffirmed "$TEMPO_TO_RAW"; then
+    add_removal MPP_TEMPO_RECIPIENT_ADDRESS
+    warn "MPP_TEMPO_RECIPIENT_ADDRESS is an address nobody here holds the key"
+    warn "to -- removing it. Mint a real Stripe crypto deposit address with"
+    warn "  bash scripts/go-live.sh"
   elif ! printf '%s' "$TEMPO_TO_RAW" | grep -qiE '^0x[0-9a-f]{40}$'; then
     add_removal MPP_TEMPO_RECIPIENT_ADDRESS
     warn "MPP_TEMPO_RECIPIENT_ADDRESS is not a valid EVM address (needs 0x +"

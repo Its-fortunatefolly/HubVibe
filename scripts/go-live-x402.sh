@@ -6,8 +6,9 @@
 # Everything the rail needs, done in order, each step skipped when it is
 # already correct:
 #
-#   1. pay-to address  -- reuse the one on the service, or mint a
-#                         Stripe-custodied deposit address if there is none
+#   1. pay-to address  -- a Base wallet whose key you hold, supplied by hand
+#                         or already on the service. Nothing is minted here:
+#                         Stripe does MPP, not x402.
 #   2. facilitator     -- point at a keyless one that needs no business review
 #   3. deploy          -- one revision, only if something actually changed
 #   4. verify          -- the live checks, including the paid path
@@ -35,6 +36,27 @@ step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$1"; }
 warn() { printf '  \033[33mNOTE\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31mSTOP\033[0m  %s\n' "$1"; exit 1; }
+
+# Well-formed addresses that must never be advertised. Shape is not ownership,
+# and that distinction has already cost this project once at the zero address:
+# 0x2b3b... is 0x + 40 hex, passes every gate in this repo, sat deployed on
+# this service as X402_PAY_TO_ADDRESS -- and the owner does not recognise it.
+# 0x32b0... is the test-suite constant, which exists to make the rail
+# inspectable locally and whose key nobody holds. Without this, "already set
+# and well-formed" keeps either one advertised forever.
+UNAFFIRMED_ADDRESSES="
+0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256
+0x32b08c5e927c69877d0fcab35618c265674922bc
+"
+
+is_unaffirmed() {
+  local needle candidate
+  needle="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+  for candidate in $UNAFFIRMED_ADDRESSES; do
+    [ "$needle" = "$(printf '%s' "$candidate" | tr 'A-Z' 'a-z')" ] && return 0
+  done
+  return 1
+}
 
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not on PATH. Run this in Cloud Shell."
 
@@ -66,8 +88,29 @@ PAY_TO="$(read_env X402_PAY_TO_ADDRESS)"
 CUR_FACILITATOR="$(read_env X402_FACILITATOR_URL)"
 
 step "1. Pay-to address -- where the USDC actually lands"
+
+# An address supplied by hand wins outright, and is settled FIRST. It used to
+# be applied after the mint step, which was harmless while that step could
+# produce an address -- now that the step can only fail (Stripe does not do
+# x402), checking it second would reject a perfectly good wallet before ever
+# reading it.
+if [ -n "${X402_PAY_TO_ADDRESS:-}" ]; then
+  printf '%s' "$X402_PAY_TO_ADDRESS" | grep -qiE '^0x[0-9a-f]{40}$' \
+    || die "X402_PAY_TO_ADDRESS from the environment is not 0x + 40 hex"
+  # Supplying it by hand is not affirmation -- a paste is how it got here.
+  ! is_unaffirmed "$X402_PAY_TO_ADDRESS" \
+    || die "X402_PAY_TO_ADDRESS is an address nobody here holds the key to. Refusing."
+  ok "using the address supplied in the environment"
+  PAY_TO="$X402_PAY_TO_ADDRESS"
+  SUPPLIED_BY_HAND=1
+else
+  SUPPLIED_BY_HAND=0
+fi
+
 NEED_ADDRESS=0
-if [ "$PAY_TO" = "__FROM_SECRET__" ]; then
+if [ "$SUPPLIED_BY_HAND" -eq 1 ]; then
+  : # already settled above
+elif [ "$PAY_TO" = "__FROM_SECRET__" ]; then
   warn "comes from Secret Manager, so its shape cannot be checked from here."
   warn "An EVM address is public -- keep it a plain env var so the guard applies."
 elif [ -z "$PAY_TO" ]; then
@@ -78,6 +121,9 @@ elif [ "$PAY_TO" = "0x0000000000000000000000000000000000000000" ]; then
   # exact value shipped once and passed every check.
   warn "is the ZERO ADDRESS -- well-formed but unownable. Replacing."
   NEED_ADDRESS=1
+elif is_unaffirmed "$PAY_TO"; then
+  warn "is an address NOBODY HERE HOLDS THE KEY TO. Replacing."
+  NEED_ADDRESS=1
 elif printf '%s' "$PAY_TO" | grep -qiE '^0x[0-9a-f]{40}$'; then
   ok "already set and well-formed (${PAY_TO:0:6}...${PAY_TO: -4})"
 else
@@ -86,39 +132,29 @@ else
 fi
 
 if [ "$NEED_ADDRESS" -eq 1 ]; then
-  step "   Minting a Stripe-custodied deposit address"
-  # Custodied by Stripe on purpose: what lands there is swept into the same
-  # balance and payout as every card charge, and there are no keys to hold.
-  if [ -z "${STRIPE_SECRET_KEY:-}" ]; then
-    STRIPE_SECRET_KEY="$(gcloud secrets versions access latest \
-      --secret="$STRIPE_SECRET_NAME" 2>/dev/null)"
-  fi
-  [ -n "${STRIPE_SECRET_KEY:-}" ] \
-    || die "no Stripe key: not in the environment and $STRIPE_SECRET_NAME is unreadable"
-
-  MINTED="$(STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
-    python3 "$REPO_ROOT/scripts/x402-setup.py" --network base 2>&1)"
-  PAY_TO="$(printf '%s' "$MINTED" | grep -oiE '0x[0-9a-f]{40}' | head -1)"
-
-  if [ -z "$PAY_TO" ]; then
-    printf '%s\n' "$MINTED" | sed 's/^/      /'
-    echo
-    die "could not mint an address. If the output above says the endpoint or a
-        parameter is unrecognised, Stripe has not enabled crypto deposit
-        addresses / x402 on this account yet -- ask Stripe support to turn on
-        machine payments. Until then, set X402_PAY_TO_ADDRESS to a Base
-        address from any self-custodial EVM wallet and re-run:
-          X402_PAY_TO_ADDRESS=0x... bash scripts/go-live-x402.sh"
-  fi
-  ok "minted ${PAY_TO:0:6}...${PAY_TO: -4}"
-fi
-
-# An override always wins, so a self-custodial address can be supplied by hand.
-if [ -n "${X402_PAY_TO_ADDRESS:-}" ]; then
-  printf '%s' "$X402_PAY_TO_ADDRESS" | grep -qiE '^0x[0-9a-f]{40}$' \
-    || die "X402_PAY_TO_ADDRESS from the environment is not 0x + 40 hex"
-  PAY_TO="$X402_PAY_TO_ADDRESS"
-  ok "using the address supplied in the environment"
+  # This used to mint a Stripe-custodied deposit address here. It no longer
+  # does, and the reason is a fact from the owner, not a preference:
+  #
+  #   STRIPE DOES NOT DO x402. Stripe does MPP. x402 is facilitated elsewhere.
+  #
+  # So the old fallback led nowhere, and it failed in the most expensive way
+  # available: its error told you to "ask Stripe support to turn on machine
+  # payments / x402", which is advice for a product Stripe does not sell. A
+  # session following it burns days on a support thread that cannot resolve.
+  # This project has already lost weeks to exactly that shape of wrong
+  # diagnosis with the CDP business review.
+  #
+  # x402 on Base means a wallet whose key you hold, and money that stays
+  # on-chain. Stripe's crypto deposit addresses are still exactly right for
+  # the OTHER rail -- MPP tempo mints one and Stripe offramps it into the
+  # Stripe balance. That is what scripts/go-live.sh uses them for.
+  step "   x402 needs a self-custody Base address"
+  warn "Stripe does not do x402 -- it does MPP. There is nothing to mint here."
+  die "set a Base address whose key you hold and re-run:
+          X402_PAY_TO_ADDRESS=0x... bash scripts/go-live-x402.sh
+        or use the one command that does both rails, which already defaults
+        to the affirmed wallet:
+          bash scripts/go-live.sh"
 fi
 
 step "2. Facilitator -- the service that verifies and settles"

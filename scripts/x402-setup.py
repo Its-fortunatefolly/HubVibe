@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
-"""Mint a Stripe-custodied crypto deposit address to use as X402_PAY_TO_ADDRESS.
+"""Mint a Stripe-custodied crypto deposit address.
 
-Why route x402 through Stripe rather than your own wallet: x402 settles in
-USDC on-chain, but the pay-to address does not have to be a wallet you
-custody. Stripe can issue a deposit address, take custody of what lands on
-it, and sweep it into your normal Stripe balance -- so x402 revenue shows up
-in the same reporting, payouts, and reconciliation as every other Stripe
-charge, and there are no keys for you to hold. This is the same pattern the
-MPP/Tempo path in app/mpp_payments.py already uses; this script just does it
-for the Base network that x402 uses.
+DO NOT USE THIS FOR x402. **Stripe does not do x402 -- Stripe does MPP.**
+x402 has to be facilitated somewhere else entirely, and its pay-to address is
+a Base wallet whose key you hold, with USDC that stays on-chain. An earlier
+version of this file argued the opposite ("why route x402 through Stripe
+rather than your own wallet") and named itself after x402; both were wrong,
+and the second one made the first one hard to notice. The name is kept only
+because `git log` is easier to follow than a rename.
 
-What this does NOT do: it does not make this service accept x402. Two env
-vars have to be set on the deployment for that (see the end of the output),
-and x402 also needs a facilitator, which is a separate service that performs
-the actual verify/settle handshake. This script only obtains the address.
+What this IS still right for: **MPP tempo**, which is a Stripe rail. Stripe
+mints the deposit address, custodies what lands on it, and offramps it into
+the Stripe balance, so there are no keys to hold and the money reconciles
+with every card charge. `scripts/go-live.sh` does this for you, on the tempo
+network, as part of one deploy -- prefer it over running this by hand.
 
-Stripe's crypto deposit-address and x402 APIs are preview features that
-require enablement on your account and are US-business gated. If this script
-reports that the endpoint or parameter is unrecognised, that is the signal
-that the feature is not enabled on your account yet -- not a bug in this
-script. Ask Stripe support to enable machine payments / x402, then re-run.
+What this does NOT do: it does not make this service accept anything. The
+deployment needs the recipient env var set, which is the go-live script's
+job. This only obtains the address.
+
+Stripe's crypto deposit-address API is a preview surface pinned by API
+version and gated on stablecoins being enabled for the account. If this
+reports that the endpoint or a parameter is unrecognised, that is the signal
+that stablecoins are not enabled yet -- not a bug in this script, and not a
+reason to ask Stripe about x402, which they do not offer.
 
 Usage:
-    STRIPE_SECRET_KEY=sk_live_... python scripts/x402-setup.py
-    STRIPE_SECRET_KEY=sk_live_... python scripts/x402-setup.py --network base
+    STRIPE_SECRET_KEY=sk_live_... python scripts/x402-setup.py --network tempo
 """
 
 import argparse
@@ -60,8 +63,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--network",
-        default="base",
-        help="Chain the deposit address should live on (x402 uses base).",
+        default="tempo",
+        help=(
+            "Chain the deposit address should live on. Defaults to tempo, the "
+            "MPP rail Stripe actually offers. `base` was the old default, for "
+            "an x402 pay-to -- Stripe does not do x402, so that was never a "
+            "destination this account could serve."
+        ),
     )
     parser.add_argument("--api-version", default=DEFAULT_API_VERSION)
     args = parser.parse_args()
@@ -82,11 +90,12 @@ def main() -> int:
         print(f"Stripe returned HTTP {exc.code}:\n{detail}\n", file=sys.stderr)
         if exc.code in (400, 404):
             print(
-                "A 400/404 here almost always means the crypto deposit-address\n"
-                "preview is not enabled on this Stripe account, or the network\n"
-                "name is different for your account. This is an account\n"
-                "entitlement, not something code can work around: ask Stripe to\n"
-                "enable machine payments / x402 for the account, then re-run.",
+                "A 400/404 here almost always means stablecoins are not enabled\n"
+                "on this Stripe account, or the network name differs for your\n"
+                "account. That is an entitlement, not something code can work\n"
+                "around: enable Stablecoins and Crypto in Payment methods\n"
+                "settings, then re-run. Do NOT ask Stripe to enable x402 --\n"
+                "Stripe does MPP; x402 is facilitated elsewhere.",
                 file=sys.stderr,
             )
         return 1
@@ -105,22 +114,19 @@ def main() -> int:
     print(f"Deposit address ({args.network}): {address}")
     print("=" * 70)
     print()
-    print("Set BOTH of these on the deployment; x402 stays inert with only one:")
+    print("This is the MPP tempo recipient. Set it on the deployment:")
     print()
-    print(f"  X402_PAY_TO_ADDRESS={address}")
-    print("  X402_FACILITATOR_URL=<your facilitator's base URL>")
+    print(f"  MPP_TEMPO_RECIPIENT_ADDRESS={address}")
     print()
-    print("The facilitator is a separate service that verifies and settles the")
-    print("payment. This service never validates a signature itself -- see the")
-    print("module docstring in app/x402_payments.py for why that split matters.")
+    print("Or let the go-live script mint, validate, set and deploy it in one:")
+    print("  bash scripts/go-live.sh")
     print()
-    print("Then redeploy and confirm x402 actually went live:")
+    print("NOT an x402 pay-to. Stripe does MPP; x402 is facilitated elsewhere")
+    print("and settles to a Base wallet whose key you hold.")
+    print()
+    print("Then confirm the rail actually went live:")
     print("  bash scripts/verify-live.sh")
     print()
-    print("The manifest at /.well-known/agent.json should then list \"x402\" under")
-    print("payment.methods. If it does not, the vars did not reach the container.")
+    print("The manifest at /.well-known/agent.json should list \"mpp-tempo\"")
+    print("under payment.methods. If not, the var did not reach the container.")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
