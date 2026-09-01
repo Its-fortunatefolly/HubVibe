@@ -36,6 +36,27 @@ ok()   { printf '  \033[32mOK\033[0m    %s\n' "$1"; }
 warn() { printf '  \033[33mNOTE\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31mSTOP\033[0m  %s\n' "$1"; exit 1; }
 
+# Well-formed addresses that must never be advertised. Shape is not ownership,
+# and that distinction has already cost this project once at the zero address:
+# 0x2b3b... is 0x + 40 hex, passes every gate in this repo, sat deployed on
+# this service as X402_PAY_TO_ADDRESS -- and the owner does not recognise it.
+# 0x32b0... is the test-suite constant, which exists to make the rail
+# inspectable locally and whose key nobody holds. Without this, "already set
+# and well-formed" keeps either one advertised forever.
+UNAFFIRMED_ADDRESSES="
+0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256
+0x32b08c5e927c69877d0fcab35618c265674922bc
+"
+
+is_unaffirmed() {
+  local needle candidate
+  needle="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+  for candidate in $UNAFFIRMED_ADDRESSES; do
+    [ "$needle" = "$(printf '%s' "$candidate" | tr 'A-Z' 'a-z')" ] && return 0
+  done
+  return 1
+}
+
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not on PATH. Run this in Cloud Shell."
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -78,6 +99,9 @@ elif [ "$PAY_TO" = "0x0000000000000000000000000000000000000000" ]; then
   # exact value shipped once and passed every check.
   warn "is the ZERO ADDRESS -- well-formed but unownable. Replacing."
   NEED_ADDRESS=1
+elif is_unaffirmed "$PAY_TO"; then
+  warn "is an address NOBODY HERE HOLDS THE KEY TO. Replacing."
+  NEED_ADDRESS=1
 elif printf '%s' "$PAY_TO" | grep -qiE '^0x[0-9a-f]{40}$'; then
   ok "already set and well-formed (${PAY_TO:0:6}...${PAY_TO: -4})"
 else
@@ -117,6 +141,9 @@ fi
 if [ -n "${X402_PAY_TO_ADDRESS:-}" ]; then
   printf '%s' "$X402_PAY_TO_ADDRESS" | grep -qiE '^0x[0-9a-f]{40}$' \
     || die "X402_PAY_TO_ADDRESS from the environment is not 0x + 40 hex"
+  # Supplying it by hand is not affirmation -- a paste is how it got here.
+  ! is_unaffirmed "$X402_PAY_TO_ADDRESS" \
+    || die "X402_PAY_TO_ADDRESS is an address nobody here holds the key to. Refusing."
   PAY_TO="$X402_PAY_TO_ADDRESS"
   ok "using the address supplied in the environment"
 fi

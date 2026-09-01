@@ -105,3 +105,99 @@ def test_it_does_not_mint_a_revision_just_to_rewrite_identical_variables():
     failure this script was written to end.
     """
     assert "both variables already correct" in _text()
+
+
+# --- the recipient nobody can claim ----------------------------------------
+#
+# Added after 0x2b3b...0256 was found deployed on this service as
+# X402_PAY_TO_ADDRESS, unrecognised by the owner. Every gate in this repo said
+# yes to it, because every gate checked shape. These run the script rather
+# than reading it: the branch order is the whole behaviour, and a well-formed
+# unaffirmed address must lose to the "replace it" path, not to "already set".
+
+import json
+import os
+import subprocess as _sp
+
+UNRECOGNISED = "0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256"
+TEST_CONSTANT = "0x32b08c5e927c69877d0fcab35618c265674922bc"
+OWNER_WALLET = "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"
+
+
+def _drive(tmp_path, live_pay_to="", env=None):
+    """Run the script with gcloud, the minter and the deploy handoff stubbed."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    svc = tmp_path / "service.json"
+    env_list = [{"name": "X402_FACILITATOR_URL", "value": "https://facilitator.xpay.sh"}]
+    if live_pay_to:
+        env_list.append({"name": "X402_PAY_TO_ADDRESS", "value": live_pay_to})
+    svc.write_text(json.dumps(
+        {"spec": {"template": {"spec": {"containers": [{"env": env_list}]}}}}
+    ))
+
+    (bin_dir / "gcloud").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$*" in\n'
+        f'  *"services describe"*) cat "{svc}" ;;\n'
+        '  *"secrets versions access"*) printf "%s" "sk_live_fake" ;;\n'
+        '  *"services update"*) echo "UPDATE_INVOKED $*" ;;\n'
+        "  *) exit 0 ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gcloud").chmod(0o755)
+
+    fake_repo = tmp_path / "repo"
+    (fake_repo / "scripts").mkdir(parents=True, exist_ok=True)
+    (fake_repo / "scripts" / "go-live-x402.sh").write_text(SCRIPT.read_text())
+    (fake_repo / "scripts" / "repair-and-deploy.sh").write_text(
+        "#!/usr/bin/env bash\necho DEPLOY_HANDOFF\n"
+    )
+    # Stands in for the Stripe mint, which needs network and a live account.
+    (fake_repo / "scripts" / "x402-setup.py").write_text(
+        "print('address: 0x9999999999999999999999999999999999999999')\n"
+    )
+
+    full_env = dict(os.environ)
+    full_env["PATH"] = f"{bin_dir}:{full_env['PATH']}"
+    full_env.pop("X402_PAY_TO_ADDRESS", None)
+    if env:
+        full_env.update(env)
+
+    return _sp.run(
+        ["bash", str(fake_repo / "scripts" / "go-live-x402.sh")],
+        capture_output=True, text=True, env=full_env, timeout=60,
+    )
+
+
+def test_a_deployed_unrecognised_address_is_not_kept_for_being_well_formed(tmp_path):
+    result = _drive(tmp_path, live_pay_to=UNRECOGNISED)
+    assert "NOBODY HERE HOLDS THE KEY TO" in result.stdout
+    assert "already set and well-formed" not in result.stdout
+    assert UNRECOGNISED not in "".join(
+        ln for ln in result.stdout.splitlines() if "UPDATE_INVOKED" in ln
+    )
+
+
+def test_the_test_suite_constant_is_refused_too(tmp_path):
+    """It exists to make the rail inspectable locally. Nobody holds its key,
+    and a truncated paste of it was deployed on the tempo rail once."""
+    result = _drive(tmp_path, live_pay_to=TEST_CONSTANT)
+    assert "NOBODY HERE HOLDS THE KEY TO" in result.stdout
+
+
+def test_supplying_an_unaffirmed_address_by_hand_stops_the_run(tmp_path):
+    """A paste is how it got there in the first place."""
+    result = _drive(tmp_path, env={"X402_PAY_TO_ADDRESS": UNRECOGNISED})
+    assert "nobody here holds the key to" in result.stdout
+    assert "UPDATE_INVOKED" not in result.stdout
+    assert "DEPLOY_HANDOFF" not in result.stdout
+
+
+def test_an_affirmed_address_still_goes_through(tmp_path):
+    """The guard must refuse two specific addresses, not become a third gate
+    that blocks the wallet this rail is meant to pay into."""
+    result = _drive(tmp_path, env={"X402_PAY_TO_ADDRESS": OWNER_WALLET})
+    assert f"X402_PAY_TO_ADDRESS={OWNER_WALLET}" in result.stdout
+    assert "DEPLOY_HANDOFF" in result.stdout

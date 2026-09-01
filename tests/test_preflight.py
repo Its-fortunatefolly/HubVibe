@@ -28,8 +28,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "repair-and-deploy.sh"
 
-GOOD_ADDR = "0x32b08c5e927c69877d0fcab35618c265674922bc"   # 0x + 40 hex
+# Not the test-suite constant (0x32b08c...): the deploy script now strips
+# that one as an address nobody holds the key to, so using it as the "good"
+# fixture here would assert the opposite of what the script does.
+GOOD_ADDR = "0x1111111111111111111111111111111111111111"   # 0x + 40 hex
 SHORT_ADDR = "0x32b08c5e927c69877d0fcab35618c265674922b"    # 0x + 39 hex
+UNAFFIRMED_ADDR = "0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256"  # deployed, unrecognised
 
 _PAY_TO_GOOD = [{"name": "X402_PAY_TO_ADDRESS", "value": GOOD_ADDR}]
 _PAY_TO_SHORT = [{"name": "X402_PAY_TO_ADDRESS", "value": SHORT_ADDR}]
@@ -279,3 +283,39 @@ def test_preflight_runs_before_the_deploy(tmp_path):
 
 if __name__ == "__main__":
     sys.exit(subprocess.call([sys.executable, "-m", "pytest", __file__, "-q"]))
+
+
+def test_an_unaffirmed_pay_to_address_is_stripped_not_deployed(tmp_path):
+    """0x2b3b... sat deployed on this service as X402_PAY_TO_ADDRESS and the
+    owner does not recognise it. It is 0x + 40 hex, so every shape gate in
+    this repo said yes -- shape is not ownership.
+
+    It is REMOVED rather than blocking the deploy: refusing would leave the
+    running revision advertising it, so stopping is the option that points
+    money at a stranger for longer.
+    """
+    result = _run(tmp_path, env=[{"name": "X402_PAY_TO_ADDRESS",
+                                  "value": UNAFFIRMED_ADDR}])
+    assert "NOBODY HERE HOLDS THE KEY TO" in result.stdout
+    updates = [ln for ln in result.stdout.splitlines() if "UPDATE_INVOKED" in ln]
+    assert updates, result.stdout
+    assert "--remove-env-vars" in updates[0]
+    assert "X402_PAY_TO_ADDRESS" in updates[0]
+    assert "X402_FACILITATOR_URL" in updates[0]
+    assert "DEPLOY_INVOKED" in result.stdout
+
+
+def test_an_unaffirmed_tempo_recipient_is_stripped_too(tmp_path):
+    result = _run(tmp_path, env=[{"name": "MPP_TEMPO_RECIPIENT_ADDRESS",
+                                  "value": UNAFFIRMED_ADDR}])
+    assert "nobody here holds the key" in result.stdout
+    updates = [ln for ln in result.stdout.splitlines() if "UPDATE_INVOKED" in ln]
+    assert "MPP_TEMPO_RECIPIENT_ADDRESS" in updates[0]
+
+
+def test_a_recipient_the_owner_controls_is_left_alone(tmp_path):
+    """The guard must refuse two named addresses, not become a third gate that
+    strips the wallet this rail exists to pay into."""
+    result = _run(tmp_path, env=[{"name": "X402_PAY_TO_ADDRESS", "value": GOOD_ADDR}])
+    assert "NOBODY HERE HOLDS THE KEY TO" not in result.stdout
+    assert "DEPLOY_INVOKED" in result.stdout

@@ -9,7 +9,85 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-01: both rails go live in ONE command, and no gate will re-bless `0x2b3b…`
+
+Two things, and the second is the one that had teeth.
+
+**`scripts/go-live.sh` turns on every rail that can settle, in one deploy.**
+
+```bash
+bash scripts/go-live.sh
+```
+
+There were already two go-live scripts, one per rail, and each ends by
+exec'ing `repair-and-deploy.sh`. Running both meant two source deploys, two
+waits, and a window in between where one rail was live and the other was in
+whatever state the first script left it. The new script resolves both
+recipients first, writes them in a single `services update`, and deploys once.
+
+- **x402** defaults to the owner's affirmed Base wallet
+  (`0x837C…77dd`) — no address to paste on a phone. `X402_PAY_TO_ADDRESS=0x…`
+  overrides it.
+- **mpp-tempo** reuses a usable recipient already on the service, else mints a
+  Stripe crypto deposit address. `MPP_TEMPO_RECIPIENT_ADDRESS=0x…` skips
+  minting.
+- **The rails are independent.** A failed Stripe mint leaves tempo off and
+  still takes x402 live — an all-or-nothing script would trade the revenue on
+  one rail for tidiness. `RAILS=x402` / `RAILS=tempo` narrows it.
+- mpp-stripe is absent by design: Stripe's SPT floor is 50c and no route here
+  is close. That is gated on the amount in code, not on a deploy.
+
+**Shape is not ownership, and three gates were still saying otherwise.**
+
+`0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256` is `0x` + 40 hex. It is not the
+zero address. It passes the #46 guard, the preflight, and every check in this
+repo — and the owner does not recognise it. It was sitting deployed as
+`X402_PAY_TO_ADDRESS`, which is why the entry below turns the rail off.
+
+The part nobody had noticed: **a bare `bash scripts/go-live-x402.sh` would
+have put it straight back.** That script reuses whatever is deployed if it is
+well-formed — `ok "already set and well-formed"` — and only an explicit
+override replaces it. So the documented recovery command was safe, and the
+undocumented one silently re-blessed a stranger's wallet. Same failure as the
+zero address exactly: a format check answering a question nobody asked.
+
+Both that address and the test-suite constant `0x32b08c…22bc` (which exists to
+make the rail inspectable on a local boot, and whose key nobody holds) are now
+named and refused in all three places that can put an address on a revision:
+
+| | on finding one |
+|---|---|
+| `go-live.sh` | refuses it, uses the affirmed wallet instead |
+| `go-live-x402.sh` | refuses it, mints or takes an override instead |
+| `repair-and-deploy.sh` | **strips** `X402_PAY_TO_ADDRESS` + the facilitator |
+
+`repair-and-deploy.sh` removes rather than refuses, and the reasoning is the
+opposite way round from the malformed case: refusing leaves the *running*
+revision advertising the address, so stopping is the option that keeps money
+pointed at a stranger for longer. Stripping it turns the rail off on the next
+revision — which is exactly the manual `--remove-env-vars` command below,
+now automatic.
+
+One fixture had to move: `tests/test_preflight.py` used `0x32b08c…` as its
+*good* address. Keeping it would have asserted the opposite of what the script
+now does.
+
+23 tests, each proved by reintroducing the bug and watching it go red —
+including the pre-fix "reuse it if it's well-formed" branch, which turns the
+replacement test red on its own. Suite: **491 passed, 1 skipped** (468 on
+`main` before this; the 487 in circulation is PR #75's branch, not `main`).
+
+**Still true, and this changes none of it:** nothing has been deployed, no
+rail is live, and no payment has ever been made. This shortens the command
+that changes that from three to one.
+
 ## 2026-08-29: the x402 recipient is UNIDENTIFIED. Turn the rail off.
+
+**Superseded twice — read the 2026-09-01 entry above and the "recipient is
+RESOLVED" entry below first.** The address is still unidentified and still
+must never be advertised; what changed is that the rail no longer has to stay
+off to achieve that (there is an affirmed wallet), and that turning it off is
+no longer a command anyone has to remember.
 
 Read this before touching anything about x402.
 
