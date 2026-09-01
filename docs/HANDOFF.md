@@ -9,6 +9,47 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-01: OWNER FACT — Stripe does NOT do x402. Stripe does MPP.
+
+Stated by the owner. It is a fact about what Stripe sells, not a preference,
+so do not re-derive it, and do not open a Stripe support thread about x402:
+
+> No, stripe does not do the four zero two. You have to do that somewhere
+> else. Stripe will... you have to go get that facilitated somewhere else.
+> Stripe will only do the MPP.
+
+The split is now clean and there is nothing left in the repo arguing
+otherwise:
+
+| | who runs it | recipient | money ends up |
+|---|---|---|---|
+| **MPP** (`tempo`, `stripe`) | Stripe | Stripe-custodied deposit address | Stripe balance |
+| **x402** | a facilitator (xpay.sh) | a Base wallet you hold the key to | on-chain, yours |
+
+**Two live traps were removed, and the first one was sitting directly in the
+go-live path.**
+
+1. `go-live-x402.sh` minted a Stripe-custodied Base deposit address whenever
+   no pay-to was set, and when that failed its error said *"ask Stripe support
+   to turn on machine payments / x402"*. That is advice for a product Stripe
+   does not sell, so following it costs a support thread that cannot resolve —
+   the same shape of wrong diagnosis that already cost this project weeks on
+   the CDP business review. The mint is gone; with no address it now names the
+   fact and stops. An address supplied by hand is also read *first* now,
+   because a step that can only fail must not run ahead of one that succeeds.
+2. `scripts/x402-setup.py` opened by arguing *"why route x402 through Stripe
+   rather than your own wallet"* and defaulted to `--network base`. Both were
+   wrong, and the name made it hard to notice. It now defaults to `tempo`,
+   prints `MPP_TEMPO_RECIPIENT_ADDRESS`, and says plainly what it is not for.
+   The filename is kept so `git log` stays followable.
+
+**What this does NOT change:** the tempo mint in `go-live.sh` is untouched and
+still correct — `/v1/crypto/deposit_addresses` is Stripe's, and MPP tempo is
+Stripe's rail. What died is using that endpoint to produce an *x402* pay-to.
+
+**And the consequence already recorded below still holds, now for a second
+reason:** x402 revenue will not appear in Stripe. The wallet is the counter.
+
 ## 2026-09-01: both rails go live in ONE command, and no gate will re-bless `0x2b3b…`
 
 Two things, and the second is the one that had teeth.

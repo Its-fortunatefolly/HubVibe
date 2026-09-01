@@ -198,3 +198,28 @@ def test_an_affirmed_address_still_goes_through(tmp_path):
     result = _drive(tmp_path, env={"X402_PAY_TO_ADDRESS": OWNER_WALLET})
     assert f"X402_PAY_TO_ADDRESS={OWNER_WALLET}" in result.stdout
     assert "DEPLOY_HANDOFF" in result.stdout
+
+
+def test_it_never_tries_to_mint_an_x402_address_from_stripe(tmp_path):
+    """Stripe does MPP, not x402. The old fallback minted a Stripe-custodied
+    deposit address here and, when that failed, told you to ask Stripe support
+    to enable machine payments -- advice for a product Stripe does not sell.
+    Following it costs a support thread that cannot resolve, which is the same
+    shape of wrong diagnosis that already cost weeks on the CDP review.
+
+    With no address anywhere, the script must say so and stop, not reach for
+    Stripe.
+    """
+    result = _drive(tmp_path, live_pay_to="")
+    assert "Stripe does not do x402" in result.stdout
+    assert "self-custody" in result.stdout
+    assert "support" not in result.stdout.lower()
+    assert "UPDATE_INVOKED" not in result.stdout
+    assert "DEPLOY_HANDOFF" not in result.stdout
+
+
+def test_the_stripe_key_is_not_even_read_for_x402(tmp_path):
+    """Reading the Stripe secret at all implies Stripe has a role on this rail.
+    It does not -- the key is for MPP, and go-live.sh reads it there."""
+    text = SCRIPT.read_text()
+    assert "x402-setup.py" not in text
