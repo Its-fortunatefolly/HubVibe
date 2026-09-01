@@ -6,6 +6,9 @@ leaves it advertised and unpayable -- so the properties that stop those are
 worth pinning even though the script itself needs live gcloud to run.
 """
 
+import json
+import os
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -17,8 +20,6 @@ def _text() -> str:
 
 
 def test_the_script_exists_and_is_valid_bash():
-    import subprocess
-
     assert SCRIPT.is_file()
     subprocess.run(["bash", "-n", str(SCRIPT)], check=True, capture_output=True)
 
@@ -115,10 +116,6 @@ def test_it_does_not_mint_a_revision_just_to_rewrite_identical_variables():
 # than reading it: the branch order is the whole behaviour, and a well-formed
 # unaffirmed address must lose to the "replace it" path, not to "already set".
 
-import json
-import os
-import subprocess as _sp
-
 UNRECOGNISED = "0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256"
 TEST_CONSTANT = "0x32b08c5e927c69877d0fcab35618c265674922bc"
 OWNER_WALLET = "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"
@@ -165,7 +162,7 @@ def _drive(tmp_path, live_pay_to="", env=None):
     if env:
         full_env.update(env)
 
-    return _sp.run(
+    return subprocess.run(
         ["bash", str(fake_repo / "scripts" / "go-live-x402.sh")],
         capture_output=True, text=True, env=full_env, timeout=60,
     )
