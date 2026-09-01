@@ -9,6 +9,34 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-01: the $100 of Anthropic credits cannot be refunded, so spend them on the bottleneck
+
+The owner topped up Anthropic API credits intending to buy a Claude
+subscription. That money cannot move and cannot come back: Anthropic's
+[Credit Terms](https://www.anthropic.com/legal/credit-terms) say credits
+"are non-refundable", and they expire one year from the purchase date. The
+only way to recover value is to spend them through the API.
+
+So they were given the one job that matches the actual constraint. Every
+rail on this node can be perfect and revenue stays zero while nobody
+arrives; `scripts/prospect_scan.py` already turns the paid audit into
+ranked evidence, and `scripts/draft_outreach.py` now turns that evidence
+into a sendable email per prospect. At published rates the credits cover
+roughly 11,000 drafts on the default model batched, or ~50,000 on Haiku
+4.5 batched — the model is a flag because that is a budget decision, and
+the run prints its estimate before it spends anything.
+
+The drafter's real content is its refusal to ship. The reason an audit
+email gets read is that every line is checkable in thirty seconds; one
+inflated number and the recipient disproves us on their own site. So a
+draft is validated against the findings that actually fired and **held,
+not sent**, if it names a rule that did not fire on that site, states a
+number nobody measured, names none of their findings, or quotes a price.
+Held drafts are written into the report marked `HELD` — never dropped,
+because a silently missing prospect is a lead nobody works. Same
+fail-closed discipline as the payment rails, applied to claims instead of
+settlement.
+
 ## 2026-08-29: the x402 recipient is UNIDENTIFIED. Turn the rail off.
 
 Read this before touching anything about x402.
