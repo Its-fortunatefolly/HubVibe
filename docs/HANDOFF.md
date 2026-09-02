@@ -9,6 +9,94 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: the first paid call could NOT have been constructed — x402 client arity
+
+Found by booting the service locally and running `first-paid-call.sh` against
+it with an unfunded throwaway key. It died before any signature existed:
+
+```
+HubVibeError: Could not construct an x402 payment:
+  x402HTTPClientSync.handle_402_response() missing 1 required
+  positional argument: 'request_url'
+```
+
+Both signatures read off the installed packages, not from memory:
+
+| x402 | `handle_402_response` |
+|---|---|
+| **2.18.0** — pinned in both `requirements.txt` | `(headers, body)` |
+| **2.21.0** | `(headers, body, request_url)` — **required** |
+
+`integrations/hubvibe_tollbooth.py` passed two arguments unconditionally.
+
+**Why the pin did not protect the thing that spends money.**
+`scripts/first-paid-call.sh` shells out to bare `python3`, which resolves to
+whatever x402 the machine has rather than the pinned one — in the build
+sandbox, 2.21.0. And this module *ships to agent authors* who install x402
+themselves. So the one script whose whole job is the first real payment, and
+every third-party agent, ran on an unpinned client.
+
+**And the failure shape is the one this file already has three entries about.**
+The TypeError is raised inside the caller's process, before a signature
+exists. Nothing reaches the facilitator, nothing lands on-chain, and from the
+server side it is pixel-identical to nobody buying — #61 rebuilt, one layer
+out.
+
+Fixed in `_sign_402()`: the arity is read off the installed callable with
+`inspect.signature` and `request_url` passed only when the parameter exists.
+Introspection rather than `except TypeError`, because a TypeError raised from
+*inside* the library would otherwise be retried with different arguments and
+misreported as an arity problem.
+
+Proved twice by mutation — pinning it to two arguments turns the 2.21 test
+red; to three arguments turns three tests red, including the pre-existing
+payment test.
+
+**What the live re-run does and does not show.** The same
+`first-paid-call.sh` invocation now gets past construction: a signature is
+produced, sent, and the node answers 402 again. The failure moved from
+*"could not construct an x402 payment"* to *"payment was rejected"*, which is
+the only claim this run supports. **Why it was rejected is NOT established**
+— the sandbox cannot reach `facilitator.xpay.sh` (the Base RPC check in the
+same run failed with URLError), so the node's verify call cannot have
+succeeded and the rail correctly failed closed. Do not read the rejection as
+evidence about the wallet, the facilitator, or settlement. An earlier draft
+of this entry attributed it to the unfunded wallet; that was a guess and the
+log does not support it.
+
+**Not proven, and still only money can prove it:** that a funded payment
+settles. Construction was the blocker; settlement is still untested.
+
+## 2026-09-02: `go-live.sh` ran against the live node — 37 passed, 0 failed
+
+The owner ran, from Cloud Shell, on `main` @ `2d0af7c`:
+
+```bash
+cd ~/HubVibe-deploy4 && git fetch origin main && git reset --hard origin/main && bash scripts/go-live.sh
+```
+
+then `bash scripts/verify-live.sh` → **37 passed, 0 failed**. That is the
+first run of the one-command go-live against the deployed service, and the
+first clean checker run since the rails were reconfigured.
+
+**Do not turn 37 into a threshold.** A previous session told the owner that
+"under 38 checks is a stale checkout" — a number that was never counted and
+does not exist. The checker's total is `PASSES + FAILURES`: it is however many
+checks *executed*, and that moves with which rails are configured (36 was the
+x402-off total; x402 being on runs more). A count compared against a
+remembered constant is exactly the reasoning this file already warns about
+twice, applied to the checker instead of the service.
+
+**The staleness signal is the checker's own, and it is not a number.**
+`verify-live.sh` fetches `origin/main` and prints a red `STALE CHECKOUT  this
+copy is N commit(s) behind` banner, plus `This was the OLD checker` after the
+totals. Read for that banner. Its absence is the proof the run is current;
+the integer is not.
+
+**Still unproven, and only money proves it:** whether a payment settles. A
+green checker means the 402 is well-formed and the rails are advertised —
+never that anything paid. Revenue is still zero.
+
 ## 2026-09-01: OWNER FACT — Stripe does NOT do x402. Stripe does MPP.
 
 Stated by the owner. It is a fact about what Stripe sells, not a preference,
