@@ -50,9 +50,19 @@ misreported as an arity problem.
 
 Proved twice by mutation — pinning it to two arguments turns the 2.21 test
 red; to three arguments turns three tests red, including the pre-existing
-payment test. Then proved for real: the same `first-paid-call.sh` invocation
-now constructs and signs the payment and is rejected downstream for an
-unfunded wallet, which is the correct place for an unfunded wallet to fail.
+payment test.
+
+**What the live re-run does and does not show.** The same
+`first-paid-call.sh` invocation now gets past construction: a signature is
+produced, sent, and the node answers 402 again. The failure moved from
+*"could not construct an x402 payment"* to *"payment was rejected"*, which is
+the only claim this run supports. **Why it was rejected is NOT established**
+— the sandbox cannot reach `facilitator.xpay.sh` (the Base RPC check in the
+same run failed with URLError), so the node's verify call cannot have
+succeeded and the rail correctly failed closed. Do not read the rejection as
+evidence about the wallet, the facilitator, or settlement. An earlier draft
+of this entry attributed it to the unfunded wallet; that was a guess and the
+log does not support it.
 
 **Not proven, and still only money can prove it:** that a funded payment
 settles. Construction was the blocker; settlement is still untested.
