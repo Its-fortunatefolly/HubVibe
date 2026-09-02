@@ -9,6 +9,57 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: the deploy REFUSED to run in a fresh Cloud Shell — and blamed a secret
+
+The second attempt of the night, read off the owner's screenshot:
+
+```
+==> Checking the Stripe secret exists before pointing anything at it
+  Available secrets:
+  STOP  no secret named SECRET_STRIPE_KEY. Re-run as:
+        STRIPE_SECRET_NAME=<one of the above> bash scripts/repair-and-deploy.sh
+```
+
+**Nothing was deployed.** The node stayed on the old image, so the
+`first-paid-call.sh` that followed could only repeat the earlier rejection,
+and the `gcloud logging read` that followed *that* was a 200-character line
+that arrived from a phone with a newline inside the filter and failed to
+parse. Three commands, zero information.
+
+The secret was never missing. **`repair-and-deploy.sh` made eight `gcloud`
+calls and none passed `--project`.** It inherited gcloud's default project,
+which the first Cloud Shell session of the night had and the second — a fresh
+one, after the first disconnected — did not. gcloud does not treat an unset
+project as an error: `secrets describe` fails, `secrets list` prints nothing,
+and the script read that empty list as "the secret you named is not among
+these" and stopped. The one deploy command could not run in a fresh shell,
+and its error pointed at the wrong thing.
+
+Fixed everywhere the pattern existed: `repair-and-deploy.sh` (8 calls),
+`go-live-x402.sh` (2), and `lib-api-key.sh` — which already threaded
+`project_args` through both of its calls but only filled it when `PROJECT`
+was exported, so `verify-live.sh`'s paid-path check inherited the same trap.
+All now default `PROJECT` to `resolver-time` and pass it explicitly.
+`repair-secrets.sh`, `measure-call-cost.sh`, `go-live.sh` and
+`go-live-mpp-tempo.sh` already did; a per-line grep undercounted the first
+two because their `--project` sits on a `\` continuation line, so the test
+joins continuations before counting. **The immediate unblock, on the current
+checkout, is one line:** `gcloud config set project resolver-time`.
+
+The secret check now tells the two faults apart: an *empty* secret list is
+reported as gcloud not seeing the project, with the `config set` line, rather
+than as a missing secret.
+
+Pinned by a static test over all seven scripts — "invocation" meaning
+`gcloud` in command position, not inside a message string — proved by
+removing one `--project` from the deploy line and watching it go red. Plus a
+driven test that the empty-list case names the project, not the secret.
+
+**Also:** `scripts/x402-log.sh` replaces the long `gcloud logging read` line.
+One short command, both payload shapes (`textPayload` and
+`jsonPayload.message`), and a "(none)" branch that says what none means.
+Untested against gcloud from the sandbox; `bash -n` clean.
+
 ## 2026-09-02: FIRST REAL PAYMENT ATTEMPTED — rejected, and the node threw the reason away
 
 The owner ran `first-paid-call.sh` against the deployed node from Cloud

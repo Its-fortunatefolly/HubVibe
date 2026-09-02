@@ -25,6 +25,11 @@ set -uo pipefail
 
 SERVICE="${SERVICE:-hubvibe}"
 REGION="${REGION:-us-south1}"
+# Passed to every gcloud call rather than inherited. A fresh Cloud Shell has
+# no default project, and gcloud's answer to "which project?" being unset is
+# not an error -- it is an empty list of secrets and a service that cannot be
+# found, which read as the secret being missing and the service being gone.
+PROJECT="${PROJECT:-resolver-time}"
 
 # Keyless, Base mainnet, zero fee. Chosen because it needs no business
 # verification: the Coinbase CDP facilitator is gated on a review that asks
@@ -67,7 +72,7 @@ trap 'rm -f "$SVC_JSON"' EXIT
 step "Reading the live service"
 # --format=json, never flattened: flattened pads names with alignment spaces,
 # so every grep against it silently matches nothing. That shipped three times.
-gcloud run services describe "$SERVICE" --region="$REGION" --format=json > "$SVC_JSON" 2>/dev/null \
+gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format=json > "$SVC_JSON" 2>/dev/null \
   || die "cannot read $SERVICE in $REGION. Wrong project, or not authenticated?"
 ok "read $SERVICE in $REGION"
 
@@ -178,7 +183,7 @@ if [ ${#UPDATE_ARGS[@]} -eq 0 ]; then
   ok "both variables already correct"
 else
   IFS=','; JOINED="${UPDATE_ARGS[*]}"; unset IFS
-  gcloud run services update "$SERVICE" --region="$REGION" \
+  gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" \
     --update-env-vars="$JOINED" \
     || die "setting the variables failed -- the running revision is untouched"
   ok "variables set"
