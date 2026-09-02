@@ -361,7 +361,14 @@ case "$BAL" in
     ok "$(printf '%s' "$BAL" | cut -d'|' -f2) holds \$$(printf '%s' "$BAL" | cut -d'|' -f3) USDC"
     ;;
   SKIP*)
+    # The RPC has failed from Cloud Shell on every run so far (HTTPError from
+    # mainnet.base.org), which left "is the wallet funded?" as the one open
+    # question after two rejected attempts. When this script cannot answer
+    # it, hand the human the page that can -- one tap on a phone, no gcloud.
+    SKIP_ADDR=$(printf '%s' "$BAL" | cut -d'|' -f2)
     warn "$(printf '%s' "$BAL" | cut -d'|' -f3)"
+    warn "check the balance yourself before reading a rejection as anything else:"
+    warn "  https://basescan.org/address/$SKIP_ADDR"
     ;;
   FAIL\|0x*)
     WALLET_ADDR=$(printf '%s' "$BAL" | cut -d'|' -f2)
