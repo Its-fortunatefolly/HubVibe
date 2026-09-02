@@ -51,6 +51,7 @@ configuration this must not make easy.
 
 from __future__ import annotations
 
+import inspect
 import os
 import threading
 from typing import Any, Optional
@@ -210,6 +211,40 @@ class HubVibeTollbooth:
         with self._lock:
             self._spent_usd = max(0.0, self._spent_usd - price_usd)
 
+    def _sign_402(self, response: httpx.Response, request_url: str):
+        """Turn a 402 into payment headers, across x402 client versions.
+
+        x402 2.21 added a REQUIRED third parameter, `request_url`, to
+        `handle_402_response`. 2.18 -- the version this repo pins -- does not
+        accept it. Calling with the wrong arity raises TypeError *before* any
+        signature exists, so the caller sees "could not construct an x402
+        payment" with nothing on-chain to inspect and no facilitator involved:
+        the exact silent-bounce shape that made revenue look like absent demand
+        in #61.
+
+        The pin protects the service, but not the two places that matter most
+        here. `scripts/first-paid-call.sh` shells out to bare `python3`, which
+        resolves to whatever x402 the machine has rather than the pinned one --
+        and this module ships to agent authors who install x402 themselves.
+        Both must work on either version, so the arity is read off the
+        installed callable instead of assumed.
+
+        Introspection rather than `except TypeError`: a TypeError raised from
+        *inside* the library would otherwise be silently retried with different
+        arguments and reported as an arity problem.
+        """
+        handler = self._http_client.handle_402_response
+        args = [dict(response.headers), response.content]
+        try:
+            takes_url = "request_url" in inspect.signature(handler).parameters
+        except (TypeError, ValueError):
+            # A callable with no introspectable signature (a C function, some
+            # mocks). Fall back to the pinned 2.18 arity rather than guess.
+            takes_url = False
+        if takes_url:
+            args.append(request_url)
+        return handler(*args)
+
     @staticmethod
     def _challenge_price_usd(body: Any, fallback: float) -> float:
         """The price the 402 actually asked for, in USD.
@@ -257,8 +292,8 @@ class HubVibeTollbooth:
             price_usd = self._challenge_price_usd(self._safe_json(response), price_hint)
             self._reserve(price_usd)
             try:
-                pay_headers, _payload = self._http_client.handle_402_response(
-                    dict(response.headers), response.content
+                pay_headers, _payload = self._sign_402(
+                    response, f"{self.base_url}{path}"
                 )
             except Exception as exc:
                 # No signature was produced, so no money moved.

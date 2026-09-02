@@ -9,6 +9,54 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: the first paid call could NOT have been constructed — x402 client arity
+
+Found by booting the service locally and running `first-paid-call.sh` against
+it with an unfunded throwaway key. It died before any signature existed:
+
+```
+HubVibeError: Could not construct an x402 payment:
+  x402HTTPClientSync.handle_402_response() missing 1 required
+  positional argument: 'request_url'
+```
+
+Both signatures read off the installed packages, not from memory:
+
+| x402 | `handle_402_response` |
+|---|---|
+| **2.18.0** — pinned in both `requirements.txt` | `(headers, body)` |
+| **2.21.0** | `(headers, body, request_url)` — **required** |
+
+`integrations/hubvibe_tollbooth.py` passed two arguments unconditionally.
+
+**Why the pin did not protect the thing that spends money.**
+`scripts/first-paid-call.sh` shells out to bare `python3`, which resolves to
+whatever x402 the machine has rather than the pinned one — in the build
+sandbox, 2.21.0. And this module *ships to agent authors* who install x402
+themselves. So the one script whose whole job is the first real payment, and
+every third-party agent, ran on an unpinned client.
+
+**And the failure shape is the one this file already has three entries about.**
+The TypeError is raised inside the caller's process, before a signature
+exists. Nothing reaches the facilitator, nothing lands on-chain, and from the
+server side it is pixel-identical to nobody buying — #61 rebuilt, one layer
+out.
+
+Fixed in `_sign_402()`: the arity is read off the installed callable with
+`inspect.signature` and `request_url` passed only when the parameter exists.
+Introspection rather than `except TypeError`, because a TypeError raised from
+*inside* the library would otherwise be retried with different arguments and
+misreported as an arity problem.
+
+Proved twice by mutation — pinning it to two arguments turns the 2.21 test
+red; to three arguments turns three tests red, including the pre-existing
+payment test. Then proved for real: the same `first-paid-call.sh` invocation
+now constructs and signs the payment and is rejected downstream for an
+unfunded wallet, which is the correct place for an unfunded wallet to fail.
+
+**Not proven, and still only money can prove it:** that a funded payment
+settles. Construction was the blocker; settlement is still untested.
+
 ## 2026-09-02: `go-live.sh` ran against the live node — 37 passed, 0 failed
 
 The owner ran, from Cloud Shell, on `main` @ `2d0af7c`:
