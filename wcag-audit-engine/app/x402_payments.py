@@ -600,6 +600,12 @@ def accepts_entry(price: Optional[str] = None, resource_url: Optional[str] = Non
     network = _V1_NETWORK_NAMES.get(_NETWORK)
     if network is None:
         return None
+    # Only offer v1 if the facilitator will take a v1 payment under the
+    # legacy name. The symmetric case of the v2 gate: a v1-only body against
+    # a v2-only facilitator is a signature for a network the node cannot
+    # route.
+    if not _facilitator_supports(1, network):
+        return None
     return {
         "scheme": "exact",
         "network": network,
@@ -631,6 +637,72 @@ def _warn_unpayable_challenge(exc: Exception) -> None:
     )
 
 
+_unsupported_version_warned: set = set()
+
+
+def _warn_version_unsupported(version: int, network: str, why: str) -> None:
+    key = (version, network)
+    if key in _unsupported_version_warned:
+        return
+    _unsupported_version_warned.add(key)
+    logging.getLogger(__name__).warning(
+        "x402 v%s on %s will NOT be advertised: %s (facilitator=%s). A client "
+        "offered this version would sign a payment this node cannot verify, "
+        "and the failure would be a bare 402 with the facilitator never called.",
+        version, network, why, _FACILITATOR_URL,
+    )
+
+
+def _facilitator_supports(version: int, network: str) -> bool:
+    """Will the facilitator verify an `exact` payment of this x402 version on
+    this network? Read off its /supported -- cached by initialize() -- through
+    the library's own lookup, wildcards included.
+
+    Found by simulation, not by reading. Against a facilitator whose
+    /supported lists only the legacy v1 name ("base"), this node still sent
+    the v2 PAYMENT-REQUIRED header naming eip155:8453. A v2-capable client
+    took that offer and signed for eip155:8453; the node then raised
+    SchemeNotFoundError before the facilitator was ever called, and failed
+    closed into a bare 402 -- every time, whatever the wallet held. That is
+    the exact shape of the two rejected live attempts.
+
+    Advertising a version the node cannot verify is the same fault as
+    advertising a recipient that cannot receive. Fail-closed: any exception,
+    an unreachable facilitator included, is "no". A challenge nobody can pay
+    is worse than no challenge, because it reads as nobody buying.
+    """
+    try:
+        server = _get_server()
+        kind = server.get_supported_kind(version, network, "exact")
+        # Every verification, whichever version the client used, builds its
+        # requirements under the CAIP-2 name (_get_requirements ->
+        # build_payment_requirements(network=_NETWORK)), and the library only
+        # does that when the facilitator's /supported lists that exact name:
+        # ExactEvmServerScheme.parse_price("$0.03", "base") raises
+        # "Unsupported network format". So a facilitator that lists only the
+        # legacy name can be offered nothing -- not even v1 -- because the
+        # node could take the signature and never build the thing to verify
+        # it against. Simulated: v1 offered, v1 paid, SchemeNotFoundError
+        # for eip155:8453 before the facilitator was called.
+        caip2_listed = any(
+            server.get_supported_kind(v, _NETWORK, "exact") is not None for v in (1, 2)
+        )
+    except Exception as exc:
+        _warn_version_unsupported(version, network, f"{type(exc).__name__}: {exc}")
+        return False
+    if kind is None:
+        _warn_version_unsupported(version, network, "not in the facilitator's /supported")
+        return False
+    if not caip2_listed:
+        _warn_version_unsupported(
+            version, network,
+            f"the facilitator lists {network!r} but not {_NETWORK!r}, and this "
+            f"server library can only build requirements under the CAIP-2 name",
+        )
+        return False
+    return True
+
+
 def payment_required_header(
     price: Optional[str] = None,
     resource_url: Optional[str] = None,
@@ -651,6 +723,10 @@ def payment_required_header(
     for either, so a v1-only node is at best an anonymous row.
     """
     if not is_configured():
+        return {}
+    # Only offer v2 if the facilitator will take a v2 payment on this network.
+    # Otherwise a v2 client signs for a network the node cannot verify.
+    if not _facilitator_supports(2, _NETWORK):
         return {}
     resolved = price or _PRICE
     try:
