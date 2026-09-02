@@ -36,10 +36,17 @@ CANDIDATES=(
 )
 [ "$#" -gt 0 ] && CANDIDATES+=("$@")
 
-# The network this service charges on. An x402 v1 client registers schemes
-# under the LEGACY name ("base"), while v2 and /supported use CAIP-2
-# ("eip155:8453") -- a facilitator may answer in either vocabulary, so both
-# count as a match.
+# The network this service charges on, in the ONE vocabulary that counts.
+#
+# This used to accept either the CAIP-2 name ("eip155:8453") or the legacy
+# v1 name ("base") as a match. Simulation against a stub facilitator that
+# lists only the legacy name showed why that was wrong: the x402 server
+# library builds every payment's requirements under the CAIP-2 name and
+# only does so when the facilitator's /supported lists that exact name
+# (ExactEvmServerScheme.parse_price("$0.03", "base") raises "Unsupported
+# network format"). Against a legacy-only facilitator the node can verify
+# nothing -- v1 or v2 -- and, since #82, correctly advertises nothing.
+# So a legacy-only answer is reported as what it is: unusable here.
 WANT_CAIP="eip155:8453"
 WANT_LEGACY="base"
 
@@ -55,7 +62,7 @@ fetch() {
 
 echo
 bold "Probing x402 facilitators for Base-mainnet settlement + a Bazaar index"
-echo "  want network: $WANT_CAIP (or legacy \"$WANT_LEGACY\"), scheme \"exact\""
+echo "  want network: $WANT_CAIP, scheme \"exact\" (the legacy \"$WANT_LEGACY\" alone is unusable)"
 echo
 
 WINNERS=()
@@ -72,10 +79,15 @@ for base in "${CANDIDATES[@]}"; do
   settles="no"
   case "$code" in
     200)
-      if printf '%s' "$body" | grep -q "$WANT_CAIP" ||
-         printf '%s' "$body" | grep -qE "\"network\"[: ]*\"$WANT_LEGACY\""; then
+      if printf '%s' "$body" | grep -q "$WANT_CAIP"; then
         settles="yes"
-        printf '  /supported            %s  Base mainnet listed\n' "$(green PASS)"
+        printf '  /supported            %s  Base mainnet listed as %s\n' "$(green PASS)" "$WANT_CAIP"
+      elif printf '%s' "$body" | grep -qE "\"network\"[: ]*\"$WANT_LEGACY\""; then
+        # Looks like Base, is not usable: this server library cannot build
+        # requirements under the legacy name. Say so, distinctly, so nobody
+        # reads "Base is listed" and deploys against it.
+        printf '  /supported            %s  legacy name only ("%s") -- this server library builds\n' "$(red FAIL)" "$WANT_LEGACY"
+        printf '                              requirements under %s and cannot use this facilitator\n' "$WANT_CAIP"
       else
         printf '  /supported            %s  200, but Base mainnet not offered\n' "$(red FAIL)"
       fi
