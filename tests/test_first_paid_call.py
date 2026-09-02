@@ -344,3 +344,17 @@ def test_the_self_payment_refusal_is_overridable(tmp_path):
     )
     assert "self-transfer, allowed by override" in result.stdout
     assert "The paying wallet IS the recipient" not in result.stdout
+
+
+def test_an_unreadable_balance_hands_over_the_basescan_link(tmp_path):
+    """The Base RPC has failed from Cloud Shell on every run so far, and the
+    script proceeds without the check -- so a rejection cannot be told apart
+    from an empty wallet. When the script cannot answer that question it must
+    hand over the page that can, for the exact paying address."""
+    from eth_account import Account
+
+    result = _drive(tmp_path, wallet_key=KEY_B, pay_to=ADDR_A,
+                    extra_env={"BASE_RPC": "http://127.0.0.1:9"})
+    payer = Account.from_key(KEY_B).address
+    assert "proceeding without the check" in result.stdout
+    assert f"https://basescan.org/address/{payer}" in result.stdout

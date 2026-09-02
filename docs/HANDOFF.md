@@ -9,6 +9,22 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: when the balance check cannot run, hand over the Basescan link
+
+The Base RPC (`mainnet.base.org`) has answered `HTTPError` from Cloud Shell on
+every `first-paid-call.sh` run so far, so the script proceeded blind each
+time and "is the paying wallet funded?" stayed the one open question after
+two rejected attempts. It now prints
+`https://basescan.org/address/<paying address>` on that branch. One tap on a
+phone, no gcloud. A rejection is not to be read as anything else until that
+page has been looked at. Proved by removing the line → the test goes red.
+
+**Also from the 1:33 screenshot:** the owner's phone keyboard substitutes
+`ø` for `o` in some pastes (`prøject`, `løg`, `ftrst-pald`), and `&&` chains
+split across lines. Commands to the owner: one per line, short, and checked
+for `ø` before enter. The `(resolver-time)` in the prompt means the project
+IS set; the `gcloud config set` error was the `ø`, not the config.
+
 ## 2026-09-02: consolidation — one go-live path, and a Stripe mirror that stops lying
 
 Owner's instruction: get rid of trash, solidify what works, be consistent.
