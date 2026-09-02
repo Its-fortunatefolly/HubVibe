@@ -18,6 +18,14 @@ set -uo pipefail
 
 SERVICE="${SERVICE:-hubvibe}"
 REGION="${REGION:-us-south1}"
+# Passed to EVERY gcloud call below, never inherited from gcloud config.
+# A fresh Cloud Shell has no default project, and gcloud treats that as an
+# empty answer rather than an error: `secrets describe` fails, `secrets list`
+# prints nothing, and this script then said "no secret named
+# SECRET_STRIPE_KEY" over a secret that exists -- and refused to deploy. That
+# happened on the second Cloud Shell session of the night, after the first
+# one (which had the project set) disconnected.
+PROJECT="${PROJECT:-resolver-time}"
 SOURCE_DIR="${SOURCE_DIR:-wcag-audit-engine}"
 
 # The Secret Manager secret holding the Stripe secret key. A revision was once
@@ -40,11 +48,22 @@ die()   { printf '  \033[31mSTOP\033[0m  %s\n' "$1"; exit 1; }
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not on PATH. Run this in Cloud Shell."
 
 step "Checking the Stripe secret exists before pointing anything at it"
-if gcloud secrets describe "$STRIPE_SECRET_NAME" >/dev/null 2>&1; then
+if gcloud secrets describe "$STRIPE_SECRET_NAME" --project="$PROJECT" >/dev/null 2>&1; then
   ok "secret $STRIPE_SECRET_NAME exists"
 else
+  AVAILABLE=$(gcloud secrets list --project="$PROJECT" --format='value(name)' 2>/dev/null)
+  if [ -z "$AVAILABLE" ]; then
+    # Zero secrets is not a project with no secrets -- this one has several.
+    # It is gcloud not seeing the project at all: wrong project id, or this
+    # account is not authorised on it. Saying "no secret named X" here sent
+    # the owner looking for a secret that was there the whole time.
+    die "gcloud lists NO secrets in project $PROJECT -- it is not seeing the project.
+        Check:  gcloud config list
+        Then:   gcloud config set project $PROJECT
+        If that is already right, this account may lack access to $PROJECT."
+  fi
   printf '\n  Available secrets:\n'
-  gcloud secrets list --format='value(name)' 2>/dev/null | sed 's/^/    /'
+  printf '%s\n' "$AVAILABLE" | sed 's/^/    /'
   die "no secret named $STRIPE_SECRET_NAME. Re-run as:
         STRIPE_SECRET_NAME=<one of the above> bash scripts/repair-and-deploy.sh"
 fi
@@ -57,7 +76,7 @@ step "Reading the service's current configuration"
 # revision 62 this way, and the docstring's promise that re-running "does not
 # create pointless revisions" was quietly false.
 SVC_JSON=/tmp/hv_svc.json
-gcloud run services describe "$SERVICE" --region="$REGION" \
+gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" \
   --format=json > "$SVC_JSON" 2>/dev/null
 [ -s "$SVC_JSON" ] || die "could not read service $SERVICE in $REGION"
 
@@ -211,11 +230,11 @@ fi
 
 if [ ${#UPDATE_ARGS[@]} -gt 0 ]; then
   step "Applying the configuration repair"
-  gcloud run services update "$SERVICE" --region="$REGION" "${UPDATE_ARGS[@]}" \
+  gcloud run services update "$SERVICE" --project="$PROJECT" --region="$REGION" "${UPDATE_ARGS[@]}" \
     || die "config repair failed -- nothing was deployed, the running revision is untouched"
   ok "configuration repaired"
   # The service just changed; the cached JSON is stale for preflight.
-  gcloud run services describe "$SERVICE" --region="$REGION" \
+  gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" \
     --format=json > "$SVC_JSON" 2>/dev/null
 else
   step "Configuration is already correct -- nothing to repair"
@@ -250,13 +269,13 @@ step "Preflight: checking the live environment"
 PREFLIGHT_FAILED=0
 
 # 1. Firestore. billing.lookup_key hits it on every keyed request.
-if gcloud firestore databases describe --database='(default)' \
+if gcloud firestore databases describe --database='(default)' --project="$PROJECT" \
      --format='value(name)' >/dev/null 2>&1; then
   ok "Firestore (default) database exists"
 else
   warn "no Firestore (default) database. Every API-key call will fail to"
   warn "authenticate, and checkout cannot store issued keys. Create it with:"
-  warn "  gcloud firestore databases create --location=$REGION"
+  warn "  gcloud firestore databases create --location=$REGION --project=$PROJECT"
   PREFLIGHT_FAILED=1
 fi
 
@@ -375,12 +394,12 @@ fi
 
 # 4. Idle billing. Not fatal, but it is pure loss at low volume and nothing
 #    else reports it.
-MIN_SCALE=$(gcloud run services describe "$SERVICE" --region="$REGION" \
+MIN_SCALE=$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" \
   --format='value(spec.template.metadata.annotations["autoscaling.knative.dev/minScale"])' 2>/dev/null)
 if [ -n "$MIN_SCALE" ] && [ "$MIN_SCALE" -gt 0 ] 2>/dev/null; then
   warn "min-instances=$MIN_SCALE: you are paying to keep an instance warm"
   warn "24/7. On a browser-sized container that is real money against zero"
-  warn "traffic. Set to 0 with: gcloud run services update $SERVICE --region=$REGION --min-instances=0"
+  warn "traffic. Set to 0 with: gcloud run services update $SERVICE --project=$PROJECT --region=$REGION --min-instances=0"
 fi
 
 if [ "$PREFLIGHT_FAILED" -ne 0 ]; then
@@ -391,7 +410,7 @@ fi
 ok "preflight passed"
 
 step "Deploying the current source"
-gcloud run deploy "$SERVICE" --source="$SOURCE_DIR" --region="$REGION" \
+gcloud run deploy "$SERVICE" --source="$SOURCE_DIR" --project="$PROJECT" --region="$REGION" \
   || die "deploy failed. The previous revision keeps serving; fix the error above and re-run."
 ok "deployed"
 

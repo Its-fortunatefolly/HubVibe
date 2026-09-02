@@ -25,6 +25,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "repair-and-deploy.sh"
 
@@ -319,3 +321,84 @@ def test_a_recipient_the_owner_controls_is_left_alone(tmp_path):
     result = _run(tmp_path, env=[{"name": "X402_PAY_TO_ADDRESS", "value": GOOD_ADDR}])
     assert "NOBODY HERE HOLDS THE KEY TO" not in result.stdout
     assert "DEPLOY_INVOKED" in result.stdout
+
+
+# --- every gcloud invocation names the project ------------------------------
+#
+# A fresh Cloud Shell has no default project. gcloud does not treat that as an
+# error: `secrets describe` fails, `secrets list` prints nothing, `run services
+# describe` finds nothing. repair-and-deploy.sh then reported "no secret named
+# SECRET_STRIPE_KEY" over a secret that exists, and refused to deploy -- on the
+# second Cloud Shell session of the night, after the first (which had the
+# project set) disconnected. The one deploy command could not run in a fresh
+# shell, and its error pointed at the wrong thing.
+#
+# "Invocation" here means gcloud in command position: at the start of a line,
+# after `if`/`!`, inside `$( )`, or after a pipe. A `gcloud` inside a string
+# printed for a human (a `die`/`warn` message) is not one. `gcloud auth` and
+# `gcloud config` are excluded: they are project-less by nature, and `config
+# set project` is precisely the human instruction the message carries.
+
+import re as _re
+
+_SCRIPTS_THAT_TOUCH_THE_PROJECT = [
+    "repair-and-deploy.sh",
+    "go-live.sh",
+    "lib-api-key.sh",
+    "repair-secrets.sh",
+    "measure-call-cost.sh",
+]
+
+_INVOCATION = _re.compile(r'^\s*(?:if\s+|!\s+|\w+=\$\(\s*|\|\s*)?gcloud\s+(\S+)')
+
+
+def _gcloud_invocations(text):
+    joined = text.replace("\\\n", " ")
+    for line in joined.splitlines():
+        m = _INVOCATION.match(line)
+        if not m:
+            continue
+        if m.group(1) in ("auth", "config"):
+            continue
+        yield line.strip()
+
+
+@pytest.mark.parametrize("name", _SCRIPTS_THAT_TOUCH_THE_PROJECT)
+def test_every_gcloud_invocation_names_the_project(name):
+    text = (REPO_ROOT / "scripts" / name).read_text()
+    invocations = list(_gcloud_invocations(text))
+    assert invocations, f"{name}: the invocation regex matched nothing -- check the test, not the script"
+    bare = [ln for ln in invocations
+            if "--project" not in ln and "project_args" not in ln]
+    assert not bare, f"{name}: gcloud invoked without --project:\n  " + "\n  ".join(bare)
+
+
+def test_the_deploy_script_defaults_the_project_rather_than_inheriting_it():
+    text = SCRIPT.read_text()
+    assert 'PROJECT="${PROJECT:-resolver-time}"' in text
+
+
+def test_an_empty_secret_list_is_reported_as_no_project_not_a_missing_secret(tmp_path):
+    """Zero secrets in this project is gcloud not seeing the project. Saying
+    "no secret named SECRET_STRIPE_KEY" there sent the owner looking for a
+    secret that was there the whole time."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gcloud").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$*" in\n'
+        '  *"secrets describe"*) exit 1 ;;\n'
+        '  *"secrets list"*) exit 0 ;;\n'   # prints nothing: no project
+        "  *) exit 0 ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gcloud").chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["SKIP_VERIFY"] = "1"
+    result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True,
+                            env=env, timeout=60)
+    assert "not seeing the project" in result.stdout
+    assert "gcloud config set project resolver-time" in result.stdout
+    assert "no secret named" not in result.stdout
+    assert "DEPLOY_INVOKED" not in result.stdout

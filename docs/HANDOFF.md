@@ -9,6 +9,85 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: consolidation — one go-live path, and a Stripe mirror that stops lying
+
+Owner's instruction: get rid of trash, solidify what works, be consistent.
+Only what had evidence went:
+
+- **`go-live-x402.sh`, `go-live-mpp-tempo.sh` → stubs.** Zero live
+  references outside themselves and this file's history; `go-live.sh`
+  replaced both with one deploy. Stubs, not deletions: a deleted script
+  produces "No such file" and a hunt — that cost a re-derivation once. Each
+  prints the replacement command and exits 1. Their 25 tests went with them;
+  the three guards only they held (API-version pin, no Stripe mint for x402,
+  the stubs themselves pointing here) now live in `tests/test_go_live.py`.
+- **`x402-setup.py` → stub.** Named for x402, argued for a Stripe-custodied
+  x402 pay-to, and Stripe does not do x402. What it minted, `go-live.sh`
+  mints inline for tempo.
+- **`record_settlement_in_stripe` is now opt-in (`X402_STRIPE_MIRROR=1`).**
+  On a self-custody pay-to it cannot succeed, and default-on it would have
+  logged a traceback on **every real payment** saying Stripe "will not show
+  it until this transaction hash is recorded" — false, on the day it is read.
+  Off: one INFO line saying the money is in the wallet. Proved by removing
+  the gate → the new test goes red.
+- The module docstring that still said the pay-to "is a Stripe-custodied
+  deposit address" now says where the money actually goes.
+- `SESSION_BRIEF.md` no longer names the stubbed script.
+
+Suite: **491 passed, 1 skipped** (514 − 25 deleted + 4 new − 2 parametrized
+cases). Lint gate 0. Sandbox: stray local servers killed, caches cleared.
+
+## 2026-09-02: the deploy REFUSED to run in a fresh Cloud Shell — and blamed a secret
+
+The second attempt of the night, read off the owner's screenshot:
+
+```
+==> Checking the Stripe secret exists before pointing anything at it
+  Available secrets:
+  STOP  no secret named SECRET_STRIPE_KEY. Re-run as:
+        STRIPE_SECRET_NAME=<one of the above> bash scripts/repair-and-deploy.sh
+```
+
+**Nothing was deployed.** The node stayed on the old image, so the
+`first-paid-call.sh` that followed could only repeat the earlier rejection,
+and the `gcloud logging read` that followed *that* was a 200-character line
+that arrived from a phone with a newline inside the filter and failed to
+parse. Three commands, zero information.
+
+The secret was never missing. **`repair-and-deploy.sh` made eight `gcloud`
+calls and none passed `--project`.** It inherited gcloud's default project,
+which the first Cloud Shell session of the night had and the second — a fresh
+one, after the first disconnected — did not. gcloud does not treat an unset
+project as an error: `secrets describe` fails, `secrets list` prints nothing,
+and the script read that empty list as "the secret you named is not among
+these" and stopped. The one deploy command could not run in a fresh shell,
+and its error pointed at the wrong thing.
+
+Fixed everywhere the pattern existed: `repair-and-deploy.sh` (8 calls),
+`go-live-x402.sh` (2), and `lib-api-key.sh` — which already threaded
+`project_args` through both of its calls but only filled it when `PROJECT`
+was exported, so `verify-live.sh`'s paid-path check inherited the same trap.
+All now default `PROJECT` to `resolver-time` and pass it explicitly.
+`repair-secrets.sh`, `measure-call-cost.sh`, `go-live.sh` and
+`go-live-mpp-tempo.sh` already did; a per-line grep undercounted the first
+two because their `--project` sits on a `\` continuation line, so the test
+joins continuations before counting. **The immediate unblock, on the current
+checkout, is one line:** `gcloud config set project resolver-time`.
+
+The secret check now tells the two faults apart: an *empty* secret list is
+reported as gcloud not seeing the project, with the `config set` line, rather
+than as a missing secret.
+
+Pinned by a static test over all seven scripts — "invocation" meaning
+`gcloud` in command position, not inside a message string — proved by
+removing one `--project` from the deploy line and watching it go red. Plus a
+driven test that the empty-list case names the project, not the secret.
+
+**Also:** `scripts/x402-log.sh` replaces the long `gcloud logging read` line.
+One short command, both payload shapes (`textPayload` and
+`jsonPayload.message`), and a "(none)" branch that says what none means.
+Untested against gcloud from the sandbox; `bash -n` clean.
+
 ## 2026-09-02: FIRST REAL PAYMENT ATTEMPTED — rejected, and the node threw the reason away
 
 The owner ran `first-paid-call.sh` against the deployed node from Cloud
