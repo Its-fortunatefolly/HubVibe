@@ -28,6 +28,12 @@ def _load_main(monkeypatch, api_key="test-key"):
     spec = importlib.util.spec_from_file_location("wcag_audit_main", MAIN_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # The 402 builders ask the facilitator which x402 versions it will verify
+    # (x402_payments._facilitator_supports) and fail closed when it cannot be
+    # reached. facilitator.example does not exist. These tests are about the
+    # shape of the 402, not about the facilitator, so they answer "yes"; the
+    # gate itself is tested in test_x402_payments.py against a fake server.
+    monkeypatch.setattr(module.x402_payments, "_facilitator_supports", lambda version, network: True)
     return module
 
 
@@ -135,6 +141,7 @@ def test_mcp_json_lists_a_rail_once_it_can_settle(monkeypatch):
 
     module = _load_main(monkeypatch)
     monkeypatch.setattr(module.x402_payments, "is_configured", lambda: True)
+    monkeypatch.setattr(module.x402_payments, "_facilitator_supports", lambda version, network: True)
     monkeypatch.setattr(module.mpp_payments, "stripe_configured", lambda: False)
     monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
     monkeypatch.setattr(module.billing, "is_configured", lambda: False)
@@ -230,6 +237,7 @@ def test_402_advertises_x402_when_it_is_configured(monkeypatch):
     addr = "0x32b08c5e927c69877d0fcab35618c265674922bc"
     module = _load_main(monkeypatch)
     monkeypatch.setattr(module.x402_payments, "is_configured", lambda: True)
+    monkeypatch.setattr(module.x402_payments, "_facilitator_supports", lambda version, network: True)
     monkeypatch.setattr(module.x402_payments, "_PAY_TO_ADDRESS", addr)
 
     client = TestClient(module.app)
@@ -1135,6 +1143,9 @@ def load_main_fresh():
         spec = importlib.util.spec_from_file_location(unique, MAIN_PATH)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        # Same reason as in _load_main: the 402 shape tests are not about the
+        # facilitator, which does not exist here; fail-closed would hide x402.
+        module.x402_payments._facilitator_supports = lambda version, network: True
         return module
 
     yield _load

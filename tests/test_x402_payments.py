@@ -174,6 +174,7 @@ def test_payment_required_body_is_empty_when_unconfigured(monkeypatch):
 
 def test_payment_required_body_advertises_real_address_when_configured(monkeypatch):
     module = _load_x402(monkeypatch, pay_to=VALID_PAY_TO)
+    _install_fake_server(monkeypatch, module)
     body = module.payment_required_body(price="$0.03")
 
     assert body["payTo"] == VALID_PAY_TO
@@ -597,6 +598,7 @@ def test_the_documented_one_variable_swap_actually_works(monkeypatch):
     """The whole point: with the CDP key pair still mounted, changing only
     X402_FACILITATOR_URL must leave a working, advertised x402 rail."""
     module = _load_cdp(monkeypatch, url="https://facilitator.xpay.sh")
+    _install_fake_server(monkeypatch, module)
     assert module.is_configured(), "the rail stopped being advertised"
     assert module.accepts_entry(price="$0.03") is not None
 
@@ -671,6 +673,7 @@ def _validate_bazaar(extension: dict):
 
 def test_a_body_route_discovery_record_passes_the_facilitator_validator(monkeypatch):
     module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
     extension = module.bazaar_extension_for_body(
         input_example={"url": "https://example.com"},
         input_schema={
@@ -861,3 +864,92 @@ def test_the_stripe_mirror_is_off_unless_asked_for(monkeypatch, caplog):
     assert "will not appear in Stripe" in caplog.text
     assert "Traceback" not in caplog.text
     assert "recording it in Stripe failed" not in caplog.text
+
+
+# --- never advertise an x402 version the facilitator will not verify --------
+#
+# Found by simulation. Against a facilitator whose /supported lists only the
+# legacy v1 name ("base"), the node still sent the v2 PAYMENT-REQUIRED header
+# naming eip155:8453. A v2-capable client took the offer and signed for
+# eip155:8453; the node then raised SchemeNotFoundError before the facilitator
+# was called and failed closed into a bare 402 -- every time, whatever the
+# wallet held. The two rejected live attempts had exactly that shape.
+
+
+def _facilitator_that_supports(server, *versions):
+    """Stand in for the cached /supported: a kind exists only for `versions`."""
+    server.get_supported_kind = (
+        lambda version, network, scheme: object() if version in versions else None
+    )
+
+
+def test_the_v2_header_is_withheld_when_the_facilitator_is_v1_only(monkeypatch, caplog):
+    module = _load_x402(monkeypatch, facilitator="https://v1only.example")
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_that_supports(server, 1)
+
+    with caplog.at_level(logging.WARNING):
+        assert module.payment_required_header(price="$0.03") == {}
+    # v1 is still offered, so the rail stays payable for v1 clients.
+    assert module.accepts_entry(price="$0.03") is not None
+    assert "v2 on eip155:8453 will NOT be advertised" in caplog.text
+    assert "https://v1only.example" in caplog.text
+
+
+def test_the_v1_body_is_withheld_when_the_facilitator_is_v2_only(monkeypatch, caplog):
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_that_supports(server, 2)
+
+    with caplog.at_level(logging.WARNING):
+        assert module.accepts_entry(price="$0.03") is None
+    assert module.payment_required_header(price="$0.03") != {}
+    assert "v1 on base will NOT be advertised" in caplog.text
+
+
+def test_both_versions_are_offered_when_the_facilitator_supports_both(monkeypatch):
+    """The gate must refuse what cannot be verified, not become a third gate
+    on the normal case."""
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_that_supports(server, 1, 2)
+
+    assert module.accepts_entry(price="$0.03") is not None
+    assert "PAYMENT-REQUIRED" in module.payment_required_header(price="$0.03")
+
+
+def test_an_unreachable_facilitator_withholds_both_versions_and_says_so(monkeypatch, caplog):
+    """Fail-closed: a challenge nobody can pay reads as nobody buying."""
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+
+    def boom(version, network, scheme):
+        raise ConnectionError("facilitator down")
+
+    server.get_supported_kind = boom
+
+    with caplog.at_level(logging.WARNING):
+        assert module.payment_required_header(price="$0.03") == {}
+        assert module.accepts_entry(price="$0.03") is None
+    assert "ConnectionError: facilitator down" in caplog.text
+
+
+def test_a_legacy_only_facilitator_is_offered_nothing_and_the_log_says_why(monkeypatch, caplog):
+    """The library builds every verification's requirements under the CAIP-2
+    name and refuses the legacy one outright (parse_price("$0.03", "base")
+    raises "Unsupported network format"). So a facilitator listing only
+    "base" can be offered nothing -- not even v1 -- or the node takes a
+    signature it can never build the requirements to verify. Simulated:
+    v1 offered, v1 paid, SchemeNotFoundError for eip155:8453 with the
+    facilitator never called. That is the shape of the live rejections."""
+    module = _load_x402(monkeypatch, facilitator="https://legacy.example")
+    server = _install_fake_server(monkeypatch, module)
+    server.get_supported_kind = (
+        lambda version, network, scheme: object() if network == "base" else None
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert module.accepts_entry(price="$0.03") is None
+        assert module.payment_required_header(price="$0.03") == {}
+    assert "lists 'base' but not 'eip155:8453'" in caplog.text
+    assert "CAIP-2" in caplog.text

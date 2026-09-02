@@ -9,6 +9,63 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: SIMULATED THE REJECTION. The node advertised x402 versions it could not verify.
+
+Owner's instruction: stop looping, simulate, solve. Done with a stub
+facilitator on localhost that records every request the node sends it, the
+node booted with the live configuration, and `first-paid-call.sh` driving
+the real client. Nothing here is inferred; every line below was observed.
+
+**What the node was doing.** It sent the v2 `PAYMENT-REQUIRED` header
+(naming `eip155:8453`) on every 402, and the v1 body (naming the legacy
+`base`), regardless of what the facilitator's `/supported` listed. Against a
+facilitator that lists only the legacy name, a v2-capable client took the v2
+offer and signed for `eip155:8453`, and the node raised
+`SchemeNotFoundError: No scheme 'exact' registered for network 'eip155:8453'`
+**before the facilitator was called.** Fail-closed into a bare 402. Every
+time. Whatever the wallet held. That is the exact shape of both live
+rejections.
+
+**Why v1 could not save it either.** `_get_requirements()` always builds
+under the CAIP-2 name, and the library only does that when the facilitator's
+`/supported` lists that exact name: `ExactEvmServerScheme.parse_price("$0.03",
+"base")` raises `Unsupported network format`. So against a legacy-only
+facilitator this server library can verify **nothing** — offered v1, paid v1,
+same `SchemeNotFoundError`, facilitator never called. Not our bug to route
+around; a library constraint to respect.
+
+**The fix: never advertise a version the node cannot verify.**
+`_facilitator_supports(version, network)` asks the initialized server's own
+`get_supported_kind()` — read off the cached `/supported`, wildcards included
+— and additionally requires the CAIP-2 name to be listed at all. The v2
+header and the v1 body each go through it. Fail-closed on any exception. One
+WARNING per (version, network) naming the facilitator and the reason.
+
+Proved end to end against the stub, both ways:
+
+| facilitator lists | v2 header | v1 body | client | facilitator got |
+|---|---|---|---|---|
+| only `base` | withheld | withheld | **stops at preflight: "no payable x402 entry"** — nothing signed | nothing, correctly |
+| `base` + `eip155:8453` | sent | sent | pays v2 | `/verify`, and its reason lands in the node log |
+
+Six unit tests, each proved by removing its gate and watching it go red.
+Suite: **497 passed, 1 skipped.** Lint 0. Two app-test loaders now fake the
+gate, because `facilitator.example` does not exist and those tests are about
+the 402's shape.
+
+**What decides the live case, and only the owner can read it:**
+
+```bash
+curl -s https://facilitator.xpay.sh/supported
+```
+
+If that lists `eip155:8453` → the node will verify against it, and after this
+deploys a rejection carries the facilitator's own reason in
+`bash scripts/x402-log.sh`. If it lists only `base` → **xpay.sh cannot be
+used by this server library at all**, the node will (correctly) advertise
+no x402, and the facilitator has to change — `scripts/probe-facilitators.sh`
+checks exactly this for each candidate.
+
 ## 2026-09-02: when the balance check cannot run, hand over the Basescan link
 
 The Base RPC (`mainnet.base.org`) has answered `HTTPError` from Cloud Shell on
