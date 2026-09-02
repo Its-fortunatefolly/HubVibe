@@ -263,3 +263,50 @@ def test_the_stripe_key_is_read_not_typed():
     text = SCRIPT.read_text()
     assert "secrets versions access" in text
     assert "sk_live" not in text
+
+
+# --- guards that lived in the per-rail scripts' tests, now that those scripts
+# --- are stubs pointing here. Each pins something go-live.sh must keep doing.
+
+
+def test_the_stripe_api_version_is_pinned_and_overridable():
+    """The deposit-address endpoint is preview-only. An older version 404s it,
+    which reads as 'crypto is not enabled on this account' rather than 'wrong
+    version' -- a wrong diagnosis that has cost this project days before."""
+    text = SCRIPT.read_text()
+    assert "STRIPE_API_VERSION" in text
+    assert "2026-07-29.preview" in text
+    assert 'Stripe-Version: $STRIPE_API_VERSION' in text
+
+
+def test_nothing_is_ever_minted_for_x402():
+    """Stripe does MPP, not x402 (owner's fact). The one deposit-address mint
+    in this script is the tempo one. A second, for x402, would be a request
+    for a product Stripe does not sell -- and its failure message would send
+    someone to Stripe support about it."""
+    text = SCRIPT.read_text()
+    assert "x402-setup" not in text
+    mints = [ln for ln in text.splitlines() if "crypto/deposit_addresses" in ln]
+    assert len(mints) == 1, mints
+    networks = [ln.strip() for ln in text.splitlines() if '-d "network=' in ln]
+    assert networks == ['-d "network=$TEMPO_NETWORK" 2>&1)"'], networks
+
+
+def test_the_superseded_scripts_refuse_and_point_here():
+    """Deleted scripts produce 'No such file' and a hunt. Stubs produce the
+    replacement command. A shell history or an old handoff entry lands on the
+    right answer either way."""
+    for name in ("go-live-x402.sh", "go-live-mpp-tempo.sh"):
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts" / name)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 1, name
+        assert "superseded" in result.stdout, name
+        assert "bash scripts/go-live.sh" in result.stdout, name
+    result = subprocess.run(
+        ["python3", str(REPO_ROOT / "scripts" / "x402-setup.py")],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 1
+    assert "bash scripts/go-live.sh" in result.stderr

@@ -344,8 +344,6 @@ import re as _re
 _SCRIPTS_THAT_TOUCH_THE_PROJECT = [
     "repair-and-deploy.sh",
     "go-live.sh",
-    "go-live-x402.sh",
-    "go-live-mpp-tempo.sh",
     "lib-api-key.sh",
     "repair-secrets.sh",
     "measure-call-cost.sh",

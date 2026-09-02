@@ -23,13 +23,20 @@ Requires, at deploy time:
 - X402_NETWORK           CAIP-2 network id (default: "eip155:8453", Base mainnet)
 - X402_PRICE             default: "$0.03"
 
-Optional, and worth having: when STRIPE_SECRET_KEY is set and the pay-to
-address is a Stripe-custodied deposit address (scripts/x402-setup.py mints
-one), every settled payment is also recorded as a Stripe PaymentIntent in
-transaction_verification mode -- the pattern from Stripe's machine-payments
-sample. That is what makes on-chain revenue show up in the Stripe balance,
-reporting, and payouts instead of accumulating invisibly on an address.
-Recording failures never fail the payment; the money moved on-chain already.
+Where the money goes: X402_PAY_TO_ADDRESS is a self-custody Base wallet.
+Stripe does MPP, not x402 (owner's fact, 2026-09-01), so x402 revenue lands
+ON-CHAIN in that wallet and does not appear in the Stripe balance. The
+wallet is the counter. Do not read an unchanged Stripe balance as "no x402
+payments".
+
+Off by default: X402_STRIPE_MIRROR=1 enables recording each settled payment
+as a Stripe PaymentIntent in transaction_verification mode. That only works
+when the pay-to is a Stripe-custodied deposit address, which this deployment
+does not use -- against a self-custody wallet Stripe rejects every attempt,
+and the previous default-on behaviour would have logged a traceback saying
+"Stripe will not show it until this transaction hash is recorded" on every
+real payment. Recording failures never fail the payment either way; the
+money moved on-chain already.
 """
 
 import asyncio
@@ -815,15 +822,32 @@ def record_settlement_in_stripe(settle_result, requirements) -> None:
         if not tx_hash or not getattr(settle_result, "success", False):
             return
 
+        # Opt-in, because on this deployment it cannot succeed. The pay-to is a
+        # self-custody wallet and Stripe's transaction_verification only
+        # verifies transfers into a Stripe-custodied address, so every attempt
+        # would raise -- and the exception branch below would then log, on
+        # every real payment, that Stripe "will not show it until this
+        # transaction hash is recorded". A log line that is false on the one
+        # day someone reads it is worse than no line.
+        if os.environ.get("X402_STRIPE_MIRROR") != "1":
+            if not _record_disabled_logged:
+                _record_disabled_logged = True
+                logging.getLogger(__name__).info(
+                    "x402 settled on-chain; revenue is in the pay-to wallet %s "
+                    "and will not appear in Stripe (X402_STRIPE_MIRROR unset -- "
+                    "Stripe does MPP, not x402). The wallet is the counter.",
+                    _PAY_TO_ADDRESS,
+                )
+            return
+
         stripe_key = os.environ.get("STRIPE_SECRET_KEY")
         if not stripe_key:
             if not _record_disabled_logged:
                 _record_disabled_logged = True
                 logging.getLogger(__name__).warning(
-                    "x402 settlement succeeded but STRIPE_SECRET_KEY is not "
-                    "set, so on-chain revenue will NOT appear in Stripe. The "
-                    "USDC is on the pay-to address; only the bookkeeping is "
-                    "missing."
+                    "X402_STRIPE_MIRROR=1 but STRIPE_SECRET_KEY is not set, so "
+                    "settlements are not being mirrored into Stripe. The USDC "
+                    "is on the pay-to address; only the bookkeeping is missing."
                 )
             return
 

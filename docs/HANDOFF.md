@@ -9,6 +9,34 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: consolidation — one go-live path, and a Stripe mirror that stops lying
+
+Owner's instruction: get rid of trash, solidify what works, be consistent.
+Only what had evidence went:
+
+- **`go-live-x402.sh`, `go-live-mpp-tempo.sh` → stubs.** Zero live
+  references outside themselves and this file's history; `go-live.sh`
+  replaced both with one deploy. Stubs, not deletions: a deleted script
+  produces "No such file" and a hunt — that cost a re-derivation once. Each
+  prints the replacement command and exits 1. Their 25 tests went with them;
+  the three guards only they held (API-version pin, no Stripe mint for x402,
+  the stubs themselves pointing here) now live in `tests/test_go_live.py`.
+- **`x402-setup.py` → stub.** Named for x402, argued for a Stripe-custodied
+  x402 pay-to, and Stripe does not do x402. What it minted, `go-live.sh`
+  mints inline for tempo.
+- **`record_settlement_in_stripe` is now opt-in (`X402_STRIPE_MIRROR=1`).**
+  On a self-custody pay-to it cannot succeed, and default-on it would have
+  logged a traceback on **every real payment** saying Stripe "will not show
+  it until this transaction hash is recorded" — false, on the day it is read.
+  Off: one INFO line saying the money is in the wallet. Proved by removing
+  the gate → the new test goes red.
+- The module docstring that still said the pay-to "is a Stripe-custodied
+  deposit address" now says where the money actually goes.
+- `SESSION_BRIEF.md` no longer names the stubbed script.
+
+Suite: **491 passed, 1 skipped** (514 − 25 deleted + 4 new − 2 parametrized
+cases). Lint gate 0. Sandbox: stray local servers killed, caches cleared.
+
 ## 2026-09-02: the deploy REFUSED to run in a fresh Cloud Shell — and blamed a secret
 
 The second attempt of the night, read off the owner's screenshot:

@@ -441,6 +441,7 @@ def _capture_payment_intents(monkeypatch, module, *, boom=False):
 
 def test_a_settled_payment_is_recorded_as_a_stripe_payment_intent(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
     calls = _capture_payment_intents(monkeypatch, module)
 
@@ -461,6 +462,7 @@ def test_recording_is_idempotent_by_transaction_hash(monkeypatch):
     """A retry or double call must not double-count revenue. The idempotency
     key IS the transaction hash, so Stripe collapses duplicates server-side."""
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
     calls = _capture_payment_intents(monkeypatch, module)
 
@@ -475,6 +477,7 @@ def test_recording_failure_never_fails_the_settlement(monkeypatch):
     bookkeeping failure that turned into a payment failure would refuse
     service to a caller who has already paid -- the worst possible outcome."""
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
     _capture_payment_intents(monkeypatch, module, boom=True)
     _install_fake_server(monkeypatch, module)
@@ -499,6 +502,7 @@ def test_a_failed_settlement_is_never_recorded(monkeypatch):
     """Recording an unsettled payment would invent revenue in Stripe that
     never arrived on-chain -- bookkeeping fraud by bug."""
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
     calls = _capture_payment_intents(monkeypatch, module)
 
@@ -515,6 +519,7 @@ def test_an_unmapped_network_skips_recording_rather_than_guessing(monkeypatch):
     the name records the payment against the wrong chain, which is worse
     than not recording: it looks reconciled and is not."""
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     monkeypatch.setenv("X402_NETWORK", "eip155:1")  # Ethereum mainnet, unmapped
     module = _load_x402(monkeypatch)
     calls = _capture_payment_intents(monkeypatch, module)
@@ -529,6 +534,7 @@ def test_sub_cent_settlements_are_not_recorded(monkeypatch):
     """Stripe rejects zero-cent PaymentIntents; a sub-cent settlement would
     turn every recording attempt into a logged error."""
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
     calls = _capture_payment_intents(monkeypatch, module)
 
@@ -542,6 +548,7 @@ def test_settle_sync_records_after_a_successful_settle(monkeypatch):
     """Both settle paths must record -- settle_sync is the one the paid
     routes actually use (verify first, deliver, then settle)."""
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
     calls = _capture_payment_intents(monkeypatch, module)
     _install_fake_server(monkeypatch, module)
@@ -557,6 +564,7 @@ def test_verify_and_settle_records_after_a_successful_settle(monkeypatch):
     settle_sync -- if only one path records, revenue splits into visible and
     invisible depending on which route the agent happened to call."""
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
     calls = _capture_payment_intents(monkeypatch, module)
     _install_fake_server(monkeypatch, module)
@@ -829,3 +837,27 @@ def test_a_valid_payment_logs_no_rejection(monkeypatch, caplog):
 
     assert "REJECTED" not in caplog.text
     assert "FAILED" not in caplog.text
+
+
+def test_the_stripe_mirror_is_off_unless_asked_for(monkeypatch, caplog):
+    """On this deployment the pay-to is a self-custody wallet, so mirroring a
+    settlement into Stripe cannot succeed -- and the old default-on behaviour
+    would have logged, on every real payment, a traceback saying Stripe 'will
+    not show it until this transaction hash is recorded'. A log line that is
+    false on the one day someone reads it is worse than no line.
+
+    With the key set and the flag absent: no PaymentIntent, no exception,
+    one INFO line that says where the money actually is."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
+    monkeypatch.delenv("X402_STRIPE_MIRROR", raising=False)
+    module = _load_x402(monkeypatch)
+    calls = _capture_payment_intents(monkeypatch, module)
+    _install_fake_server(monkeypatch, module)
+
+    with caplog.at_level(logging.INFO):
+        assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
+
+    assert calls == []
+    assert "will not appear in Stripe" in caplog.text
+    assert "Traceback" not in caplog.text
+    assert "recording it in Stripe failed" not in caplog.text
