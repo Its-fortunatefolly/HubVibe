@@ -9,6 +9,41 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: the owner's Base wallet IS the recipient — do not pay from it
+
+The owner's wallet is `hubvibe.base.eth` →
+`0x837c40e2b4e976f43ffb4451ee281a00fa9477dd`. Compared programmatically
+against `DEFAULT_X402_PAY_TO` in `go-live.sh`: **the same address**, differing
+only in EIP-55 checksum case.
+
+That is correct as the *recipient*. It is a trap as the *payer*, and the trap
+is one paste wide: it is the only Base wallet the owner has, so it is the
+obvious thing to put in `HUBVIBE_WALLET_KEY` — which is the paying wallet.
+
+**Nothing caught it.** Verified by booting a node whose `payTo` was the
+payer's own address and running `first-paid-call.sh`: the x402 client
+produced a signature without complaint. The failure would have landed at the
+facilitator, on the one call whose entire purpose is to prove the facilitator
+settles. `exact` has the payer sign an EIP-3009 `transferWithAuthorization`
+from → to; with from == to that is a degenerate self-transfer nothing here has
+ever tested, so whatever came back would say nothing about whether a real
+buyer can pay — while consuming the bootstrap attempt.
+
+Guarded now, before any spend, case-insensitively (a wallet app's copy button
+yields lowercase; the config is checksummed). Overridable with
+`HUBVIBE_ALLOW_SELF_PAYMENT=1`, because a self-transfer may well be valid and
+forbidding a deliberate attempt is not the script's call — forbidding an
+accidental one is.
+
+**The correct shape: pay from a second wallet, receive into `0x837C…77dd`.**
+
+```bash
+bash scripts/first-paid-call.sh --new-wallet   # prints an address to fund
+```
+
+Fund that with ~$1 of USDC on Base (no ETH — the facilitator pays gas) and
+re-run without arguments. The $0.03 lands in the owner's wallet.
+
 ## 2026-09-02: the first paid call could NOT have been constructed — x402 client arity
 
 Found by booting the service locally and running `first-paid-call.sh` against

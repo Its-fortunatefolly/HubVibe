@@ -16,6 +16,7 @@ The preflight is extracted and driven against synthetic challenges here, so
 every rejection path is exercised without a network or a wallet.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -262,3 +263,84 @@ def test_an_unreadable_key_file_says_so_instead_of_printing_nothing(tmp_path):
     )
     assert "does not contain a readable private key" in result.stdout
     assert "HUBVIBE_FORCE_NEW_WALLET=1" in result.stdout
+
+
+# --- the paying wallet must not be the recipient ---------------------------
+#
+# The owner's Base wallet is the natural thing to reach for and it is also
+# X402_PAY_TO_ADDRESS, so this mistake is one paste away. Nothing else catches
+# it: verified by running the script against a node whose payTo was the
+# payer's own address -- the x402 client produced a signature without
+# complaint. The failure would land at the facilitator, on the one call whose
+# entire purpose is to prove the facilitator settles a real payment.
+#
+# These drive the whole shell script with curl stubbed, because the guard is
+# in the shell after the embedded preflight, and the preflight-only harness
+# above cannot see it.
+
+# Deterministic throwaway keys. Never funded; they exist so the payer address
+# is known to the test rather than generated per run.
+KEY_A = "0x" + "11" * 32
+ADDR_A = "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+KEY_B = "0x" + "22" * 32
+
+
+def _drive(tmp_path, wallet_key, pay_to, extra_env=None):
+    """Run the real script with curl stubbed to serve one challenge."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    challenge = tmp_path / "challenge.json"
+    challenge.write_text(_challenge(pay_to=pay_to))
+
+    (bin_dir / "curl").write_text(
+        f'#!/usr/bin/env bash\ncat "{challenge}"\n'
+    )
+    (bin_dir / "curl").chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["HOME"] = str(tmp_path)
+    env["HUBVIBE_WALLET_KEY"] = wallet_key
+    env["BASE"] = "https://example.test"
+    env.pop("HUBVIBE_ALLOW_SELF_PAYMENT", None)
+    if extra_env:
+        env.update(extra_env)
+
+    return subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=180
+    )
+
+
+def test_paying_from_the_recipient_wallet_is_refused(tmp_path):
+    result = _drive(tmp_path, wallet_key=KEY_A, pay_to=ADDR_A)
+    assert "The paying wallet IS the recipient" in result.stdout
+    assert result.returncode == 1
+    # It must stop BEFORE spending: no payment attempt, no settlement report.
+    assert "Paying for one real call" not in result.stdout
+
+
+def test_the_recipient_check_is_case_insensitive(tmp_path):
+    """EIP-55 checksummed and all-lowercase spellings are the same address.
+    Comparing them raw would let the mistake through on a lowercase paste --
+    which is exactly the form a wallet app's copy button produces."""
+    result = _drive(tmp_path, wallet_key=KEY_A, pay_to=ADDR_A.lower())
+    assert "The paying wallet IS the recipient" in result.stdout
+    assert result.returncode == 1
+
+
+def test_a_different_paying_wallet_passes_the_guard(tmp_path):
+    """The guard must stop one specific mistake, not become a gate on the
+    normal case it exists to protect."""
+    result = _drive(tmp_path, wallet_key=KEY_B, pay_to=ADDR_A)
+    assert "The paying wallet IS the recipient" not in result.stdout
+
+
+def test_the_self_payment_refusal_is_overridable(tmp_path):
+    """It may well be a valid transfer. Refusing to let the owner try it is
+    not this script's call -- refusing to let them do it BY ACCIDENT is."""
+    result = _drive(
+        tmp_path, wallet_key=KEY_A, pay_to=ADDR_A,
+        extra_env={"HUBVIBE_ALLOW_SELF_PAYMENT": "1"},
+    )
+    assert "self-transfer, allowed by override" in result.stdout
+    assert "The paying wallet IS the recipient" not in result.stdout
