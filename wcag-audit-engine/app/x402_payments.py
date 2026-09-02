@@ -40,6 +40,7 @@ money moved on-chain already.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -826,6 +827,33 @@ def _log_rejection(stage: str, price: Optional[str], *, result=None, exc=None) -
         pass
 
 
+def _run_coro_sync(coro):
+    """asyncio.run(), but safe on a thread that already hosts a running loop.
+
+    Playwright's sync API (app/browser_pool.py) keeps a running event loop in
+    each worker thread for the lifetime of the pooled browser, and anyio
+    REUSES those threads for later requests. So any request landing on a
+    thread that has ever run an audit -- even one whose browser launch failed,
+    because sync_playwright().start() runs first -- finds get_running_loop()
+    succeeding, and a bare asyncio.run() raises "cannot be called from a
+    running event loop" before the facilitator is ever contacted. That is the
+    error the live node logged for the first real paid call on 2026-09-02,
+    and it reproduces deterministically: MAX_CONCURRENT_AUDITS=1, one audit,
+    then one paid call.
+
+    When a loop is present the coroutine is handed to a fresh thread and run
+    there. One short-lived thread per verify/settle, and no deadlock surface:
+    the coroutine awaits only its own facilitator I/O, never anything
+    scheduled on the poisoned loop.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 def verify_only_sync(payment_header: str, price: Optional[str] = None):
     """Verify a payment without moving any money.
 
@@ -846,7 +874,7 @@ def verify_only_sync(payment_header: str, price: Optional[str] = None):
         async def _run():
             return await server.verify_payment(payload, requirements[0])
 
-        result = asyncio.run(_run())
+        result = _run_coro_sync(_run())
         if not result.is_valid:
             _log_rejection("verify", resolved_price, result=result)
             return None
@@ -996,7 +1024,7 @@ def settle_sync(pending) -> bool:
         async def _run():
             return await server.settle_payment(pending.payload, pending.requirements[0])
 
-        result = asyncio.run(_run())
+        result = _run_coro_sync(_run())
         if result.success:
             record_settlement_in_stripe(result, pending.requirements[0])
         else:
@@ -1063,6 +1091,6 @@ def verify_and_settle_sync(payment_header: str, price: Optional[str] = None) -> 
     no running event loop to reuse -- fails closed, same as the async path.
     """
     try:
-        return asyncio.run(verify_and_settle(payment_header, price))
+        return _run_coro_sync(verify_and_settle(payment_header, price))
     except Exception:
         return False

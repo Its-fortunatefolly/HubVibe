@@ -9,6 +9,48 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: THE REJECTION IS ROOT-CAUSED. The node killed its own verify on a poisoned thread.
+
+The #79 logging paid for itself on its first live outing. `x402-log.sh`,
+owner-run:
+
+```
+x402 verify FAILED before the facilitator could answer
+  (facilitator=https://facilitator.xpay.sh price=$0.03):
+  RuntimeError: asyncio.run() cannot be called from a running event loop
+```
+
+**Mechanism, reproduced deterministically, then fixed, then re-proven.**
+Playwright's sync API (`app/browser_pool.py`) keeps a running asyncio event
+loop in each worker thread for the lifetime of the pooled browser — that is
+how the sync API works — and anyio REUSES those threads. So any request that
+lands on a thread that has ever served an audit (even one whose browser
+launch failed, because `sync_playwright().start()` runs first) finds
+`asyncio.get_running_loop()` succeeding, and the bare `asyncio.run()` inside
+`verify_only_sync` raised before the facilitator was ever contacted. Bare
+402 to the caller, every time, whatever the wallet held.
+
+Why no simulation had caught it: none of them ran a real audit before the
+paid call, so no worker thread was poisoned. With `MAX_CONCURRENT_AUDITS=1`
+(one worker thread) it reproduces on the second request, byte-for-byte the
+live error, line 856 and all.
+
+Fixed with `_run_coro_sync()`: when the current thread hosts a running loop,
+the coroutine is handed to a fresh thread and `asyncio.run` there; otherwise
+plain `asyncio.run`. Applied to all three payment call sites — verify,
+settle (where this bug costs money directly: audit delivered, then settle
+dies), and the legacy verify+settle. An AST-counted test refuses any new
+bare `asyncio.run()` in the module.
+
+Proof: three in-loop tests plus the AST guard, red under the bare call and
+green under the fix; then the same poisoned-thread repro re-run — the stub
+facilitator RECEIVED `/verify` and the node logged the facilitator's own
+reason. **501 passed, 1 skipped**, lint 0.
+
+**With xpay.sh confirmed compatible (next entry) this was the last known
+in-code blocker on the paid path.** After deploying this, what remains is
+the wallet: fund the payer and run `first-paid-call.sh`.
+
 ## 2026-09-02: OWNER READ xpay.sh /supported — it is COMPATIBLE. Do not re-litigate.
 
 The owner ran `curl -s https://facilitator.xpay.sh/supported` from Cloud

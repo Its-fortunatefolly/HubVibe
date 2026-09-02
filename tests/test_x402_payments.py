@@ -953,3 +953,75 @@ def test_a_legacy_only_facilitator_is_offered_nothing_and_the_log_says_why(monke
         assert module.payment_required_header(price="$0.03") == {}
     assert "lists 'base' but not 'eip155:8453'" in caplog.text
     assert "CAIP-2" in caplog.text
+
+
+# --- verify/settle must work on a thread that hosts a running event loop ----
+#
+# Playwright's sync API (app/browser_pool.py) keeps a running loop in each
+# worker thread for the life of the pooled browser, and anyio reuses those
+# threads. The first real paid call against the deployed node died on this:
+# the live log read "RuntimeError: asyncio.run() cannot be called from a
+# running event loop", verify raised before the facilitator was contacted,
+# and the caller saw a bare 402. Reproduced deterministically against a local
+# node with MAX_CONCURRENT_AUDITS=1: one audit, then one paid call. These
+# reproduce the same condition in-process: the sync entry points are invoked
+# from inside a running loop, exactly as on a poisoned worker thread.
+
+import asyncio as _asyncio
+
+
+def _call_in_running_loop(fn, *args, **kwargs):
+    async def _inner():
+        return fn(*args, **kwargs)
+
+    return _asyncio.run(_inner())
+
+
+def test_verify_only_sync_works_inside_a_running_loop(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+
+    pending = _call_in_running_loop(module.verify_only_sync, "signed", price="$0.03")
+    assert pending is not None
+
+
+def test_verify_and_settle_sync_works_inside_a_running_loop(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+
+    assert _call_in_running_loop(
+        module.verify_and_settle_sync, "signed", price="$0.03"
+    ) is True
+
+
+def test_settle_sync_works_inside_a_running_loop(monkeypatch):
+    """The settle path is the one where this bug costs money directly: the
+    audit was already delivered, and a settle that dies on the loop check
+    delivers it unpaid."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+
+    pending = module.verify_only_sync("signed", price="$0.03")
+    assert pending is not None
+    assert _call_in_running_loop(module.settle_sync, pending) is True
+
+
+def test_no_bare_asyncio_run_remains_on_the_payment_path():
+    """A new call site written with plain asyncio.run() reintroduces the bug
+    on exactly the threads that have ever served an audit. Counted off the
+    AST, not grepped, so docstrings and comments cannot confuse it."""
+    import ast
+
+    tree = ast.parse(X402_PATH.read_text())
+    helper = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_run_coro_sync")
+    ok_lines = set(range(helper.lineno, helper.end_lineno + 1))
+    stray = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute) and node.func.attr == "run"
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == "asyncio"
+        and node.lineno not in ok_lines
+    ]
+    assert stray == [], f"bare asyncio.run() at lines {stray} -- use _run_coro_sync"
