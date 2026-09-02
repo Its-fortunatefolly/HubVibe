@@ -702,13 +702,55 @@ class PendingPayment:
         self.price = price
 
 
+def _log_rejection(stage: str, price: Optional[str], *, result=None, exc=None) -> None:
+    """Say WHY a payment failed, at a level Cloud Run keeps.
+
+    Every fail-closed return in this module used to be a bare `return None`
+    or `return False`. Correct as a contract, and it discarded the one thing
+    that matters when a payment is refused: the reason. The first real paid
+    call against the deployed node came back as a plain 402 re-challenge --
+    the facilitator's `invalid_reason`, or the exception that stopped the
+    verify call from ever reaching it, existed for a few milliseconds inside
+    this process and was thrown away. The Cloud Run log had nothing; the
+    owner had the word "rejected" and nowhere to look next.
+
+    That is the #61 failure shape one layer in: from the outside a bounced
+    payment is indistinguishable from nobody buying, and this made it
+    indistinguishable from the inside too.
+
+    WARNING rather than ERROR because a rejected payment is the facilitator
+    working -- it is the outcome that is loud, not necessarily wrong. Never
+    raises: a logging failure must not turn a refused payment into a 500.
+    """
+    try:
+        log = logging.getLogger(__name__)
+        if exc is not None:
+            log.warning(
+                "x402 %s FAILED before the facilitator could answer "
+                "(facilitator=%s price=%s): %s: %s",
+                stage, _FACILITATOR_URL, price, type(exc).__name__, exc,
+            )
+            return
+        log.warning(
+            "x402 %s REJECTED by the facilitator (facilitator=%s price=%s): "
+            "reason=%s message=%s payer=%s",
+            stage, _FACILITATOR_URL, price,
+            getattr(result, "invalid_reason", None),
+            getattr(result, "invalid_message", None),
+            getattr(result, "payer", None),
+        )
+    except Exception:
+        pass
+
+
 def verify_only_sync(payment_header: str, price: Optional[str] = None):
     """Verify a payment without moving any money.
 
     Returns a PendingPayment handle to settle later, or None if the payment is
     invalid -- the same fail-closed contract as everything else here: any
     exception, any facilitator rejection, any missing configuration all
-    resolve to None.
+    resolve to None. Each of those is logged with its reason first; the
+    return value stays fail-closed, the log is what changed.
     """
     if not is_configured():
         return None
@@ -721,10 +763,13 @@ def verify_only_sync(payment_header: str, price: Optional[str] = None):
         async def _run():
             return await server.verify_payment(payload, requirements[0])
 
-        if not asyncio.run(_run()).is_valid:
+        result = asyncio.run(_run())
+        if not result.is_valid:
+            _log_rejection("verify", resolved_price, result=result)
             return None
         return PendingPayment(payload, requirements, resolved_price)
-    except Exception:
+    except Exception as exc:
+        _log_rejection("verify", resolved_price, exc=exc)
         return None
 
 
@@ -854,8 +899,20 @@ def settle_sync(pending) -> bool:
         result = asyncio.run(_run())
         if result.success:
             record_settlement_in_stripe(result, pending.requirements[0])
+        else:
+            # An audit was delivered and not paid for. The reason is the only
+            # thing that distinguishes a facilitator outage from a payer whose
+            # funds moved between verify and settle.
+            logging.getLogger(__name__).warning(
+                "x402 settle REFUSED after delivery (facilitator=%s price=%s): "
+                "error=%s message=%s",
+                _FACILITATOR_URL, pending.price,
+                getattr(result, "error_reason", None),
+                getattr(result, "error_message", None),
+            )
         return bool(result.success)
-    except Exception:
+    except Exception as exc:
+        _log_rejection("settle", getattr(pending, "price", None), exc=exc)
         return False
 
 
@@ -873,20 +930,30 @@ async def verify_and_settle(payment_header: str, price: Optional[str] = None) ->
     """
     if not is_configured():
         return False
+    resolved_price = price or _PRICE
     try:
         payload = decode_payment_signature_header(payment_header)
-        requirements = _get_requirements(price or _PRICE)
+        requirements = _get_requirements(resolved_price)
         server = _get_server()
 
         verify_result = await server.verify_payment(payload, requirements[0])
         if not verify_result.is_valid:
+            _log_rejection("verify", resolved_price, result=verify_result)
             return False
 
         settle_result = await server.settle_payment(payload, requirements[0])
         if settle_result.success:
             record_settlement_in_stripe(settle_result, requirements[0])
+        else:
+            logging.getLogger(__name__).warning(
+                "x402 settle REFUSED (facilitator=%s price=%s): error=%s message=%s",
+                _FACILITATOR_URL, resolved_price,
+                getattr(settle_result, "error_reason", None)
+                or getattr(settle_result, "error", None),
+            )
         return bool(settle_result.success)
-    except Exception:
+    except Exception as exc:
+        _log_rejection("verify+settle", resolved_price, exc=exc)
         return False
 
 
