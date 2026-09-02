@@ -9,6 +9,65 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: FIRST REAL PAYMENT ATTEMPTED — rejected, and the node threw the reason away
+
+The owner ran `first-paid-call.sh` against the deployed node from Cloud
+Shell, paying from `0x5bcea6496599D65E432E50340056194D92F95d06` (an existing
+key at `~/.hubvibe-wallet-key`) to `0x837C…77dd`. Read off the screenshot:
+
+```
+OK    x402 advertised: $0.03 to 0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd on base
+OK    the Bazaar record on this 402 is well-formed and will survive validation
+NOTE  could not reach the Base RPC (HTTPError); proceeding without the check
+NOTE  https://facilitator.xpay.sh serves no /discovery/resources ...
+STOP  the payment did not go through:
+      HubVibeError: Payment was rejected by HubVibe: {'error': 'payment_required', ...
+```
+
+Three facts, and one that is NOT known:
+
+1. **The client-side blocker is gone.** A signature was constructed and sent.
+   Before the arity fix (previous entry) this run would have died with a
+   TypeError before reaching the node.
+2. **The node re-challenged with a bare 402.** That body carries no reason.
+3. **The balance check was skipped.** `mainnet.base.org` returned an
+   HTTPError from Cloud Shell, so the script proceeded without knowing
+   whether the paying wallet holds any USDC on Base. The most ordinary cause
+   of a rejection — an unfunded payer — is therefore **unverified either
+   way.** Check it before anything else, in a browser, no deploy needed:
+   `https://basescan.org/address/0x5bcea6496599D65E432E50340056194D92F95d06`
+
+**Why the reason is unknown: the node discarded it.** `verify_only_sync`,
+`verify_and_settle` and `settle_sync` each ended in `except Exception:
+return None/False` with no log line, and an `is_valid=False` from the
+facilitator returned the same way. The facilitator's `invalid_reason` — or
+the exception that stopped verify from ever reaching the facilitator — existed
+inside the process for a few milliseconds and was dropped. The Cloud Run log
+had nothing. That is the #61 silent-bounce, one layer in: from the outside a
+refused payment looked like nobody buying, and this made it look like nothing
+from the inside too.
+
+Fixed: every fail-closed return now logs first, at WARNING, with the stage,
+facilitator URL, price, and either the facilitator's `invalid_reason` /
+`invalid_message` / `payer` (fields read off `x402.schemas.responses`, not
+recalled) or the exception type and text. A refusal and an outage now read
+differently, because they need different fixes. The return values are
+unchanged — fail-closed is the contract; the log is what was missing.
+
+Four tests, proved by silencing the logging and watching all four go red.
+The suite also caught a bug in the first draft of the fix itself: a format
+string with one `%s` given two values raised inside the logger, and the
+wrapper reported it as "FAILED before the facilitator could answer" — the
+exact misreport its own docstring warns about. Worth noting because it is the
+kind of bug a green run cannot see and a mutation run can.
+
+**After deploying this, the next `first-paid-call.sh` leaves its reason
+here** (untested from the sandbox — no gcloud; the shape is the standard one):
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="hubvibe" AND textPayload:"x402"' --project=resolver-time --freshness=1h --limit=10 --format='value(textPayload)'
+```
+
 ## 2026-09-02: the owner's Base wallet IS the recipient — do not pay from it
 
 The owner's wallet is `hubvibe.base.eth` →

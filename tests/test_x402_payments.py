@@ -17,6 +17,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -709,3 +710,122 @@ def test_no_discovery_record_is_emitted_when_x402_cannot_settle(monkeypatch):
     assert module.bazaar_extension_for_mcp_tool(
         tool_name="audit_wcag", description="d", input_schema={"type": "object"}
     ) == {}
+
+
+# --- a refused payment must say WHY, in the log Cloud Run keeps ------------
+#
+# The first real paid call against the deployed node came back as a bare 402
+# re-challenge. The facilitator's invalid_reason -- or the exception that
+# stopped verify from ever reaching it -- existed for a few milliseconds
+# inside this process and was discarded by `except Exception: return None`.
+# The Cloud Run log had nothing; the owner had the word "rejected". These pin
+# the reason into the log at WARNING, which the default handler emits to
+# stderr and Cloud Run captures. The fail-closed return values are asserted
+# unchanged in every case: the log is what changed, not the contract.
+
+
+def _rejecting_verify(server, *, reason, message="the facilitator said no"):
+    result = MagicMock()
+    result.is_valid = False
+    result.invalid_reason = reason
+    result.invalid_message = message
+    result.payer = "0xpayer"
+
+    async def _verify(*a, **k):
+        return result
+
+    server.verify_payment = _verify
+
+
+def _exploding_verify(server, exc):
+    async def _verify(*a, **k):
+        raise exc
+
+    server.verify_payment = _verify
+
+
+def test_a_facilitator_rejection_is_logged_with_its_reason(monkeypatch, caplog):
+    module = _load_x402(monkeypatch, facilitator="https://fac.example")
+    server = _install_fake_server(monkeypatch, module)
+    _rejecting_verify(server, reason="insufficient_funds")
+
+    with caplog.at_level(logging.WARNING):
+        assert module.verify_only_sync("signed", price="$0.03") is None
+
+    text = caplog.text
+    assert "REJECTED" in text
+    assert "insufficient_funds" in text
+    assert "the facilitator said no" in text
+    assert "https://fac.example" in text
+    assert "$0.03" in text
+
+
+def test_an_unreachable_facilitator_is_logged_as_such_not_as_a_rejection(monkeypatch, caplog):
+    """A refusal and an outage need different fixes. Collapsing both into a
+    402 is how a week gets spent on the wrong one."""
+    module = _load_x402(monkeypatch, facilitator="https://fac.example")
+    server = _install_fake_server(monkeypatch, module)
+    _exploding_verify(server, ConnectionError("Name or service not known"))
+
+    with caplog.at_level(logging.WARNING):
+        assert module.verify_only_sync("signed", price="$0.03") is None
+
+    text = caplog.text
+    assert "FAILED before the facilitator could answer" in text
+    assert "ConnectionError" in text
+    assert "Name or service not known" in text
+    assert "REJECTED" not in text
+
+
+def test_the_legacy_verify_and_settle_path_logs_the_same_reason(monkeypatch, caplog):
+    """/audit goes through verify_and_settle_sync, not verify_only_sync. A
+    reason logged on one path and not the other splits diagnosability by
+    which route the agent happened to call."""
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+    _rejecting_verify(server, reason="invalid_signature")
+
+    with caplog.at_level(logging.WARNING):
+        assert module.verify_and_settle_sync("signed", price="$0.03") is False
+
+    assert "invalid_signature" in caplog.text
+
+
+def test_a_refused_settlement_is_logged_after_delivery(monkeypatch, caplog):
+    """This is the case where an audit went out unpaid. It must be the
+    loudest of all, and it must carry the facilitator's reason."""
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module, settled=False)
+
+    settle_result = MagicMock()
+    settle_result.success = False
+    settle_result.error_reason = "authorization_expired"
+    settle_result.error_message = "past validBefore"
+
+    async def _settle(*a, **k):
+        return settle_result
+
+    server.settle_payment = _settle
+
+    pending = module.verify_only_sync("signed", price="$0.03")
+    assert pending is not None
+    with caplog.at_level(logging.WARNING):
+        assert module.settle_sync(pending) is False
+
+    text = caplog.text
+    assert "settle REFUSED" in text
+    assert "authorization_expired" in text
+    assert "past validBefore" in text
+
+
+def test_a_valid_payment_logs_no_rejection(monkeypatch, caplog):
+    """The guard must not cry wolf: a clean payment produces no REJECTED or
+    FAILED line, or the log becomes noise on exactly the day it matters."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+
+    with caplog.at_level(logging.WARNING):
+        assert module.verify_only_sync("signed", price="$0.03") is not None
+
+    assert "REJECTED" not in caplog.text
+    assert "FAILED" not in caplog.text
