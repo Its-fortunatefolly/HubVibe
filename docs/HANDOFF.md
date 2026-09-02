@@ -9,6 +9,36 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: `go-live.sh` ran against the live node — 37 passed, 0 failed
+
+The owner ran, from Cloud Shell, on `main` @ `2d0af7c`:
+
+```bash
+cd ~/HubVibe-deploy4 && git fetch origin main && git reset --hard origin/main && bash scripts/go-live.sh
+```
+
+then `bash scripts/verify-live.sh` → **37 passed, 0 failed**. That is the
+first run of the one-command go-live against the deployed service, and the
+first clean checker run since the rails were reconfigured.
+
+**Do not turn 37 into a threshold.** A previous session told the owner that
+"under 38 checks is a stale checkout" — a number that was never counted and
+does not exist. The checker's total is `PASSES + FAILURES`: it is however many
+checks *executed*, and that moves with which rails are configured (36 was the
+x402-off total; x402 being on runs more). A count compared against a
+remembered constant is exactly the reasoning this file already warns about
+twice, applied to the checker instead of the service.
+
+**The staleness signal is the checker's own, and it is not a number.**
+`verify-live.sh` fetches `origin/main` and prints a red `STALE CHECKOUT  this
+copy is N commit(s) behind` banner, plus `This was the OLD checker` after the
+totals. Read for that banner. Its absence is the proof the run is current;
+the integer is not.
+
+**Still unproven, and only money proves it:** whether a payment settles. A
+green checker means the 402 is well-formed and the rails are advertised —
+never that anything paid. Revenue is still zero.
+
 ## 2026-09-01: OWNER FACT — Stripe does NOT do x402. Stripe does MPP.
 
 Stated by the owner. It is a fact about what Stripe sells, not a preference,
