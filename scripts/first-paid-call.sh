@@ -264,6 +264,53 @@ ok "x402 advertised: $PRICE to $PAY_TO on $NETWORK"
 ok "the Bazaar record on this 402 is well-formed and will survive validation"
 
 # ---------------------------------------------------------------------------
+# The paying wallet must not BE the recipient.
+#
+# It is an easy mistake and nothing else catches it: the owner's Base wallet
+# is the natural thing to reach for, and it is also X402_PAY_TO_ADDRESS. The
+# x402 client raises no objection -- verified by running this script against a
+# node whose payTo was the payer's own address; a signature was produced
+# normally.
+#
+# So the failure would land at the facilitator, on the one call whose entire
+# purpose is to prove the facilitator settles. `exact` has the payer sign an
+# EIP-3009 transferWithAuthorization from -> to; with from == to that is a
+# degenerate self-transfer nothing here has ever tested. Whatever came back,
+# it would say nothing about whether a real buyer can pay -- the question this
+# call exists to answer -- while consuming the bootstrap attempt.
+#
+# Overridable, because a self-transfer may well be valid and refusing to let
+# the owner try it is not this script's call to make.
+# ---------------------------------------------------------------------------
+PAYER=$(python3 -c '
+import os
+from eth_account import Account
+try:
+    print(Account.from_key(os.environ["HUBVIBE_WALLET_KEY"].strip()).address)
+except Exception:
+    print("")
+' 2>/dev/null)
+
+if [ -n "$PAYER" ] && [ "$(printf '%s' "$PAYER" | tr 'A-Z' 'a-z')" = \
+                        "$(printf '%s' "$PAY_TO" | tr 'A-Z' 'a-z')" ]; then
+  if [ -z "${HUBVIBE_ALLOW_SELF_PAYMENT:-}" ]; then
+    printf '\n  \033[31mSTOP\033[0m  The paying wallet IS the recipient.\n\n'
+    printf '      paying:    %s\n' "$PAYER"
+    printf '      paying to: %s\n\n' "$PAY_TO"
+    printf '  x402 would sign this without complaining, so nothing before the\n'
+    printf '  facilitator stops it -- but it is a self-transfer, and this call\n'
+    printf '  exists to prove the facilitator settles a REAL payment. Whatever\n'
+    printf '  came back would not answer that.\n\n'
+    printf '  Pay from a different wallet. The money still lands in yours:\n\n'
+    printf '      bash scripts/first-paid-call.sh --new-wallet\n\n'
+    printf '  then send that address ~$1 of USDC on Base and re-run.\n\n'
+    printf '  (To try the self-payment anyway: HUBVIBE_ALLOW_SELF_PAYMENT=1)\n\n'
+    exit 1
+  fi
+  warn "paying wallet IS the recipient -- self-transfer, allowed by override"
+fi
+
+# ---------------------------------------------------------------------------
 # Does the wallet actually hold the asset this challenge asks for?
 #
 # Without this, an unfunded or wrongly-funded wallet fails deep inside the
