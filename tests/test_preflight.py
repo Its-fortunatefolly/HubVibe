@@ -66,26 +66,37 @@ J
   *minScale*) echo "{min_scale}" ;;
   *"run services describe"*)
     printf 'name:  STRIPE_SECRET_KEY\\n  secretKeyRef.name:  SECRET_STRIPE_KEY\\n' ;;
-  *"run services update"*) echo "UPDATE_INVOKED $*" ;;
+  *"run services update"*) echo "UPDATE_INVOKED $*" >> "$GCLOUD_CALL_LOG"; echo "UPDATE_INVOKED $*" ;;
   *"run deploy"*) echo "DEPLOY_INVOKED" ;;
   *) exit 0 ;;
 esac
 """
 
 
-def _run(tmp_path, **kwargs):
+def _run(tmp_path, extra_env=None, **kwargs):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     (bin_dir / "gcloud").write_text(_stub(**kwargs))
     (bin_dir / "gcloud").chmod(0o755)
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env.pop("KEEP_WARM", None)
+    # The script sends the min-instances repair's output to /dev/null, so a
+    # marker on stdout cannot prove it ran. The stub logs every invocation to
+    # this file, which survives any redirection the script does.
+    call_log = tmp_path / "gcloud_calls.log"
+    call_log.write_text("")
+    env["GCLOUD_CALL_LOG"] = str(call_log)
+    if extra_env:
+        env.update(extra_env)
     # verify-live.sh makes real network calls with retries; the preflight is
     # what is under test here, not the post-deploy check.
     env["SKIP_VERIFY"] = "1"
-    return subprocess.run(
+    result = subprocess.run(
         ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=120
     )
+    result.gcloud_calls = call_log.read_text()
+    return result
 
 
 def test_the_script_is_valid_bash():
@@ -263,12 +274,33 @@ def test_a_plain_value_is_still_repointed_at_the_secret(tmp_path):
     assert "UPDATE_INVOKED" in result.stdout
 
 
-def test_min_instances_is_reported_but_does_not_block(tmp_path):
-    """Idle billing is money, not brokenness -- worth saying, not worth
-    refusing to ship over."""
+def test_min_instances_is_set_to_zero_not_merely_reported(tmp_path):
+    """This used to only warn and print the gcloud command for a human. It
+    warned on every deploy for weeks while the meter ran and the bill reached
+    $300. A warning nobody reads is not a control -- the money leaves either
+    way. Keeping an instance warm has no valid use at zero paid traffic, so
+    it is repaired like any other setting with no valid use."""
     result = _run(tmp_path, min_scale="1")
     assert "min-instances=1" in result.stdout
+    assert "--min-instances=0" in result.gcloud_calls, result.gcloud_calls
+    # Still not fatal: idle billing is money, not brokenness.
     assert "DEPLOY_INVOKED" in result.stdout
+
+
+def test_a_zero_min_instances_service_is_left_alone(tmp_path):
+    """The repair must fire on the fault, not on every deploy -- an
+    unconditional update mints a pointless revision every run, which this
+    repo has already paid for once."""
+    result = _run(tmp_path, min_scale="0")
+    assert "--min-instances" not in result.gcloud_calls, result.gcloud_calls
+
+
+def test_keep_warm_opts_back_in(tmp_path):
+    """Once paid volume makes cold starts worth avoiding, the owner must be
+    able to keep it warm without this undoing the choice on every deploy."""
+    result = _run(tmp_path, min_scale="1", extra_env={"KEEP_WARM": "1"})
+    assert "--min-instances" not in result.gcloud_calls, result.gcloud_calls
+    assert "leaving it warm" in result.stdout
 
 
 def test_a_healthy_environment_deploys(tmp_path):

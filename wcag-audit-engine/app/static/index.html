@@ -11,8 +11,16 @@
 <!-- Base app registration. Base's verifier fetches this page and reads this
      tag to confirm the domain belongs to the app, so it must be live on / at
      the moment Register is pressed -- a deploy that lands after verification
-     is a deploy that verified nothing. Public identifier, not a secret. -->
-<meta name="base:app_id" content="6a83832901463168d7e651ca">
+     is a deploy that verified nothing. Public identifier, not a secret.
+
+     Written self-closing (" />"), byte-identical to the snippet Base's Add
+     Domain dialog hands out. An HTML parser treats <meta ...> and
+     <meta ... /> as the same element, but a verifier that string-matches
+     its own snippet does not, and that failure is silent: the tag is
+     present, the page is correct, and registration simply never completes.
+     Matching the vendor's exact bytes costs nothing and removes the
+     guess. -->
+<meta name="base:app_id" content="6a8383066ea1f57fed333625" />
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HubVibe">
 <meta property="og:title" content="HubVibe — machine-payable site audits for AI agents">
