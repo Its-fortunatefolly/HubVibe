@@ -1840,10 +1840,18 @@ def test_page_head_social_tags_point_at_served_assets(monkeypatch):
 # --- Machine payers are charged only for audits that actually ran ----------
 
 
+_SETTLED_TX = "0x" + "cd" * 32
+
+
 def _x402_caller(monkeypatch, module, *, settle_ok=True):
-    """Make an X-PAYMENT header authenticate, tracking verify/settle calls."""
+    """Make an X-PAYMENT header authenticate, tracking verify/settle calls.
+
+    The pending payment is a real PendingPayment, and a successful settle
+    leaves a real SettleResponse on it -- exactly what x402_payments does --
+    so the route's receipt header is built by the real code, not faked.
+    """
     calls = {"verified": 0, "settled": 0}
-    sentinel = object()
+    sentinel = module.x402_payments.PendingPayment(None, None, "$0.03")
 
     def _verify(header, price=None):
         calls["verified"] += 1
@@ -1852,6 +1860,13 @@ def _x402_caller(monkeypatch, module, *, settle_ok=True):
     def _settle(pending):
         calls["settled"] += 1
         assert pending is sentinel
+        if settle_ok:
+            from x402.schemas import SettleResponse
+
+            pending.settle_result = SettleResponse(
+                success=True, transaction=_SETTLED_TX, network="eip155:8453",
+                payer="0x" + "11" * 20,
+            )
         return settle_ok
 
     monkeypatch.setattr(module.x402_payments, "verify_only_sync", _verify)
@@ -3209,3 +3224,119 @@ def test_the_base_app_id_meta_tag_is_served_in_the_head(monkeypatch):
     # self-closing slash included. A parser does not care; a verifier that
     # string-matches its own snippet does, and that failure is silent.
     assert '<meta name="base:app_id" content="6a8383066ea1f57fed333625" />' in head
+
+
+# --- The paid 200 carries the settlement receipt ----------------------------
+#
+# x402 spec step 10: after settling, the resource server returns the
+# facilitator's settle response to the payer in PAYMENT-RESPONSE (v2) /
+# X-PAYMENT-RESPONSE (v1). Until this the node delivered the audit and kept
+# the transaction hash to itself, so a paying agent had proof of nothing.
+# Found by scripts/simulate-paid-call.py -- the first check to read the
+# headers of a paid 200 rather than its status code.
+
+
+def _paid(client, path="/audit/wcag", body=None):
+    return client.post(
+        path, json=body or {"url": "https://example.com"}, headers={"X-PAYMENT": "signed-payment"}
+    )
+
+
+def test_a_paid_200_carries_the_settlement_receipt(monkeypatch):
+    from fastapi.testclient import TestClient
+    from x402.http.utils import decode_payment_response_header
+
+    module = _load_main(monkeypatch)
+    _x402_caller(monkeypatch, module)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    response = _paid(TestClient(module.app))
+
+    assert response.status_code == 200
+    assert response.json()["pass"] is True, "the receipt must not displace the audit"
+    for name in ("PAYMENT-RESPONSE", "X-PAYMENT-RESPONSE"):
+        assert name in response.headers, f"{name} missing from a paid 200"
+    decoded = decode_payment_response_header(response.headers["PAYMENT-RESPONSE"])
+    assert decoded.success is True
+    assert decoded.transaction == _SETTLED_TX
+
+
+def test_no_receipt_when_settlement_failed_after_delivery(monkeypatch):
+    """No settlement, no receipt -- a header claiming success on a refused
+    settle would be a forged proof of payment."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _x402_caller(monkeypatch, module, settle_ok=False)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    response = _paid(TestClient(module.app))
+
+    assert response.status_code == 200
+    assert "billing_warning" in response.json()
+    assert "PAYMENT-RESPONSE" not in response.headers
+    assert "X-PAYMENT-RESPONSE" not in response.headers
+
+
+def test_an_api_key_call_carries_no_receipt(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    response = TestClient(module.app).post(
+        "/audit/wcag", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
+    )
+
+    assert response.status_code == 200
+    assert "PAYMENT-RESPONSE" not in response.headers
+
+
+def test_a_paid_mcp_tool_call_carries_the_receipt(monkeypatch):
+    """MCP callers pay the same way and are owed the same receipt; the
+    JSON-RPC envelope travels over HTTP, so the header is where it goes."""
+    from fastapi.testclient import TestClient
+    from x402.http.utils import decode_payment_response_header
+
+    module = _load_main(monkeypatch, api_key=None)
+    _x402_caller(monkeypatch, module)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+    client = TestClient(module.app)
+
+    response = client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": "audit_wcag", "arguments": {"url": "https://example.com"}},
+        },
+        headers={"X-PAYMENT": "signed-payment"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["isError"] is False
+    assert decode_payment_response_header(response.headers["PAYMENT-RESPONSE"]).transaction == _SETTLED_TX
+
+
+def test_every_paid_route_delivers_through_the_receipt_path():
+    """Static guard: each /audit route's handler must end in _deliver(), the
+    one place the receipt (and a bought prepaid key) is attached. A route
+    that `return result`s directly delivers the audit and drops both."""
+    import re
+
+    text = MAIN_PATH.read_text()
+    routes = re.split(r'\n@app\.post\("/audit', text)[1:]
+    assert len(routes) == 6, f"expected 6 paid routes, found {len(routes)}"
+    for chunk in routes:
+        handler = chunk.split("\n@app.")[0]
+        name = handler.split("\n")[0]
+        assert "return _deliver(result, auth)" in handler, f"/audit{name} bypasses _deliver()"
+
+
+def test_the_manifest_tells_payers_where_the_receipt_is(monkeypatch):
+    """An agent reading agent.json before paying should learn it will get a
+    settlement receipt back, and in which header."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    payment = TestClient(module.app).get("/.well-known/agent.json").json()["payment"]
+    assert "PAYMENT-RESPONSE" in payment["receipt"]

@@ -120,6 +120,11 @@ class HubVibeTollbooth:
         self._spent_usd = 0.0
         self._lock = threading.Lock()
         self._http_client = None
+        # The facilitator's settle response for the most recent paid call,
+        # decoded from the PAYMENT-RESPONSE header: transaction hash, network,
+        # payer. None until a call has been paid, and None again if the server
+        # sent no receipt. This is the only on-chain reference the payer gets.
+        self.last_settlement: Optional[dict] = None
 
         if wallet_key:
             self._http_client = self._build_x402_client(wallet_key, max_price_usd)
@@ -312,7 +317,34 @@ class HubVibeTollbooth:
                 raise HubVibeError(
                     f"Payment was rejected by HubVibe: {self._safe_json(retried)}"
                 )
+            self.last_settlement = self._read_receipt(retried)
             return self._unwrap(retried)
+
+    @staticmethod
+    def _read_receipt(response: httpx.Response) -> Optional[dict]:
+        """Decode the x402 settlement receipt off a paid response, or None.
+
+        Base64 JSON in PAYMENT-RESPONSE (v2) or X-PAYMENT-RESPONSE (v1). Read
+        by hand rather than through the x402 library so a receipt in a shape
+        a newer library rejects still reaches the caller: this is evidence
+        for a human to reconcile, not an input anything here acts on. Never
+        raises -- a malformed receipt must not turn a delivered, paid audit
+        into an exception.
+        """
+        header = response.headers.get("PAYMENT-RESPONSE") or response.headers.get(
+            "X-PAYMENT-RESPONSE"
+        )
+        if not header:
+            return None
+        try:
+            import base64
+            import json
+
+            padded = header + "=" * (-len(header) % 4)
+            decoded = json.loads(base64.b64decode(padded).decode("utf-8"))
+            return decoded if isinstance(decoded, dict) else None
+        except Exception:
+            return None
 
     @staticmethod
     def _safe_json(response: httpx.Response) -> Any:

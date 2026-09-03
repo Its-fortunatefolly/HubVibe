@@ -9,6 +9,79 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-03: THE WHOLE PAID PATH RAN, END TO END, WITH THE REAL LIBRARY. And the payer now gets a receipt.
+
+Every x402 test in `tests/` mocks the library's server object. So nothing
+had ever pushed a real signed EIP-3009 authorization through the real x402
+HTTP facilitator client into a facilitator and back out as a settled audit --
+which is exactly where #82 and #83 lived, and why two live attempts found
+them instead of a test. `scripts/simulate-paid-call.py` is that missing
+layer, and it is committed so it stays run:
+
+- boots the real service on localhost with the live x402 configuration
+  (`MAX_CONCURRENT_AUDITS=1`, one API-key audit first, so the paid call
+  lands on a Playwright-poisoned thread -- the #83 precondition);
+- points it at a stub facilitator that is **not a rubber stamp**: `/verify`
+  and `/settle` recover the EIP-712 signer from the signature (the x402
+  facilitator's own check, minus chain state), refuse a wrong recipient,
+  amount, or window, refuse a re-used nonce, and catalog the Bazaar record
+  only after the x402 library's own facilitator-side validator accepts it.
+  `/supported` mirrors what the owner read off xpay.sh, byte for byte;
+- drives it with `scripts/first-paid-call.sh` -- the owner's script, the
+  real client, a throwaway funded wallet (the stub also serves the balance
+  RPC so the check runs instead of skipping).
+
+**Result on current main: 22 passed, 0 failed.** `/supported -> /verify ->
+audit -> /settle`, once each, same signed payload both times, $0.03 to the
+configured recipient from a different payer, v2 header path, Bazaar record
+valid and indexed, no `asyncio.run()` error, no traceback. `--no-index`
+mirrors xpay's `{"message":"Not Found"}` and passes too. Run it before every
+deploy that touches payments:
+
+```bash
+python3 scripts/simulate-paid-call.py
+```
+
+(Needs the service deps and a Chromium Playwright can launch.)
+
+**The one thing it found: the node never returned the settlement receipt.**
+x402 spec step 10 puts the facilitator's settle response -- transaction
+hash, network, payer -- in the `PAYMENT-RESPONSE` header of the 200
+(`X-PAYMENT-RESPONSE` for v1). Every paid route returned a bare dict, so a
+paying agent got an audit and proof of nothing; the owner, after the first
+real payment, would have had to hunt a wallet app for the transfer. Now:
+
+- `settle_sync` keeps the `SettleResponse` on the pending payment;
+  `receipt_headers()` encodes it under both names via the library's own
+  encoder; `_deliver()` is the last line of all six paid routes and the
+  MCP tool call attaches it. No settlement, no header -- a receipt on a
+  refused settle would be a forged proof of payment. Never raises.
+- `hubvibe_tollbooth.py` keeps it as `booth.last_settlement`.
+- `first-paid-call.sh` prints `https://basescan.org/tx/<hash>` after a
+  settlement, and says plainly when the node sent no receipt (a deployed
+  revision that predates this).
+- `agent.json` `payment.receipt` tells payers where to look.
+
+Fifteen tests, each proved by reintroducing its bug: forgetting the settle
+result, never attaching the header, one route bypassing `_deliver`, the
+client dropping the receipt, the stub rubber-stamping signatures, the script
+not printing the link -- all red, then green. Suite: read it off the run.
+Lint gate 0.
+
+Also gone: `reg.sh` (a one-line Glama registration curl; Glama is done per
+the 2026-08-18 entry). `.sim-paid-call/` is the simulation's scratch dir and
+is gitignored.
+
+**What is left is unchanged and is not code:** deploy current `main`
+(`bash scripts/repair-and-deploy.sh`, from a checkout that has this entry),
+confirm the payer wallet holds USDC on Base at the Basescan link the script
+prints, then `bash scripts/first-paid-call.sh`. The receipt line it now
+prints is the proof. A rejection after that deploy carries the facilitator's
+reason in `bash scripts/x402-log.sh`. mcp.json / agent.json were re-read for
+crawler quality: every tool has title, description, strict input schema
+with examples, output schema, and annotations, and a test pins the static
+file to the live catalog -- nothing to change there.
+
 ## 2026-09-02: THE REJECTION IS ROOT-CAUSED. The node killed its own verify on a poisoned thread.
 
 The #79 logging paid for itself on its first live outing. `x402-log.sh`,
@@ -1429,6 +1502,10 @@ exist, and it strips placeholder x402 values before they can reach a live
 revision.
 
 ## What is left
+
+**Superseded by the dated entries at the top of this file — read the newest
+one first; its last paragraph is the current list.** What follows is the
+2026-08-27 state, kept for history.
 
 **THE ONE THING — half done.** The deploy landed and the checker proved it:
 **36/36 against the deployed node, 2026-08-27**, including both payability

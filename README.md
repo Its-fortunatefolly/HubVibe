@@ -139,6 +139,11 @@ Only an audit that produced a result.
   has delivered.
 - A rate-limited request returns **429** with `Retry-After`, checked before any
   payment is touched, so it costs nothing.
+- A settled x402 payment gets a receipt: the facilitator's settle response
+  (transaction hash, network, payer) comes back on the 200 in the
+  `PAYMENT-RESPONSE` header (`X-PAYMENT-RESPONSE` for v1 clients), exactly
+  as the x402 spec describes. The x402 client libraries decode it; the
+  bundled `hubvibe_tollbooth.py` keeps it as `last_settlement`.
 
 ## Discovery
 
@@ -268,6 +273,10 @@ wcag-audit-engine/        the audit service (this is the product)
 privacy-compliance-scanner/
 dead-end-resolver/
 scripts/verify-live.sh    verifies a deployed node from outside
+scripts/simulate-paid-call.py
+                          the whole x402 paid path, locally, for free
+scripts/first-paid-call.sh
+                          the same paid path against the live node, for $0.03
 tests/
 ```
 
@@ -282,6 +291,15 @@ pytest tests/ -q
 whole discovery surface, every paid route answering 402 rather than 404, and
 that the 402 is actually machine-actionable. Green unit tests do not prove a
 deploy; this does.
+
+`scripts/simulate-paid-call.py` proves the paid path itself without spending
+anything: it boots the real service with the live x402 configuration against
+a stub facilitator that recovers the EIP-712 signer from every payment it is
+sent, then drives it with the real client through `first-paid-call.sh`. It
+checks that verify happens before the audit and settle after it, that the
+Bazaar record rides the payment and passes the x402 validator, and that the
+200 carries the settlement receipt. Needs a Chromium Playwright can launch
+(`python -m playwright install chromium`).
 
 ## Honest limits
 
