@@ -3205,4 +3205,7 @@ def test_the_base_app_id_meta_tag_is_served_in_the_head(monkeypatch):
     html = client.get("/").text
 
     head = html[: html.index("</head>")]
-    assert '<meta name="base:app_id" content="6a83832901463168d7e651ca">' in head
+    # Byte-identical to the snippet Base's Add Domain dialog hands out,
+    # self-closing slash included. A parser does not care; a verifier that
+    # string-matches its own snippet does, and that failure is silent.
+    assert '<meta name="base:app_id" content="6a83832901463168d7e651ca" />' in head
