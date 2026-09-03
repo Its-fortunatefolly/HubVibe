@@ -397,9 +397,31 @@ fi
 MIN_SCALE=$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" \
   --format='value(spec.template.metadata.annotations["autoscaling.knative.dev/minScale"])' 2>/dev/null)
 if [ -n "$MIN_SCALE" ] && [ "$MIN_SCALE" -gt 0 ] 2>/dev/null; then
-  warn "min-instances=$MIN_SCALE: you are paying to keep an instance warm"
-  warn "24/7. On a browser-sized container that is real money against zero"
-  warn "traffic. Set to 0 with: gcloud run services update $SERVICE --project=$PROJECT --region=$REGION --min-instances=0"
+  # This used to only WARN, printing the gcloud command for a human to run.
+  # It warned on every deploy for weeks while the meter ran, and the bill
+  # reached $300 before anyone acted on it. A warning nobody reads is not a
+  # control; the money leaves either way.
+  #
+  # So it is repaired, like the malformed tempo recipient above, and for the
+  # same reason: keeping an instance warm has no valid use at zero paid
+  # traffic. Cold starts cost an agent a few seconds on the first call after
+  # an idle period. Idle billing costs real dollars every hour forever.
+  # KEEP_WARM=1 opts back in once paid volume makes the trade worth it.
+  if [ -n "${KEEP_WARM:-}" ]; then
+    warn "min-instances=$MIN_SCALE and KEEP_WARM is set -- leaving it warm."
+    warn "That is real money per hour against current traffic. Unset KEEP_WARM"
+    warn "to have this set it back to 0."
+  else
+    warn "min-instances=$MIN_SCALE: paying to keep an instance warm 24/7."
+    warn "Setting it to 0 -- at zero paid traffic that is pure loss."
+    if gcloud run services update "$SERVICE" --project="$PROJECT" \
+         --region="$REGION" --min-instances=0 >/dev/null 2>&1; then
+      ok "min-instances set to 0; idle billing stops"
+    else
+      warn "could not set it. Run this yourself, it is the whole bill:"
+      warn "  gcloud run services update $SERVICE --project=$PROJECT --region=$REGION --min-instances=0"
+    fi
+  fi
 fi
 
 if [ "$PREFLIGHT_FAILED" -ne 0 ]; then
