@@ -3188,3 +3188,21 @@ def test_a_response_carries_no_key_when_none_was_issued(monkeypatch):
     result = {"status": "ok"}
     module._attach_issued_key(result, auth)
     assert "api_key" not in result
+
+
+def test_the_base_app_id_meta_tag_is_served_in_the_head(monkeypatch):
+    """Base's domain verifier fetches / and reads this tag to confirm the
+    domain belongs to the app. It has to be in the <head> of the page the
+    live service actually serves -- not merely present in the repo -- so this
+    asserts it through the route, and asserts the exact id: a truncated or
+    edited value verifies as nothing, and the failure mode is a registration
+    that silently never completes.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    html = client.get("/").text
+
+    head = html[: html.index("</head>")]
+    assert '<meta name="base:app_id" content="6a83832901463168d7e651ca">' in head
