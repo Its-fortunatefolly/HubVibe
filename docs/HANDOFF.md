@@ -9,6 +9,79 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-02: THE REJECTION IS ROOT-CAUSED. The node killed its own verify on a poisoned thread.
+
+The #79 logging paid for itself on its first live outing. `x402-log.sh`,
+owner-run:
+
+```
+x402 verify FAILED before the facilitator could answer
+  (facilitator=https://facilitator.xpay.sh price=$0.03):
+  RuntimeError: asyncio.run() cannot be called from a running event loop
+```
+
+**Mechanism, reproduced deterministically, then fixed, then re-proven.**
+Playwright's sync API (`app/browser_pool.py`) keeps a running asyncio event
+loop in each worker thread for the lifetime of the pooled browser — that is
+how the sync API works — and anyio REUSES those threads. So any request that
+lands on a thread that has ever served an audit (even one whose browser
+launch failed, because `sync_playwright().start()` runs first) finds
+`asyncio.get_running_loop()` succeeding, and the bare `asyncio.run()` inside
+`verify_only_sync` raised before the facilitator was ever contacted. Bare
+402 to the caller, every time, whatever the wallet held.
+
+Why no simulation had caught it: none of them ran a real audit before the
+paid call, so no worker thread was poisoned. With `MAX_CONCURRENT_AUDITS=1`
+(one worker thread) it reproduces on the second request, byte-for-byte the
+live error, line 856 and all.
+
+Fixed with `_run_coro_sync()`: when the current thread hosts a running loop,
+the coroutine is handed to a fresh thread and `asyncio.run` there; otherwise
+plain `asyncio.run`. Applied to all three payment call sites — verify,
+settle (where this bug costs money directly: audit delivered, then settle
+dies), and the legacy verify+settle. An AST-counted test refuses any new
+bare `asyncio.run()` in the module.
+
+Proof: three in-loop tests plus the AST guard, red under the bare call and
+green under the fix; then the same poisoned-thread repro re-run — the stub
+facilitator RECEIVED `/verify` and the node logged the facilitator's own
+reason. **501 passed, 1 skipped**, lint 0.
+
+**With xpay.sh confirmed compatible (next entry) this was the last known
+in-code blocker on the paid path.** After deploying this, what remains is
+the wallet: fund the payer and run `first-paid-call.sh`.
+
+## 2026-09-02: OWNER READ xpay.sh /supported — it is COMPATIBLE. Do not re-litigate.
+
+The owner ran `curl -s https://facilitator.xpay.sh/supported` from Cloud
+Shell (the sandbox cannot; every facilitator host is egress-blocked). The
+response, read off the owner's screen:
+
+```json
+{"kinds":[
+  {"x402Version":2,"scheme":"exact","network":"eip155:8453"},
+  {"x402Version":2,"scheme":"exact","network":"eip155:84532"},
+  {"x402Version":1,"scheme":"exact","network":"base"},
+  {"x402Version":1,"scheme":"exact","network":"base-sepolia"}],
+ "extensions":[],
+ "signers":{"eip155:*":["0x2772F7F74ac0aCA38C6238aA5EcE72B27bEB8C17"]}}
+```
+
+So the fork the #82 entry below left open is resolved: **xpay.sh lists Base
+mainnet under BOTH names** — `eip155:8453` for v2 and `base` for v1. The #82
+gate passes both versions against it and withholds nothing. The facilitator
+does not need to change.
+
+Which means the vocabulary mismatch #82 guards against was NOT the cause of
+the two rejected live payments — the deployed revision at the time predated
+#79 and threw the reason away, so their cause is still unknown. The leading
+unexcluded candidate remains the unfunded paying wallet
+(`0x5bcea6496599D65E432E50340056194D92F95d06` — balance never verified; the
+Base RPC failed from Cloud Shell on every run). After deploying current
+main, the next rejection prints its reason via `bash scripts/x402-log.sh`.
+#82 stays: it turns a silent config-mismatch failure class into a loud one,
+whichever facilitator is set.
+
 ## 2026-09-02: SIMULATED THE REJECTION. The node advertised x402 versions it could not verify.
 
 Owner's instruction: stop looping, simulate, solve. Done with a stub
