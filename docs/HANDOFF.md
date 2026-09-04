@@ -49,6 +49,31 @@ Cloud Billing console, and is worth a calendar reminder.
 `bash scripts/repair-and-deploy.sh` (from a checkout at or after this
 entry) → `bash scripts/first-paid-call.sh`.
 
+**Also done the same night, on GitHub, at the owner's instruction:**
+
+- #86 and #87 are merged; `main` carries the simulation, the receipt, and
+  the diagnostics above.
+- **The Action repo was two features behind.** `diff -r` of a fresh
+  `scripts/publish-action-repo.sh` output against
+  `Its-fortunatefolly/hubvibe-audit-action` showed it had never received the
+  x402 path: no `wallet-key` / `max-price-usd` inputs, no
+  `scripts/x402_pay.py`, no "pay per run without an account" section. So
+  `@v1` could only run with a subscription key. Its `main` is now `075358a`,
+  generated verbatim from HubVibe `d247945`, diff clean.
+- **The `v1` and `v1.0.0` tags still point at `5e77da7`, the old main.**
+  The sandbox's git proxy silently drops every tag ref push (force, delete,
+  and even a brand-new tag all answer "Everything up-to-date" and change
+  nothing), so the tags could not be moved from here. Two lines for the
+  owner, in Cloud Shell, in the ACTION repo:
+
+  ```bash
+  cd ~ && (test -d hubvibe-audit-action || git clone https://github.com/Its-fortunatefolly/hubvibe-audit-action) && cd hubvibe-audit-action && git fetch origin main
+  git tag -f -a v1 -m v1 origin/main && git tag -f -a v1.0.0 -m v1.0.0 origin/main && git push -f origin v1 v1.0.0
+  ```
+
+  The push output must say `To https://github.com/Its-fortunatefolly/hubvibe-audit-action`.
+  A Release (Marketplace publish) is still UI-only.
+
 ## 2026-09-04: the deploy and the paid call BOTH stopped, and BOTH hid the reason
 
 Owner ran the three commands after #86 merged. Read off the screenshot:
