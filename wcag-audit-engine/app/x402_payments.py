@@ -751,38 +751,41 @@ def _facilitator_supports(version: int, network: str) -> bool:
     return True
 
 
-def payment_required_header(
+def payment_required_v2(
     price: Optional[str] = None,
     resource_url: Optional[str] = None,
     description: Optional[str] = None,
     extensions: Optional[dict] = None,
-) -> dict:
-    """The x402 **v2** challenge, as the `PAYMENT-REQUIRED` header, or `{}`.
+):
+    """The x402 **v2** challenge as the library's `PaymentRequired` model, or
+    None when this node cannot take a v2 payment right now.
 
-    v2 does not put the challenge in the body at all. The client checks for
-    this header first and only falls back to parsing the body as v1 -- so
-    without it, every v2 client is served the v1 path whether or not it wants
-    it, and the v2 `extensions` slot (where the Bazaar discovery record
-    actually belongs in v2) has nowhere to live.
+    One builder for every transport. The HTTP 402 carries it base64-encoded in
+    the `PAYMENT-REQUIRED` header (payment_required_header); the MCP paywall
+    carries the same object as JSON in the tool result's `structuredContent`
+    (payment_required_v2_dict). Two hand-built copies of the challenge would
+    be two places for the price, the recipient or the network to drift.
 
     This is also the only place a service can name itself for the index:
     `ResourceInfo.service_name` and `.tags` are what an agent shopping the
     Bazaar by capability matches against. In the v1 body there is no field
     for either, so a v1-only node is at best an anonymous row.
+
+    Never raises: any failure is logged once and answered with None, so a
+    caller can still send the v1 body, which is still payable.
     """
     if not is_configured():
-        return {}
+        return None
     # Only offer v2 if the facilitator will take a v2 payment on this network.
     # Otherwise a v2 client signs for a network the node cannot verify.
     if not _facilitator_supports(2, _NETWORK):
-        return {}
+        return None
     resolved = price or _PRICE
     try:
-        from x402.http.utils import encode_payment_required_header
         from x402.schemas import PaymentRequired, PaymentRequirements, ResourceInfo
 
         priced = _priced_asset(resolved)
-        challenge = PaymentRequired(
+        return PaymentRequired(
             x402Version=2,
             error="payment_required",
             resource=ResourceInfo(
@@ -805,11 +808,141 @@ def payment_required_header(
             ],
             extensions=extensions or None,
         )
-        return {"PAYMENT-REQUIRED": encode_payment_required_header(challenge)}
     except Exception as exc:
         # Same trade as the Bazaar extension: never let the richer path break
         # the challenge. A v1 body still goes out and is still payable.
         _warn_unpayable_challenge(exc)
+        return None
+
+
+def payment_required_v2_dict(
+    price: Optional[str] = None,
+    resource_url: Optional[str] = None,
+    description: Optional[str] = None,
+    extensions: Optional[dict] = None,
+) -> dict:
+    """The v2 challenge as the wire-shaped dict (camelCase, no nulls), or {}.
+
+    This is exactly what the x402 MCP server wrapper puts in a paywalled
+    tool result's `structuredContent`, and exactly what the x402 MCP client
+    parses back out of it (`parse_payment_required` on the dict). Same
+    serialisation as the header path -- `by_alias=True, exclude_none=True` --
+    so a facilitator that re-marshals the echoed `resource` sees no nulls.
+    """
+    challenge = payment_required_v2(
+        price=price, resource_url=resource_url, description=description, extensions=extensions
+    )
+    if challenge is None:
+        return {}
+    try:
+        return challenge.model_dump(by_alias=True, exclude_none=True)
+    except Exception as exc:
+        _warn_unpayable_challenge(exc)
+        return {}
+
+
+def payment_required_header(
+    price: Optional[str] = None,
+    resource_url: Optional[str] = None,
+    description: Optional[str] = None,
+    extensions: Optional[dict] = None,
+) -> dict:
+    """The x402 **v2** challenge, as the `PAYMENT-REQUIRED` header, or `{}`.
+
+    v2 does not put the challenge in the body at all. The client checks for
+    this header first and only falls back to parsing the body as v1 -- so
+    without it, every v2 client is served the v1 path whether or not it wants
+    it, and the v2 `extensions` slot (where the Bazaar discovery record
+    actually belongs in v2) has nowhere to live.
+    """
+    challenge = payment_required_v2(
+        price=price, resource_url=resource_url, description=description, extensions=extensions
+    )
+    if challenge is None:
+        return {}
+    try:
+        from x402.http.utils import encode_payment_required_header
+
+        return {"PAYMENT-REQUIRED": encode_payment_required_header(challenge)}
+    except Exception as exc:
+        _warn_unpayable_challenge(exc)
+        return {}
+
+
+# The keys the x402 MCP transport uses, read off the library
+# (x402.mcp.constants) rather than recalled. A payment rides in the tool
+# call's `params._meta["x402/payment"]`; the settlement receipt rides back in
+# the result's `_meta["x402/payment-response"]`. There is no HTTP header on
+# this path: an MCP client has no access to the transport's headers at all.
+MCP_PAYMENT_META_KEY = "x402/payment"
+MCP_PAYMENT_RESPONSE_META_KEY = "x402/payment-response"
+
+
+def payment_header_from_meta(value) -> Optional[str]:
+    """Turn the `_meta["x402/payment"]` value of an MCP tool call into the
+    base64 form the header path verifies, or None when there is nothing there.
+
+    The official x402 MCP client sends the PaymentPayload as a JSON object
+    (`payload.model_dump(by_alias=True)`); the official server also accepts a
+    JSON string. Both are re-encoded exactly the way a `PAYMENT-SIGNATURE`
+    header is encoded (`safe_base64_encode(json)`), so ONE verify path --
+    nonce ledger, facilitator loop, logging, all of it -- serves both
+    transports. A second verify implementation for MCP would be a second
+    place for the replay guard to be forgotten.
+
+    A string that is not JSON is passed through untouched, on the assumption
+    it is already the base64 header form; the decoder fails closed on it if
+    it is not. Never raises.
+    """
+    try:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return _encode_payment_json(json.dumps(value))
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            if stripped[0] in "{[":
+                json.loads(stripped)  # must be a JSON document, or fall through
+                return _encode_payment_json(stripped)
+            return stripped
+    except Exception:
+        return None
+    return None
+
+
+def _encode_payment_json(document: str) -> str:
+    from x402.http.utils import safe_base64_encode
+
+    return safe_base64_encode(document)
+
+
+def receipt_meta(pending) -> dict:
+    """The x402 settlement receipt as an MCP result `_meta` entry, or {}.
+
+    The MCP counterpart of receipt_headers(): the official x402 MCP server
+    puts the facilitator's SettleResponse under `_meta["x402/payment-response"]`
+    of the CallToolResult, and the official client reads it from there
+    (`extract_payment_response_from_meta`). Without it an MCP payer gets an
+    audit and no transaction hash -- the same bookkeeping gap the header
+    receipt closed for HTTP callers.
+
+    Same contract as receipt_headers: nothing on a refused or absent
+    settlement (a receipt there would be a forged proof of payment), and it
+    never raises -- the money has moved by the time this runs.
+    """
+    result = getattr(pending, "settle_result", None)
+    if result is None or not getattr(result, "success", False):
+        return {}
+    try:
+        return {MCP_PAYMENT_RESPONSE_META_KEY: result.model_dump(by_alias=True, exclude_none=True)}
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "x402 settled but the MCP receipt could not be serialised (%s: %s); "
+            "the tool result is delivered without _meta.",
+            type(exc).__name__, exc,
+        )
         return {}
 
 

@@ -38,6 +38,13 @@ What it proves, when it exits 0:
     delivered one always is
   * the Bazaar record rides the payment payload and survives validation
   * the 200 carries a PAYMENT-RESPONSE receipt with the settlement tx hash
+  * the MCP paywall is payable by the x402 MCP client shape: the v2 challenge
+    is read out of the tool result's structuredContent, the payment goes in
+    params._meta["x402/payment"], the receipt comes back in _meta, and the
+    facilitator catalogs the tool as an "mcp" Bazaar resource
+  * the delivered MCP result carries structuredContent that validates against
+    the outputSchema the tool advertises -- the official MCP SDK client raises
+    on a non-error result that lacks it, after the payment has settled
   * nothing in the node raised "cannot be called from a running event loop"
   * a replayed signature is refused without reaching the facilitator
   * sixteen concurrent payers against a KEEP-ALIVE facilitator all settle
@@ -56,6 +63,11 @@ Usage:
 
 Needs the service's dependencies and a Chromium Playwright can launch
 (`python -m playwright install chromium`). Exit 0 = every check passed.
+
+SIM_NODE_PYTHON=/path/to/other/python boots the NODE on a different
+interpreter than the one paying, so a client on one x402 release can be
+proved against a node on another -- agents in the wild run whatever x402
+they installed, not the one this repo pins.
 """
 
 from __future__ import annotations
@@ -227,7 +239,7 @@ def _catalog(state: FacilitatorState, fields: dict) -> str | None:
         state.catalog.append(
             {
                 "resourceUrl": url,
-                "type": (ext.get("info") or {}).get("type"),
+                "type": ((ext.get("info") or {}).get("input") or {}).get("type"),
                 "x402Version": fields["version"],
                 "accepts": [fields["payload"].get("accepted") or {}],
                 "lastUpdated": int(time.time()),
@@ -380,8 +392,9 @@ def start_facilitator(port: int, pay_to: str, index: bool) -> FacilitatorState:
 
 def start_node(port: int, env: dict, log_path: Path) -> subprocess.Popen:
     log = open(log_path, "wb")
+    node_python = os.environ.get("SIM_NODE_PYTHON") or sys.executable
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
+        [node_python, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
         cwd=SERVICE_DIR,
         env=env,
         stdout=log,
@@ -606,6 +619,41 @@ def main() -> int:
             f"PAYMENT-RESPONSE header carries the settlement transaction ({receipt_tx})",
         )
 
+        step("MCP: the x402 MCP client shape -- v2 challenge in structuredContent, payment in _meta")
+        mcp_tx, mcp_result = _mcp_paid_call(base, payer, f"{facilitator}/page")
+        with state.lock:
+            mcp_settles = [e for e in state.log if e["path"] == "/settle"]
+            mcp_verifies = [e for e in state.log if e["path"] == "/verify"]
+            catalog_now = list(state.catalog)
+        last_settle = mcp_settles[-1] if mcp_settles else {}
+        checks.expect(
+            mcp_result is not None and mcp_result.get("isError") is False,
+            "the paid MCP tool call returned a result (isError=%s)" % (mcp_result or {}).get("isError"),
+        )
+        checks.expect(
+            mcp_tx is not None and mcp_tx == last_settle.get("transaction"),
+            f"_meta['x402/payment-response'] carries the settlement transaction ({mcp_tx})",
+        )
+        checks.expect(
+            len(mcp_verifies) == 3 and len(mcp_settles) == 3,
+            f"the MCP payment was verified and settled once each (verify={len(mcp_verifies)}, settle={len(mcp_settles)})",
+        )
+        checks.expect(
+            (last_settle.get("resource_url") or "") == f"{base}/mcp",
+            f"the MCP payment names the MCP endpoint as its resource ({last_settle.get('resource_url')})",
+        )
+        if not args.no_index:
+            checks.expect(
+                any(c["type"] == "mcp" and c["resourceUrl"] == f"{base}/mcp" for c in catalog_now),
+                "the MCP tool is in the facilitator's Bazaar index as an mcp resource",
+            )
+        schema_problem = _output_schema_problem(base, "audit_wcag", mcp_result or {})
+        checks.expect(
+            schema_problem is None,
+            "the delivered MCP result validates against the tool's advertised outputSchema"
+            + (f" -- {schema_problem}" if schema_problem else ""),
+        )
+
         step("Replay: the same signed payment sent again")
         with state.lock:
             verifies_before = sum(1 for e in state.log if e["path"] == "/verify")
@@ -712,15 +760,63 @@ def main() -> int:
     return 1 if checks.failed else 0
 
 
-def _x402_http_client(payer):
+def _x402_core_client(payer):
     from x402 import max_amount, x402ClientSync
-    from x402.http import x402HTTPClientSync
     from x402.mechanisms.evm import EthAccountSigner
     from x402.mechanisms.evm.exact import register_exact_evm_client
 
     client = x402ClientSync()
     register_exact_evm_client(client, EthAccountSigner(payer), policies=[max_amount(150_000)])
-    return x402HTTPClientSync(client)
+    return client
+
+
+def _x402_http_client(payer):
+    from x402.http import x402HTTPClientSync
+
+    return x402HTTPClientSync(_x402_core_client(payer))
+
+
+def _mcp_paid_call(base: str, payer, target_url: str):
+    """Pay for one tool call the way the x402 MCP client does.
+
+    The library's MCP client needs an MCP SDK session; this node speaks plain
+    JSON-RPC over POST, so the client's steps are replayed here with the
+    library's own helpers: read the challenge out of the tool result with
+    `extract_payment_required_from_result`, sign it with the payment client,
+    send the payload in `params._meta["x402/payment"]`, read the receipt
+    back with `extract_payment_response_from_meta`. Returns (tx hash or
+    None, the paid result dict or None)."""
+    from x402.mcp.types import MCPToolResult
+    from x402.mcp.utils import (
+        extract_payment_required_from_result,
+        extract_payment_response_from_meta,
+    )
+
+    def _as_result(result: dict) -> MCPToolResult:
+        return MCPToolResult(
+            content=result.get("content") or [],
+            is_error=bool(result.get("isError")),
+            meta=result.get("_meta"),
+            structured_content=result.get("structuredContent"),
+        )
+
+    call = {
+        "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+        "params": {"name": "audit_wcag", "arguments": {"url": target_url}},
+    }
+    status, _, body = _post(f"{base}/mcp", call)
+    result = (body or {}).get("result") or {}
+    challenge = extract_payment_required_from_result(_as_result(result))
+    if challenge is None:
+        print(f"      unpaid MCP call: HTTP {status}, no payable challenge in the result")
+        return None, None
+    payload = _x402_core_client(payer).create_payment_payload(challenge)
+    call["params"]["_meta"] = {"x402/payment": payload.model_dump(by_alias=True)}
+    status, _, body = _post(f"{base}/mcp", call)
+    result = (body or {}).get("result") or {}
+    print(f"      paid MCP call: HTTP {status}, isError={result.get('isError')}")
+    receipt = extract_payment_response_from_meta(_as_result(result))
+    return (receipt.transaction if receipt is not None else None), result
 
 
 def _sign(http_client, headers: dict, body: bytes, request_url: str) -> dict:
@@ -755,6 +851,33 @@ def _paid_call_receipt(base: str, payer, target_url: str):
         if not header:
             return None, pay_headers
         return decode_payment_response_header(header).transaction, pay_headers
+
+
+def _output_schema_problem(base: str, tool_name: str, result: dict):
+    """What the official MCP SDK client would raise on this result, or None.
+
+    Mirrors mcp.client.session.ClientSession.call_tool: on a non-error
+    result for a tool that declares an outputSchema, structuredContent must
+    be present and must validate against that schema, else RuntimeError --
+    in the agent's process, after the payment settled."""
+    import jsonschema
+
+    _, _, body = _post(f"{base}/mcp", {"jsonrpc": "2.0", "id": 12, "method": "tools/list"})
+    tool = next((t for t in body["result"]["tools"] if t["name"] == tool_name), None)
+    if tool is None:
+        return f"{tool_name} is not in tools/list"
+    schema = tool.get("outputSchema")
+    if schema is None:
+        return None
+    if result.get("isError"):
+        return "the result is an error"
+    if "structuredContent" not in result:
+        return "no structuredContent on a tool that declares an outputSchema"
+    try:
+        jsonschema.validate(result["structuredContent"], schema)
+    except jsonschema.ValidationError as exc:
+        return f"structuredContent does not validate: {exc.message}"
+    return None
 
 
 def _load_payments_module(facilitator: str, recipient: str):

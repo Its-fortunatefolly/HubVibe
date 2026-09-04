@@ -220,12 +220,12 @@ class HubVibeTollbooth:
         """Turn a 402 into payment headers, across x402 client versions.
 
         x402 2.21 added a REQUIRED third parameter, `request_url`, to
-        `handle_402_response`. 2.18 -- the version this repo pins -- does not
-        accept it. Calling with the wrong arity raises TypeError *before* any
-        signature exists, so the caller sees "could not construct an x402
-        payment" with nothing on-chain to inspect and no facilitator involved:
-        the exact silent-bounce shape that made revenue look like absent demand
-        in #61.
+        `handle_402_response`. 2.18 -- the version this repo pinned until
+        2026-09-04 (2.22 now) -- does not accept it. Calling with the wrong
+        arity raises TypeError *before* any signature exists, so the caller
+        sees "could not construct an x402 payment" with nothing on-chain to
+        inspect and no facilitator involved: the exact silent-bounce shape
+        that made revenue look like absent demand in #61.
 
         The pin protects the service, but not the two places that matter most
         here. `scripts/first-paid-call.sh` shells out to bare `python3`, which
@@ -244,7 +244,8 @@ class HubVibeTollbooth:
             takes_url = "request_url" in inspect.signature(handler).parameters
         except (TypeError, ValueError):
             # A callable with no introspectable signature (a C function, some
-            # mocks). Fall back to the pinned 2.18 arity rather than guess.
+            # mocks). Fall back to the two-argument (<= 2.20) arity rather
+            # than guess.
             takes_url = False
         if takes_url:
             args.append(request_url)

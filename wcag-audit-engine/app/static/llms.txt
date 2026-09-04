@@ -13,7 +13,13 @@ Machine-readable discovery:
   rate limits, per-endpoint examples
 - /openapi.json -- OpenAPI 3.1 spec for all routes
 - /mcp -- live MCP endpoint (Streamable HTTP, JSON-RPC). Discovery via
-  initialize/tools/list is free; tools/call is billed per call.
+  initialize/tools/list is free; tools/call is billed per call. It speaks
+  the x402 MCP protocol: an unpaid tools/call returns isError with the v2
+  PaymentRequired in structuredContent; send the signed PaymentPayload in
+  params._meta["x402/payment"] (the x402.mcp client does this for you) and
+  the settlement receipt comes back in the result's
+  _meta["x402/payment-response"]. X-PAYMENT / PAYMENT-SIGNATURE / X-API-Key
+  headers on the POST work as well.
 - /mcp.json -- static MCP tool definitions with their httpEndpoint
 - /docs -- interactive API reference
 

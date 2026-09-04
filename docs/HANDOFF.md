@@ -9,6 +9,109 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-04, evening: the MCP paywall could not be paid by any x402 MCP client, and five more ways a payer was turned away
+
+Owner's instruction: make sure the 402, the facilitator and the wallet are
+ready, money lands right, nobody gets turned away. Everything below was
+found by driving the CURRENT x402 client library (2.22.0, the one an agent
+installs today) against the node, not by reading; every fix was proved by
+putting the bug back and watching its test go red, and the end-to-end
+simulation now drives the MCP paid path too.
+
+**1. The MCP paywall was unpayable by every conforming x402 MCP client.**
+The x402 MCP protocol (`x402.mcp` in the library — server wrapper and client,
+identical in 2.18 and 2.22) is precise and it is NOT the HTTP 402 shape: a
+paywalled tool result is `isError: true` with a **v2** `PaymentRequired` in
+`structuredContent`; the client signs for `accepts[0]` and retries with the
+`PaymentPayload` in `params._meta["x402/payment"]`; the settlement comes back
+in the result's `_meta["x402/payment-response"]`. This node served the REST
+402 body (v1, v1 `accepts[]`) as text, and read payments ONLY from HTTP
+headers — which an MCP client cannot send. So a v2 MCP client either parsed
+the text as v1 and signed a v1 payment, or found no v2 challenge; whatever it
+signed went into `_meta`, which nothing here read; it got the same paywall
+back and gave up. From this side: no MCP agent ever called. Same fault as
+#61, one transport over. Proved by simulation on the pre-fix node: the
+x402-shaped MCP payment is re-challenged (`isError=True`), no verify, no
+settle, no receipt, and the tool indexed in the Bazaar as the HTTP route
+rather than as an MCP tool.
+
+Fixed: `_mcp_payment_required()` builds the v2 challenge from the SAME
+builder the HTTP header uses (`x402_payments.payment_required_v2`, so the
+two transports cannot quote different prices or recipients) into
+`structuredContent` and the text; `resource.url` is `/mcp` (what an agent
+that finds the tool in the Bazaar connects to) and the discovery record
+names the tool and its transport. `payment_header_from_meta()` re-encodes
+the `_meta` payload into the header form so the ONE verify path (nonce
+ledger, facilitator loop, logging) serves both transports; an explicit header
+still wins. `receipt_meta()` puts the SettleResponse under
+`_meta["x402/payment-response"]`, beside the header copy. The LLM-facing
+keys (`message`, `price_usd`, `other_rails`, `docs`) survive — the x402
+models ignore unknown fields. With x402 off, `accepts` is empty and the
+client correctly reads "nothing here I can pay".
+
+**2. Browser-resident agents could not read the x402 challenge or their
+receipt.** CORS exposed only `WWW-Authenticate` and `Cache-Control`. A
+browser strips every other response header from a cross-origin response
+before script sees it, so a browser x402 client never saw `PAYMENT-REQUIRED`
+(silently downgraded to the v1 body at best) and never got
+`PAYMENT-RESPONSE` (its transaction hash), nor `Retry-After` on a 429. All
+four are exposed now.
+
+**3. Every unkeyed caller shared ONE rate-limit bucket.** The limiter keyed
+x402/MPP payers and unpaid 402 reads on `request.client.host` — the TCP
+peer, which on Cloud Run is the platform's front-end proxy, one address for
+every caller on earth. Past ten unpaid reads a second per instance, paying
+agents got 429s for traffic that was not theirs. `_client_ip()` now keys on
+the address the platform appended to `X-Forwarded-For` (the last entry;
+`RATE_LIMIT_PROXY_DEPTH=2` behind an external load balancer). Anything a
+client prepends is ignored — a client cannot append after the platform.
+
+**4. Discovery queued behind Chromium.** `MAX_CONCURRENT_AUDITS` caps
+anyio's thread pool and every SYNC route ran in it, so with four audits in
+flight `/health`, `/.well-known/agent.json`, `/mcp.json` and the MCP
+`initialize` waited on a stranger's page load — and a health probe that
+times out marks an instance unhealthy at exactly the moment it is earning.
+The discovery routes and the MCP handshake are coroutines now; only
+`tools/call` (`_mcp_tools_call`) goes to the pool.
+
+**5. A paid MCP result was thrown away by the official MCP SDK — after the
+payment settled.** Every tool advertises an `outputSchema`, and the current
+MCP SDK client (`mcp` 2.1.1, `ClientSession.call_tool`, read off the wheel)
+enforces the spec's consequence on every non-error result: no
+`structuredContent` on a tool with an output schema → `RuntimeError` in the
+agent's process. Successful tool results here carried only text. So the
+order of events for an SDK-driven agent was: pay, audit runs, settle,
+client raises on delivery. Fixed: the result dict is the
+`structuredContent` (the text is the same JSON), and `impact`/`help` in the
+wcag schema are nullable because `v.get(...)` can be None — a strict client
+validating against the advertised schema must never reject a delivered
+audit over a value it was never told about. Error results (the paywall) are
+not validated by the SDK, which is why the v2 challenge may live in
+`structuredContent` there. Tested for all five tools against the real audit
+functions on offline inputs, validated with `jsonschema` the way the SDK
+does; the simulation validates the real paid wcag result the same way.
+
+**6. x402 pinned at 2.18.0 while agents run 2.22.0.** Bumped both
+`requirements.txt` to 2.22.0. Proved in all four combinations with the
+simulation's new `SIM_NODE_PYTHON`: 2.18 client → 2.22 node and 2.22 client
+→ 2.18 node both 43/43, so an agent on either library pays either node.
+2.22 also retries a `settlement_pending` settle once and reconciles a
+broadcast-but-unconfirmed transaction instead of re-broadcasting it.
+
+Suite: **read it off the run** (this entry's PR reports it). Lint gate 0.
+Simulation: **43 passed, 0 failed**, both with and without a Bazaar index —
+the 38 before plus the MCP leg: v2 challenge read from `structuredContent`
+by the library's own extractor, payment sent in `_meta`, verified and
+settled once, receipt in `_meta`, tool catalogued as an `mcp` Bazaar
+resource. Ten unit-level mutations and one simulation-level mutation, all
+red.
+
+**Still not code, still the owner's, and unchanged:** billing on
+`resolver-time`, then `bash scripts/launch.sh` (or `repair-and-deploy.sh`
+then `first-paid-call.sh`) from a checkout at or after this entry. The
+sandbox still cannot reach any facilitator host (every CONNECT is refused by
+the egress policy — checked, not assumed), so nothing here is a live fact.
+
 ## 2026-09-04, CORRECTION from the billing report: the money was CLOUD WORKSTATIONS, not Cloud Run
 
 The owner opened the billing report. Read off the screen:

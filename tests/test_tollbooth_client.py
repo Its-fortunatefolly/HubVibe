@@ -278,8 +278,9 @@ def test_published_prices_match_the_service_catalog():
 #     x402HTTPClientSync.handle_402_response() missing 1 required
 #     positional argument: 'request_url'
 #
-# requirements.txt pins x402==2.18.0, so the service and the test suite are
-# safe. The two places that are not: first-paid-call.sh shells out to bare
+# requirements.txt pinned x402==2.18.0 at the time (2.22.0 now, which takes
+# the third argument), so the service and the test suite were safe. The two
+# places that are not: first-paid-call.sh shells out to bare
 # `python3`, which resolves to whatever x402 the machine has; and this module
 # ships to agent authors who install x402 themselves. The TypeError lands
 # before any signature exists, so there is nothing on-chain to look at and no
