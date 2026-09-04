@@ -461,3 +461,39 @@ def test_an_empty_secret_list_prints_what_gcloud_actually_said(tmp_path):
     assert "gcloud said: ERROR: (gcloud.secrets.list) PERMISSION_DENIED" in result.stdout
     assert "roles/secretmanager.viewer" in result.stdout
     assert "DEPLOY_INVOKED" not in result.stdout
+
+
+def test_billing_disabled_is_named_as_billing_not_as_a_missing_role(tmp_path):
+    """The 2026-09-04 root cause. Google phrases it as a permission error
+    ("does not have permission to access projects instance ... This API
+    method requires billing to be enabled ... reason: BILLING_DISABLED"),
+    so a permission-first hint sends the owner to IAM. Billing off shuts
+    Secret Manager, Cloud Run and the node at once; the hint must say so and
+    hand over the billing console link."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gcloud").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$*" in\n'
+        '  *"secrets describe"*) exit 1 ;;\n'
+        '  *"secrets list"*) cat >&2 <<MSG\n'
+        "ERROR: (gcloud.secrets.list) [owner@example.com] does not have permission to access "
+        "projects instance [resolver-time] (or it may not exist): This API method requires "
+        "billing to be enabled. Please enable billing on project #resolver-time by visiting "
+        "https://console.developers.google.com/billing/enable?project=resolver-time then retry.\n"
+        "  reason: BILLING_DISABLED\n"
+        "MSG\n"
+        "exit 1 ;;\n"
+        "  *) exit 0 ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gcloud").chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["SKIP_VERIFY"] = "1"
+    result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True,
+                            env=env, timeout=60)
+    assert "BILLING IS DISABLED on resolver-time" in result.stdout
+    assert "https://console.developers.google.com/billing/enable?project=resolver-time" in result.stdout
+    assert "roles/secretmanager.viewer" not in result.stdout, "sent to IAM for a billing fault"
+    assert "DEPLOY_INVOKED" not in result.stdout

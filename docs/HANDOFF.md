@@ -9,6 +9,46 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-04, later: ROOT CAUSE — BILLING IS DISABLED ON `resolver-time`. Nothing on it serves.
+
+The owner ran the direct command and read it off the screen:
+
+```
+gcloud secrets list --project=resolver-time
+ERROR: (gcloud.secrets.list) [ladywikert@gmail.com] does not have permission to
+access projects instance [resolver-time] (or it may not exist): This API method
+requires billing to be enabled. Please enable billing on project #resolver-time
+by visiting https://console.developers.google.com/billing/enable?project=resolver-time
+  service: secretmanager.googleapis.com
+  reason: BILLING_DISABLED
+```
+
+**One cause, every symptom.** Billing off on the project shuts Secret Manager
+(the deploy stop), Cloud Run (the node stops serving, which is the non-JSON
+page the paid call read), and anything else billable. It is not IAM, not the
+project setting, not the code, and not a cold start. Nothing deploys and no
+agent can pay until a billing account is linked again:
+
+```
+https://console.developers.google.com/billing/enable?project=resolver-time
+```
+
+Google words this as a permission error, so the hint added earlier today
+would have matched its PERMISSION_DENIED branch and sent the owner to IAM.
+`repair-and-deploy.sh` now matches `BILLING_DISABLED` first and prints the
+billing console link. One test, proved red by removing the case.
+
+**Why it matters beyond today:** a billing lapse is silent from the outside.
+The URL stays, `verify-live.sh` from a stale checkout would read the error
+page as "node down", and every agent that arrived would bounce — the #61
+shape again, caused by the account rather than the code. Whatever caused the
+lapse (card expired, account closed, free-trial credit exhausted) is in the
+Cloud Billing console, and is worth a calendar reminder.
+
+**Then, in order, one line at a time:** link billing → wait ~5 minutes →
+`bash scripts/repair-and-deploy.sh` (from a checkout at or after this
+entry) → `bash scripts/first-paid-call.sh`.
+
 ## 2026-09-04: the deploy and the paid call BOTH stopped, and BOTH hid the reason
 
 Owner ran the three commands after #86 merged. Read off the screenshot:

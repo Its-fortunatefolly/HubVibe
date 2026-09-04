@@ -66,6 +66,14 @@ else
     # says why: a permission it lacks, an API not enabled, an expired login.
     printf '\n  gcloud said: %s\n\n' "${GCLOUD_SAID:-(nothing -- an empty list with no error)}"
     case "$GCLOUD_SAID" in
+      # First, because Google words it as a permission error ("does not have
+      # permission to access projects instance") and the IAM hint below would
+      # match it and send the owner to the wrong console. This is what stopped
+      # the 2026-09-04 deploy: billing off on the project shuts Secret Manager,
+      # Cloud Run and the node itself -- every symptom that night, one cause.
+      *BILLING_DISABLED*|*"billing to be enabled"*|*"enable billing"*)
+        HINT="BILLING IS DISABLED on $PROJECT. Nothing on it serves -- not Secret Manager, not Cloud Run, not the node. Link a billing account here, then wait a few minutes and re-run:
+        https://console.developers.google.com/billing/enable?project=$PROJECT" ;;
       *PERMISSION_DENIED*|*"does not have"*|*403*)
         HINT="this account is not authorised on $PROJECT. It needs roles/secretmanager.viewer (to read) and roles/run.admin (to deploy) on the project -- grant them in IAM, or run this from the account that owns the project." ;;
       *"not been used"*|*"is disabled"*|*"Enable it"*)
