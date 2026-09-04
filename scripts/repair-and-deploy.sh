@@ -450,6 +450,36 @@ if [ -n "$MIN_SCALE" ] && [ "$MIN_SCALE" -gt 0 ] 2>/dev/null; then
   fi
 fi
 
+# 5. Spend guard. The bill reached $300 with zero revenue before anyone saw
+#    it, because nothing was watching. A budget alert is Google's own
+#    tripwire: an email to the billing admins at half and at all of the
+#    amount. It costs nothing, and it is created here so it cannot be
+#    forgotten the way the min-instances warning was. Not fatal: a deploy
+#    must not be blocked by an alert failing to register -- but it is never
+#    silent about it either.
+step "Spend guard: a \$${SPEND_ALERT_USD:-5}/month billing alert on $PROJECT"
+BILLING_ACCOUNT=$(gcloud billing projects describe "$PROJECT" \
+  --format='value(billingAccountName)' 2>/dev/null | sed 's|billingAccounts/||')
+if [ -z "$BILLING_ACCOUNT" ]; then
+  warn "no billing account is linked to $PROJECT -- nothing on it can serve, and there"
+  warn "is nothing to alert on. Link one: https://console.developers.google.com/billing/enable?project=$PROJECT"
+elif gcloud billing budgets list --billing-account="$BILLING_ACCOUNT" \
+       --format='value(displayName)' 2>/dev/null | grep -qx "hubvibe-spend-alert"; then
+  ok "budget alert 'hubvibe-spend-alert' already exists on billing account $BILLING_ACCOUNT"
+else
+  gcloud services enable billingbudgets.googleapis.com --project="$PROJECT" >/dev/null 2>&1 || true
+  if gcloud billing budgets create --billing-account="$BILLING_ACCOUNT" \
+       --display-name="hubvibe-spend-alert" \
+       --budget-amount="${SPEND_ALERT_USD:-5}USD" \
+       --filter-projects="projects/$PROJECT" \
+       --threshold-rule=percent=0.5 --threshold-rule=percent=1.0 >/dev/null 2>&1; then
+    ok "budget alert created: email at 50% and 100% of \$${SPEND_ALERT_USD:-5}/month"
+  else
+    warn "could not create the budget alert. Do it once by hand:"
+    warn "  gcloud billing budgets create --billing-account=$BILLING_ACCOUNT --display-name=hubvibe-spend-alert --budget-amount=${SPEND_ALERT_USD:-5}USD --filter-projects=projects/$PROJECT --threshold-rule=percent=1.0"
+  fi
+fi
+
 if [ "$PREFLIGHT_FAILED" -ne 0 ]; then
   die "preflight found problems above. Nothing was deployed and the running
         revision is untouched. Fix them and re-run -- deploying into a broken
@@ -466,16 +496,18 @@ step "Deploying the current source"
 #   --concurrency       MAX_CONCURRENT_AUDITS (4) audits run per instance;
 #                       at 8 in-flight requests Cloud Run adds an instance
 #                       instead of queueing 80 behind one browser.
-#   --max-instances     the blast radius of a flood of unpaid 402s. 10 x 4
-#                       audits ~ 8 audits/s ~ $20k/day of paid capacity;
-#                       raise it when revenue says so, not before.
+#   --max-instances     the blast radius of a flood of unpaid 402s, and the
+#                       hard ceiling on what a day can cost: 3 instances at
+#                       full tilt is ~$12/day worst case, while 3 x 4 audits
+#                       is ~2 audits/s ~ 170k audits/day ~ $5k/day of PAID
+#                       capacity. Raise it when revenue says so, not before.
 #   --timeout           a bundle is four page loads; 120s covers it and
 #                       stops a hung audit from holding an instance for 5 min.
 #   --cpu-boost         full CPU during cold start, so a paying agent's
 #                       first call after idle is not the one that times out.
 gcloud run deploy "$SERVICE" --source="$SOURCE_DIR" --project="$PROJECT" --region="$REGION" \
   --memory="${MEMORY:-2Gi}" --cpu="${CPU:-2}" --concurrency="${CONCURRENCY:-8}" \
-  --max-instances="${MAX_INSTANCES:-10}" --timeout="${REQUEST_TIMEOUT:-120}" --cpu-boost \
+  --max-instances="${MAX_INSTANCES:-3}" --timeout="${REQUEST_TIMEOUT:-120}" --cpu-boost \
   || die "deploy failed. The previous revision keeps serving; fix the error above and re-run."
 ok "deployed"
 
