@@ -9,6 +9,87 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-04, night: the paid path under LOAD — one bug that would have rejected half of all payers, and four gates a public tollbooth cannot ship without
+
+Owner's instruction: simulate, assess, fix, simulate again, no corners. So
+the paid path was attacked the way traffic attacks it, not the way one
+sequential call does. Every finding below was measured first, then fixed,
+then measured again; every test was proved red by putting its bug back.
+
+**1. Half of all concurrent payments were being rejected by this node, facilitator never asked.**
+The x402 facilitator client keeps one `httpx.AsyncClient` and reuses its
+pooled keep-alive connections. A pooled connection is bound to the event
+loop that opened it, and `_run_coro_sync` ran `asyncio.run()` — a fresh
+loop — per verify/settle. Against a keep-alive stub facilitator with 16
+concurrent payers: **56 of 96 payments failed** with `Event loop is closed`
+/ `bound to a different event loop`. The earlier simulation passed only
+because its stub spoke HTTP/1.0 and closed every connection — a stub easier
+on the code than any real facilitator. Fixed: every facilitator coroutine
+now runs on ONE long-lived loop on its own thread
+(`asyncio.run_coroutine_threadsafe`), bounded by
+`X402_FACILITATOR_CALL_TIMEOUT` (45s). 96/96 after. The stub now speaks
+HTTP/1.1 keep-alive and the simulation hammers the module from 16 threads
+on every run. This also closes #83 for good: the caller's thread never
+runs asyncio at all.
+
+**2. One signed payment bought N audits.** verify does not consume the
+EIP-3009 nonce; only settle does, and settle runs after the audit. Send the
+same signature N times at once: N verifies pass, N audits run, one settle
+succeeds, N−1 are "delivered, not paid". A payer whose settle failed once
+could re-send the same signature forever. Fixed: a per-node nonce ledger,
+admitted at first verify for the authorization's own validity window,
+released only when verify itself fails (a retry after an outage is
+legitimate), kept after a failed settle (no free second audit). Replay is
+refused with a WARNING and never reaches the facilitator. Per instance; the
+facilitator's own nonce check still bounds the cross-instance case to one
+unpaid audit per extra instance.
+
+**3. A facilitator outage was a node outage.** `_get_server()` fetched
+`/supported` under the module lock with the library's 30s timeout, and a
+failed init was retried on the very next request — so with the facilitator
+down every 402 waited up to 30s, serially. Fixed: `/supported` on an 8s
+timeout (`X402_SUPPORTED_TIMEOUT`), a 15s back-off after a failed init
+(`X402_FACILITATOR_RETRY_SECONDS`) during which x402 is simply not
+advertised — fail-closed, fast, MPP still on the 402. Measured: first 402
+during an outage 0.1s, second 0.00s.
+
+**4. The node was a proxy into its own network.** Every audit fetches the
+caller's URL from inside Cloud Run; nothing refused
+`http://169.254.169.254/`, loopback, the VPC, `file://`. Fixed: every
+`/audit*` route and the MCP `tools/call` resolve the hostname and refuse
+any non-globally-routable address, internal names, and non-http schemes
+with a 400 **before rate limiting and before any payment is read** — it
+costs the caller nothing and this node no facilitator call. Twenty-six unit
+cases including the DNS-rebinding shape (public name, private A record).
+`ALLOW_PRIVATE_TARGETS=1` exists for the local simulation only and
+`verify-live.sh` now fails if the deployed node fetches any of three
+internal targets. `verify-live.sh` was also the reason this was hard to see:
+it only ever asked whether routes answer, never what they would fetch.
+
+**5. `html` was unbounded.** A 2 MiB ceiling (`MAX_HTML_BYTES`) on the REST
+model (422) and the MCP argument (error result), both before payment.
+
+**6. Capacity was inherited, not chosen.** `gcloud run deploy --source`
+carried whatever the last revision had — Cloud Run's default is 512 MiB,
+which OOMs under concurrent Chromium contexts. The deploy now pins
+`--memory=2Gi --cpu=2 --concurrency=8 --max-instances=10 --timeout=120
+--cpu-boost` (each env-overridable). Idle cost is unchanged: min-instances
+stays 0 and these bill only while a request is in flight. `--max-instances`
+is the blast radius of a flood of free 402s; raise it when revenue says so.
+
+**7. Revenue is now countable in the log.** One INFO line per settlement:
+`x402 SETTLED (settle) price=… tx=… network=… payer=… amount=…`. "The
+wallet is the counter" stays true; this is what a log query sums per route
+and per hour.
+
+Simulation: **38 passed, 0 failed** — the original 22 plus replay refused,
+64/64 concurrent payments through the keep-alive stub, outage handled in
+0.1s, a second node with the gate on refusing six hostile URLs and an
+oversized body. Suite: read it off the run. Lint gate 0.
+
+**Still not code, still the owner's:** billing on `resolver-time`, then
+deploy, then `first-paid-call.sh`. Nothing above changes that order.
+
 ## 2026-09-04, later: ROOT CAUSE — BILLING IS DISABLED ON `resolver-time`. Nothing on it serves.
 
 The owner ran the direct command and read it off the screen:

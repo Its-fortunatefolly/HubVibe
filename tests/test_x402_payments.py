@@ -1114,3 +1114,280 @@ def test_an_unencodable_receipt_is_logged_and_never_raises(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING):
         assert module.receipt_headers(pending) == {}
     assert "receipt could not be encoded" in caplog.text
+
+
+# --- one event loop for every facilitator call -------------------------------
+#
+# The facilitator client keeps one httpx.AsyncClient with pooled keep-alive
+# connections, and a pooled connection is bound to the loop that opened it.
+# asyncio.run() per call meant a new loop per call, and against a keep-alive
+# facilitator at 16 concurrent payers 56 of 96 payments died in this node with
+# "Event loop is closed" / "bound to a different event loop" -- facilitator
+# never asked. Every facilitator coroutine now runs on one long-lived loop.
+
+
+def test_every_facilitator_call_runs_on_the_same_loop_from_any_thread(monkeypatch):
+    import asyncio
+    import threading
+
+    module = _load_x402(monkeypatch)
+
+    async def which_loop():
+        return id(asyncio.get_running_loop())
+
+    seen = []
+    lock = threading.Lock()
+
+    def worker():
+        for _ in range(3):
+            loop_id = module._run_coro_sync(which_loop())
+            with lock:
+                seen.append(loop_id)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(seen) == 24
+    assert len(set(seen)) == 1, "facilitator coroutines ran on more than one event loop"
+
+
+def test_the_shared_loop_is_not_the_callers_loop(monkeypatch):
+    """The #83 case: a caller thread that already hosts a running loop. The
+    facilitator coroutine must run elsewhere, never on that loop."""
+    import asyncio
+
+    module = _load_x402(monkeypatch)
+
+    async def which_loop():
+        return id(asyncio.get_running_loop())
+
+    async def caller():
+        mine = id(asyncio.get_running_loop())
+        theirs = module._run_coro_sync(which_loop())
+        return mine, theirs
+
+    mine, theirs = asyncio.run(caller())
+    assert mine != theirs
+
+
+def test_a_facilitator_call_that_never_answers_is_bounded(monkeypatch):
+    import asyncio
+    import time
+
+    module = _load_x402(monkeypatch)
+    monkeypatch.setattr(module, "_FACILITATOR_CALL_TIMEOUT", 0.2)
+
+    async def hangs():
+        await asyncio.sleep(30)
+
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        module._run_coro_sync(hangs())
+    assert time.monotonic() - started < 5
+
+
+# --- the facilitator outage must not become a node outage ---------------------
+
+
+def test_an_unreachable_facilitator_is_not_re_probed_on_every_request(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    boom = MagicMock()
+    boom.register = MagicMock()
+    boom.initialize = MagicMock(side_effect=RuntimeError("connection refused"))
+    monkeypatch.setattr(module, "x402ResourceServer", MagicMock(return_value=boom))
+
+    with pytest.raises(RuntimeError):
+        module._get_server()
+    with pytest.raises(RuntimeError) as second:
+        module._get_server()
+    assert boom.initialize.call_count == 1, "the outage was re-probed on the next request"
+    assert "not retried" in str(second.value)
+    assert "connection refused" in str(second.value), "the original failure is carried in the message"
+
+    # Once the window has passed, it tries again.
+    monkeypatch.setattr(module, "_SERVER_RETRY_SECONDS", 0.0)
+    with pytest.raises(RuntimeError):
+        module._get_server()
+    assert boom.initialize.call_count == 2
+
+
+def test_a_failed_facilitator_still_fails_closed_fast(monkeypatch):
+    """During the back-off window the 402 simply carries no x402 -- no
+    exception escapes, and nothing waits on the network."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    boom = MagicMock()
+    boom.register = MagicMock()
+    boom.initialize = MagicMock(side_effect=RuntimeError("connection refused"))
+    monkeypatch.setattr(module, "x402ResourceServer", MagicMock(return_value=boom))
+
+    assert module.payment_required_header("$0.03") == {}
+    assert module.accepts_entry("$0.03") is None
+    assert module.verify_only_sync("signed-payment", price="$0.03") is None
+    assert boom.initialize.call_count == 1
+
+
+def test_supported_is_fetched_with_a_short_timeout(monkeypatch):
+    """/supported is read under the module lock, so its timeout is how long
+    every 402 waits when the facilitator is down. Eight seconds, not the
+    library's thirty."""
+    module = _load_x402(monkeypatch)
+    client = module._FacilitatorClient(module.FacilitatorConfig(url="https://facilitator.example"))
+    http = client._get_sync_client()
+    try:
+        assert http.timeout.connect == 8.0
+        assert http.timeout.read == 8.0
+    finally:
+        http.close()
+
+
+# --- replay: one signed authorization buys one audit -------------------------
+
+
+def _payload_with_nonce(nonce: str):
+    payload = MagicMock()
+    payload.payload = {"authorization": {"nonce": nonce, "from": "0x" + "11" * 20}, "signature": "0xsig"}
+    return payload
+
+
+def _counting_fake_server(monkeypatch, module, **kwargs):
+    server = _install_fake_server(monkeypatch, module, **kwargs)
+    calls = {"verify": 0}
+    original = server.verify_payment
+
+    async def _verify(*a, **k):
+        calls["verify"] += 1
+        return await original(*a, **k)
+
+    server.verify_payment = _verify
+    return calls
+
+
+def test_a_replayed_authorization_is_refused_before_the_facilitator(monkeypatch, caplog):
+    module = _load_x402(monkeypatch)
+    calls = _counting_fake_server(monkeypatch, module)
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: _payload_with_nonce("0xAA"))
+
+    assert module.verify_only_sync("signed", price="$0.03") is not None
+    with caplog.at_level(logging.WARNING):
+        assert module.verify_only_sync("signed", price="$0.03") is None
+    assert calls["verify"] == 1, "the replay reached the facilitator"
+    assert "replayed authorization" in caplog.text
+
+
+def test_a_nonce_is_released_when_the_facilitator_rejects_it(monkeypatch):
+    """A retry after a transient rejection or outage is legitimate."""
+    module = _load_x402(monkeypatch)
+    calls = _counting_fake_server(monkeypatch, module, valid=False)
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: _payload_with_nonce("0xBB"))
+
+    assert module.verify_only_sync("signed", price="$0.03") is None
+    assert module.verify_only_sync("signed", price="$0.03") is None
+    assert calls["verify"] == 2, "a nonce whose verify failed must be admitted again"
+
+
+def test_a_nonce_is_released_when_verify_raises(monkeypatch):
+    module = _load_x402(monkeypatch)
+    calls = _counting_fake_server(monkeypatch, module)
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: _payload_with_nonce("0xCC"))
+
+    def facilitator_down(coro, *a, **k):
+        coro.close()  # never awaited on purpose; close it so Python does not warn
+        raise RuntimeError("facilitator down")
+
+    monkeypatch.setattr(module, "_run_coro_sync", facilitator_down)
+
+    assert module.verify_only_sync("signed", price="$0.03") is None
+    monkeypatch.undo()
+    module = _load_x402(monkeypatch)
+    _counting_fake_server(monkeypatch, module)
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: _payload_with_nonce("0xCC"))
+    assert module.verify_only_sync("signed", price="$0.03") is not None
+    _ = calls
+
+
+def test_a_nonce_stays_spent_after_a_failed_settle(monkeypatch):
+    """Settle failed after delivery: one unpaid audit. Re-sending the same
+    signature must not buy a second one."""
+    module = _load_x402(monkeypatch)
+    calls = _counting_fake_server(monkeypatch, module, settled=False)
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: _payload_with_nonce("0xDD"))
+
+    pending = module.verify_only_sync("signed", price="$0.03")
+    assert pending is not None
+    assert module.settle_sync(pending) is False
+    assert module.verify_only_sync("signed", price="$0.03") is None
+    assert calls["verify"] == 1
+
+
+def test_distinct_nonces_are_independent(monkeypatch):
+    module = _load_x402(monkeypatch)
+    calls = _counting_fake_server(monkeypatch, module)
+    payloads = iter([_payload_with_nonce("0x01"), _payload_with_nonce("0x02")])
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: next(payloads))
+
+    assert module.verify_only_sync("a", price="$0.03") is not None
+    assert module.verify_only_sync("b", price="$0.03") is not None
+    assert calls["verify"] == 2
+
+
+def test_the_replay_guard_is_case_insensitive_on_the_nonce(monkeypatch):
+    module = _load_x402(monkeypatch)
+    calls = _counting_fake_server(monkeypatch, module)
+    payloads = iter([_payload_with_nonce("0xABCD"), _payload_with_nonce("0xabcd")])
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: next(payloads))
+
+    assert module.verify_only_sync("a", price="$0.03") is not None
+    assert module.verify_only_sync("b", price="$0.03") is None
+    assert calls["verify"] == 1
+
+
+def test_a_payload_without_a_nonce_is_not_blocked(monkeypatch):
+    """Other schemes carry no EIP-3009 nonce; the guard must not refuse them."""
+    module = _load_x402(monkeypatch)
+    calls = _counting_fake_server(monkeypatch, module)
+    payload = MagicMock()
+    payload.payload = {"something": "else"}
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: payload)
+
+    assert module.verify_only_sync("a", price="$0.03") is not None
+    assert module.verify_only_sync("a", price="$0.03") is not None
+    assert calls["verify"] == 2
+
+
+def test_the_legacy_path_has_the_same_replay_guard(monkeypatch):
+    module = _load_x402(monkeypatch)
+    calls = _counting_fake_server(monkeypatch, module)
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: _payload_with_nonce("0xEE"))
+
+    assert module.verify_and_settle_sync("signed", price="$0.03") is True
+    assert module.verify_and_settle_sync("signed", price="$0.03") is False
+    assert calls["verify"] == 1
+
+
+# --- every settlement leaves one countable line in the log -------------------
+
+
+def test_each_settlement_is_logged_with_its_transaction(monkeypatch, caplog):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module, settle_response=_real_settle_response())
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    with caplog.at_level(logging.INFO):
+        assert module.settle_sync(pending) is True
+    lines = [r for r in caplog.records if "x402 SETTLED" in r.getMessage()]
+    assert len(lines) == 1
+    assert _RECEIPT_TX in lines[0].getMessage()
+    assert "$0.03" in lines[0].getMessage()
+
+
+def test_a_refused_settlement_is_not_logged_as_settled(monkeypatch, caplog):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module, settled=False)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    with caplog.at_level(logging.INFO):
+        module.settle_sync(pending)
+    assert "x402 SETTLED" not in caplog.text

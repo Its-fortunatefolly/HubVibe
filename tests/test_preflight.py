@@ -497,3 +497,19 @@ def test_billing_disabled_is_named_as_billing_not_as_a_missing_role(tmp_path):
     assert "https://console.developers.google.com/billing/enable?project=resolver-time" in result.stdout
     assert "roles/secretmanager.viewer" not in result.stdout, "sent to IAM for a billing fault"
     assert "DEPLOY_INVOKED" not in result.stdout
+
+
+def test_the_deploy_pins_capacity_instead_of_inheriting_it():
+    """Memory, CPU, concurrency, instance cap, request timeout and startup CPU
+    boost are bill-or-outage decisions. A deploy that inherits whatever the
+    last revision had leaves them to chance; 512 MiB (Cloud Run's default)
+    OOMs under concurrent Chromium contexts, and no instance cap is an
+    unbounded bill under a flood of free 402s."""
+    text = SCRIPT.read_text().replace("\\\n", " ")
+    deploy = [ln for ln in text.splitlines() if ln.lstrip().startswith("gcloud run deploy")]
+    assert len(deploy) == 1
+    line = deploy[0]
+    for flag in ("--memory=", "--cpu=", "--concurrency=", "--max-instances=", "--timeout=", "--cpu-boost"):
+        assert flag in line, f"deploy line lacks {flag}"
+    assert 'MAX_INSTANCES:-10' in line, "the default instance cap is not 10"
+    assert 'MEMORY:-2Gi' in line
