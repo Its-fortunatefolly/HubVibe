@@ -192,20 +192,58 @@ else
 fi
 
 step "Reading the live 402 challenge from $BASE$ROUTE"
-CHALLENGE=$(curl -sS -m 30 -X POST "$BASE$ROUTE" \
-  -H 'Content-Type: application/json' \
-  -d "{\"url\":\"$TARGET_URL\"}" 2>/dev/null)
-[ -n "$CHALLENGE" ] || die "no response from $BASE$ROUTE"
+# min-instances is 0 (#85), so the first request after an idle spell cold-
+# starts a browser-sized container. That can run past 30 seconds, and while
+# it boots Cloud Run answers with its own HTML error page -- which this step
+# used to report as "the response was not JSON -- is the node up?" with the
+# status and the body thrown away (2026-09-04). This read is free, so it gets
+# a longer timeout and two retries on a 5xx or a timeout. The PAYMENT below
+# is never retried; that rule is unchanged.
+RETRY_SLEEP="${HUBVIBE_RETRY_SLEEP:-10}"
+CHALLENGE=""
+STATUS="000"
+for attempt in 1 2 3; do
+  RAW=$(curl -sS -m 120 -w '\n%{http_code}' -X POST "$BASE$ROUTE" \
+    -H 'Content-Type: application/json' \
+    -d "{\"url\":\"$TARGET_URL\"}" 2>/dev/null)
+  STATUS="${RAW##*$'\n'}"
+  CHALLENGE="${RAW%$'\n'*}"
+  case "$STATUS" in
+    000|5??)
+      if [ "$attempt" -lt 3 ]; then
+        warn "HTTP $STATUS from the node (attempt $attempt of 3 -- a cold start?); retrying in ${RETRY_SLEEP}s"
+        sleep "$RETRY_SLEEP"
+        continue
+      fi
+      ;;
+  esac
+  break
+done
+[ -n "$CHALLENGE" ] || die "no response body from $BASE$ROUTE (HTTP $STATUS after 3 attempts).
+      Is the service up?  gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format='value(status.url,status.conditions[0].message)'"
+export STATUS
 
 # One python pass over the challenge: it has to answer four questions, and
 # reading it four times invites the four answers to disagree.
 PREFLIGHT=$(printf '%s' "$CHALLENGE" | python3 -c '
 import json, sys
+import os
 
+raw = sys.stdin.read()
 try:
-    body = json.load(sys.stdin)
+    body = json.loads(raw)
 except Exception:
-    print("FAIL\tthe response was not JSON -- is the node up?")
+    # Show what came back. "not JSON" alone sent the owner guessing whether
+    # the node was up; the status and the first line of the body say.
+    excerpt = " ".join(raw.split())[:200]
+    status = os.environ.get("STATUS", "?")
+    where = ("Cloud Run answered for the service, so the container did not "
+             "answer in time: still cold-starting, or the latest revision "
+             "failed to start. Check: gcloud run services describe hubvibe "
+             "--project=resolver-time --region=us-south1"
+             if status.startswith("5") else "is the node up?")
+    print("FAIL\tthe response was not JSON (HTTP %s). It said: %r -- %s"
+          % (status, excerpt, where))
     sys.exit()
 
 # accepts[] is the x402 spec array as of #61: spec-shaped entries only, no

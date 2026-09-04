@@ -9,6 +9,111 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-04, later: ROOT CAUSE — BILLING IS DISABLED ON `resolver-time`. Nothing on it serves.
+
+The owner ran the direct command and read it off the screen:
+
+```
+gcloud secrets list --project=resolver-time
+ERROR: (gcloud.secrets.list) [ladywikert@gmail.com] does not have permission to
+access projects instance [resolver-time] (or it may not exist): This API method
+requires billing to be enabled. Please enable billing on project #resolver-time
+by visiting https://console.developers.google.com/billing/enable?project=resolver-time
+  service: secretmanager.googleapis.com
+  reason: BILLING_DISABLED
+```
+
+**One cause, every symptom.** Billing off on the project shuts Secret Manager
+(the deploy stop), Cloud Run (the node stops serving, which is the non-JSON
+page the paid call read), and anything else billable. It is not IAM, not the
+project setting, not the code, and not a cold start. Nothing deploys and no
+agent can pay until a billing account is linked again:
+
+```
+https://console.developers.google.com/billing/enable?project=resolver-time
+```
+
+Google words this as a permission error, so the hint added earlier today
+would have matched its PERMISSION_DENIED branch and sent the owner to IAM.
+`repair-and-deploy.sh` now matches `BILLING_DISABLED` first and prints the
+billing console link. One test, proved red by removing the case.
+
+**Why it matters beyond today:** a billing lapse is silent from the outside.
+The URL stays, `verify-live.sh` from a stale checkout would read the error
+page as "node down", and every agent that arrived would bounce — the #61
+shape again, caused by the account rather than the code. Whatever caused the
+lapse (card expired, account closed, free-trial credit exhausted) is in the
+Cloud Billing console, and is worth a calendar reminder.
+
+**Then, in order, one line at a time:** link billing → wait ~5 minutes →
+`bash scripts/repair-and-deploy.sh` (from a checkout at or after this
+entry) → `bash scripts/first-paid-call.sh`.
+
+## 2026-09-04: the deploy and the paid call BOTH stopped, and BOTH hid the reason
+
+Owner ran the three commands after #86 merged. Read off the screenshot:
+
+```
+==> Checking the Stripe secret exists before pointing anything at it
+  STOP  gcloud lists NO secrets in project resolver-time -- it is not seeing the project.
+        Check:  gcloud config list
+        Then:   gcloud config set project resolver-time
+```
+
+then, with the node still on the old revision:
+
+```
+==> Reading the live 402 challenge from https://hubvibe-…/audit/wcag
+  STOP  the response was not JSON -- is the node up?
+```
+
+**Nothing was deployed, nothing was paid, and neither message names its
+cause.** The prompt read `(resolver-time)`, so the project WAS set; #80 made
+every gcloud call pass `--project`; and the script still printed the #80
+guess, because the secret-list branch sent gcloud's stderr to `/dev/null`
+and then reasoned about an empty string. Whatever gcloud actually said —
+a permission this account lacks on the project, the Secret Manager API
+disabled, an expired login — was discarded. The paid-call read did the
+same: `curl … 2>/dev/null` into a Python `json.load`, status and body
+dropped, one 30-second attempt. With min-instances 0 (#85) the first request
+after idle cold-starts a browser-sized container, which can outrun 30s, and
+Cloud Run answers with its own HTML page while it does. That page is the
+"not JSON".
+
+Fixed, both places, by showing what came back instead of guessing:
+
+- `repair-and-deploy.sh` keeps gcloud's stderr and prints it as
+  `gcloud said: …`, then picks the hint that matches it (PERMISSION_DENIED
+  → the IAM roles this account needs; API disabled → the `services enable`
+  line; reauth → `gcloud auth login`; project not found → `projects list`).
+  The `config set project` line is now only the fallback.
+- `first-paid-call.sh` reads the 402 with a 120s timeout and up to three
+  attempts on a 5xx or a timeout (this read is free; the payment is still
+  never retried — the no-loop test on the paying block still holds), and on
+  a non-JSON body prints the HTTP status and the first 200 characters of
+  what the node said, with the `gcloud run services describe` line when it
+  was a 5xx.
+
+Three tests, each proved red by putting the bug back. Simulation still
+22/22 through the new read path.
+
+**What the owner runs next, one line at a time.** First, see the real
+reason the deploy stopped — the script now prints it, but the direct
+command is:
+
+```bash
+gcloud secrets list --project=resolver-time
+```
+
+If that says `PERMISSION_DENIED`, the Cloud Shell account is not the one
+that owns `resolver-time` (or lost the role): grant `roles/secretmanager.viewer`
+and `roles/run.admin` to it in IAM, or switch accounts with
+`gcloud auth login`. If it says the API is disabled:
+`gcloud services enable secretmanager.googleapis.com --project=resolver-time`.
+Then re-run `bash scripts/repair-and-deploy.sh`, and only after it says
+deployed, `bash scripts/first-paid-call.sh`. The new read will wait through
+the cold start on its own.
+
 ## 2026-09-03: THE WHOLE PAID PATH RAN, END TO END, WITH THE REAL LIBRARY. And the payer now gets a receipt.
 
 Every x402 test in `tests/` mocks the library's server object. So nothing

@@ -51,16 +51,42 @@ step "Checking the Stripe secret exists before pointing anything at it"
 if gcloud secrets describe "$STRIPE_SECRET_NAME" --project="$PROJECT" >/dev/null 2>&1; then
   ok "secret $STRIPE_SECRET_NAME exists"
 else
-  AVAILABLE=$(gcloud secrets list --project="$PROJECT" --format='value(name)' 2>/dev/null)
+  # Keep gcloud's stderr. This branch used to discard it and then GUESS the
+  # cause ("gcloud config set project"), and on 2026-09-04 the guess was
+  # wrong: the prompt already read (resolver-time), --project was passed, and
+  # the real reason -- whatever gcloud printed -- was thrown away. The
+  # instruction it printed instead could not have fixed anything.
+  LIST_ERR=$(mktemp)
+  AVAILABLE=$(gcloud secrets list --project="$PROJECT" --format='value(name)' 2>"$LIST_ERR")
+  GCLOUD_SAID=$(tr -s '[:space:]' ' ' <"$LIST_ERR" | cut -c1-600)
+  rm -f "$LIST_ERR"
   if [ -z "$AVAILABLE" ]; then
     # Zero secrets is not a project with no secrets -- this one has several.
-    # It is gcloud not seeing the project at all: wrong project id, or this
-    # account is not authorised on it. Saying "no secret named X" here sent
-    # the owner looking for a secret that was there the whole time.
+    # It is gcloud not seeing the project at all, and gcloud's own message
+    # says why: a permission it lacks, an API not enabled, an expired login.
+    printf '\n  gcloud said: %s\n\n' "${GCLOUD_SAID:-(nothing -- an empty list with no error)}"
+    case "$GCLOUD_SAID" in
+      # First, because Google words it as a permission error ("does not have
+      # permission to access projects instance") and the IAM hint below would
+      # match it and send the owner to the wrong console. This is what stopped
+      # the 2026-09-04 deploy: billing off on the project shuts Secret Manager,
+      # Cloud Run and the node itself -- every symptom that night, one cause.
+      *BILLING_DISABLED*|*"billing to be enabled"*|*"enable billing"*)
+        HINT="BILLING IS DISABLED on $PROJECT. Nothing on it serves -- not Secret Manager, not Cloud Run, not the node. Link a billing account here, then wait a few minutes and re-run:
+        https://console.developers.google.com/billing/enable?project=$PROJECT" ;;
+      *PERMISSION_DENIED*|*"does not have"*|*403*)
+        HINT="this account is not authorised on $PROJECT. It needs roles/secretmanager.viewer (to read) and roles/run.admin (to deploy) on the project -- grant them in IAM, or run this from the account that owns the project." ;;
+      *"not been used"*|*"is disabled"*|*"Enable it"*)
+        HINT="the Secret Manager API is off in $PROJECT. Run: gcloud services enable secretmanager.googleapis.com --project=$PROJECT" ;;
+      *[Rr]eauthentication*|*"credentials"*|*"auth login"*)
+        HINT="the gcloud login has expired. Run: gcloud auth login" ;;
+      *"not found"*|*"could not be found"*)
+        HINT="there is no project with id $PROJECT visible to this account. Check: gcloud projects list" ;;
+      *)
+        HINT="read the message above; it is the fault. Check: gcloud config list, then gcloud config set project $PROJECT" ;;
+    esac
     die "gcloud lists NO secrets in project $PROJECT -- it is not seeing the project.
-        Check:  gcloud config list
-        Then:   gcloud config set project $PROJECT
-        If that is already right, this account may lack access to $PROJECT."
+        $HINT"
   fi
   printf '\n  Available secrets:\n'
   printf '%s\n' "$AVAILABLE" | sed 's/^/    /'
