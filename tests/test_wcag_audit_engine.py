@@ -474,13 +474,19 @@ def test_rate_limiter_evicts_idle_keys_and_stays_bounded(monkeypatch):
     """A dict-of-deques keyed by caller IP that never evicts is an OOM at
     volume -- one leaked entry per unique caller, forever."""
     module = _load_main(monkeypatch)
+    # A controlled clock, not a real 50ms window: on a slow CI runner the 500
+    # checks below took longer than the window and the sweep evicted some of
+    # them before the first assertion (386 == 500). The limiter's behaviour
+    # is a function of time; the test supplies the time.
+    clock = {"now": 1_000_000.0}
+    monkeypatch.setattr(module.time, "time", lambda: clock["now"])
     limiter = module._SlidingWindowLimiter(
         limit=5, window_seconds=0.05, sweep_interval=0.0
     )
     for i in range(500):
         limiter.check(f"ip-{i}")
     assert len(limiter._log) == 500
-    time.sleep(0.06)
+    clock["now"] += 0.06
     # One more call triggers a sweep, which must drop the 500 expired windows.
     limiter.check("fresh-key")
     assert len(limiter._log) == 1
