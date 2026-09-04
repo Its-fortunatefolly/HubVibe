@@ -117,16 +117,38 @@ app = FastAPI(
 
 # Agents call this from browsers, edge workers, and other origins. There are
 # no cookies or sessions here -- authentication is an explicit per-request
-# header -- so a wildcard origin grants no ambient authority. WWW-Authenticate
-# must be exposed or a browser-side caller literally cannot read the MPP
-# payment challenge off a 402 and would have no way to pay.
+# header -- so a wildcard origin grants no ambient authority.
+#
+# Every header a paying client has to READ must be listed in expose_headers,
+# or a browser-resident caller literally cannot see it: the browser strips
+# unlisted response headers from cross-origin responses before script ever
+# sees them. That is every rail's challenge and receipt --
+#   WWW-Authenticate      the MPP challenge on a 402
+#   PAYMENT-REQUIRED      the x402 v2 challenge on a 402 (a v2 client reads
+#                         this FIRST; without it a browser client is silently
+#                         downgraded to the v1 body, or sees no x402 at all)
+#   PAYMENT-RESPONSE /    the x402 settlement receipt on the paid 200 -- the
+#   X-PAYMENT-RESPONSE    transaction hash the payer reconciles against
+#   Retry-After           when to come back after a 429, so a browser agent
+#                         backs off instead of giving up on the node.
+# Request headers (X-PAYMENT, PAYMENT-SIGNATURE, Authorization, X-API-Key) are
+# covered by allow_headers=["*"].
+CORS_EXPOSED_HEADERS = [
+    "WWW-Authenticate",
+    "Cache-Control",
+    "PAYMENT-REQUIRED",
+    "PAYMENT-RESPONSE",
+    "X-PAYMENT-RESPONSE",
+    "Retry-After",
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["WWW-Authenticate", "Cache-Control"],
+    expose_headers=CORS_EXPOSED_HEADERS,
     max_age=86400,
 )
 
@@ -219,6 +241,43 @@ class _SlidingWindowLimiter:
 
 
 _audit_limiter = _SlidingWindowLimiter(RATE_LIMIT_PER_MINUTE, 60.0)
+
+# How many proxy hops sit between the public internet and this container, i.e.
+# which X-Forwarded-For entry is the address the platform itself appended.
+# Cloud Run's front end appends the connecting client's address as the LAST
+# entry (1). A deployment that later puts an external HTTPS load balancer in
+# front gains one more trusted hop and sets 2. Anything a client supplies in
+# the header sits BEFORE the platform's entries and is never read.
+RATE_LIMIT_PROXY_DEPTH = max(1, int(os.environ.get("RATE_LIMIT_PROXY_DEPTH", "1")))
+
+
+def _client_ip(request: Request) -> str:
+    """The address the rate limiter keys an unkeyed caller on.
+
+    `request.client.host` is the TCP peer, and on Cloud Run the TCP peer is
+    the platform's own front-end proxy -- the same address for every caller on
+    earth. Keyed on that, every x402 and MPP payer, and every agent reading an
+    unpaid 402, shared ONE bucket of RATE_LIMIT_PER_MINUTE per instance. Past
+    ten unpaid reads a second, per instance, every paying agent got a 429:
+    refused revenue, keyed on nothing to do with the agent. The limiter exists
+    to stop a single runaway client; it was stopping everyone.
+
+    The address Cloud Run vouches for is the one IT appended to
+    X-Forwarded-For -- the last entry, counting back RATE_LIMIT_PROXY_DEPTH
+    hops. A client can prepend whatever it likes to that header; it cannot
+    append after the platform. Without the header (local test, direct
+    uvicorn) the TCP peer is the client and is used as before.
+    """
+    forwarded = request.headers.get("x-forwarded-for") if request else None
+    if forwarded:
+        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+        if len(hops) >= RATE_LIMIT_PROXY_DEPTH:
+            return hops[-RATE_LIMIT_PROXY_DEPTH]
+        if hops:
+            return hops[0]
+    if request is not None and request.client:
+        return request.client.host
+    return "unknown"
 
 
 # Largest raw-HTML body an audit accepts. A page is tens of kilobytes; two
@@ -577,9 +636,10 @@ def _authorize_and_rate_limit(
     # must be rejected before their payment instrument is touched.
     #
     # x402/MPP payers have no API key to key the limiter on -- fall back to
-    # IP. Either way this is per-instance overload protection, not the
-    # billing boundary: that's Stripe usage records / on-chain settlement.
-    rate_limit_key = x_api_key or (request.client.host if request.client else "unknown")
+    # the client's address (the one the platform vouches for, see
+    # _client_ip). Either way this is per-instance overload protection, not
+    # the billing boundary: that's Stripe usage records / on-chain settlement.
+    rate_limit_key = x_api_key or _client_ip(request)
     if not _audit_limiter.check(rate_limit_key):
         return None, _rate_limited_response()
 
@@ -870,27 +930,27 @@ def _remediation_notes(violations: list) -> Optional[dict]:
 
 
 @app.get("/", response_class=FileResponse)
-def landing_page():
+async def landing_page():
     return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/billing/success", response_class=FileResponse)
-def checkout_success_page():
+async def checkout_success_page():
     return FileResponse(STATIC_DIR / "success.html")
 
 
 @app.get("/billing/cancel", response_class=FileResponse)
-def checkout_cancel_page():
+async def checkout_cancel_page():
     return FileResponse(STATIC_DIR / "cancel.html")
 
 
 @app.get("/llms.txt", response_class=FileResponse)
-def llms_txt():
+async def llms_txt():
     return FileResponse(STATIC_DIR / "llms.txt", media_type="text/plain")
 
 
 @app.get("/mcp.json", tags=["discovery"])
-def mcp_manifest():
+async def mcp_manifest():
     """The MCP tool manifest, with prices and rails taken from live config.
 
     The tool names, descriptions and input schemas come from the static file
@@ -962,12 +1022,12 @@ def mcp_manifest():
 
 
 @app.get("/favicon.svg", response_class=FileResponse, tags=["discovery"])
-def favicon():
+async def favicon():
     return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
 
 
 @app.get("/og-image.png", response_class=FileResponse, tags=["discovery"])
-def og_image():
+async def og_image():
     # Referenced by og:image/twitter:image. Social scrapers fetch this
     # unauthenticated and cache aggressively, so it must stay a stable,
     # public URL -- a link with no preview card is a link people don't click.
@@ -975,12 +1035,12 @@ def og_image():
 
 
 @app.get("/robots.txt", response_class=FileResponse, tags=["discovery"])
-def robots_txt():
+async def robots_txt():
     return FileResponse(STATIC_DIR / "robots.txt", media_type="text/plain")
 
 
 @app.get("/sitemap.xml", response_class=FileResponse)
-def sitemap_xml():
+async def sitemap_xml():
     return FileResponse(STATIC_DIR / "sitemap.xml", media_type="application/xml")
 
 
@@ -994,7 +1054,7 @@ def sitemap_xml():
 # is kept for any environment (local, other hosts) that does not reserve it.
 @app.get("/health", tags=["discovery"])
 @app.get("/healthz", tags=["discovery"])
-def health_check():
+async def health_check():
     return {"status": "ok", "service": "wcag-audit-engine"}
 
 
@@ -1193,7 +1253,7 @@ def _payment_methods_live() -> list:
 
 
 @app.get("/.well-known/agent.json", tags=["discovery"])
-def agent_manifest(request: Request):
+async def agent_manifest(request: Request):
     base = PUBLIC_BASE_URL
     live_methods = _payment_methods_live()
     return {
@@ -1250,7 +1310,17 @@ def agent_manifest(request: Request):
             "receipt": (
                 "A settled x402 payment returns the facilitator's settle "
                 "response -- transaction hash, network, payer -- on the 200 in "
-                "the PAYMENT-RESPONSE header (X-PAYMENT-RESPONSE for v1 clients)."
+                "the PAYMENT-RESPONSE header (X-PAYMENT-RESPONSE for v1 clients). "
+                "Over MCP the same receipt is in the tool result's "
+                "_meta[\"x402/payment-response\"]."
+            ),
+            "mcp": (
+                "The /mcp endpoint speaks the x402 MCP protocol: an unpaid "
+                "tools/call returns isError with the v2 PaymentRequired in "
+                "structuredContent; send the signed PaymentPayload in "
+                "params._meta[\"x402/payment\"] (the x402.mcp client does this "
+                "for you). HTTP headers X-PAYMENT / PAYMENT-SIGNATURE / "
+                "X-API-Key on the POST work too."
             ),
         },
         "limits": {
@@ -1554,8 +1624,14 @@ _MCP_WCAG_OUTPUT_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "id": {"type": "string", "description": "axe-core rule id."},
-                    "impact": {"type": "string", "description": "axe-core impact level."},
-                    "help": {"type": "string"},
+                    # Nullable because the value is `v.get("impact")`: axe-core
+                    # sets it on every violation in practice, but the schema
+                    # describes what the route can emit, and a strict client
+                    # validating structuredContent against this would reject
+                    # a paid, delivered audit over a null it was never told
+                    # about.
+                    "impact": {"type": ["string", "null"], "description": "axe-core impact level."},
+                    "help": {"type": ["string", "null"]},
                     "help_url": {"type": "string", "format": "uri"},
                     "nodes_affected": {"type": "integer", "minimum": 0},
                 },
@@ -1763,7 +1839,7 @@ def _mcp_tool_error(request_id, message: str, details: Optional[dict] = None) ->
 
 
 @app.post("/mcp", tags=["discovery"])
-def mcp_streamable_http(
+async def mcp_streamable_http(
     payload: dict = Body(...),
     request: Request = None,
     x_api_key: Optional[str] = Header(None),
@@ -1777,6 +1853,10 @@ def mcp_streamable_http(
     deciding to buy. Execution (tools/call) goes through exactly the same
     fail-closed authorisation as the REST routes, including verify-then-settle,
     rather than a second copy of the payment logic that could drift from it.
+
+    A coroutine, like every other discovery route: see _mcp_tools_call for
+    why. The handshake and the tool list are answered on the event loop;
+    only tools/call is handed to the audit thread pool.
     """
     method = payload.get("method")
     request_id = payload.get("id")
@@ -1816,89 +1896,199 @@ def mcp_streamable_http(
         return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": _mcp_tools()}}
 
     if method == "tools/call":
-        params = payload.get("params") or {}
-        name = params.get("name")
-        args = params.get("arguments") or {}
+        from starlette.concurrency import run_in_threadpool
 
-        price = _MCP_TOOL_PRICES.get(name)
-        if price is None:
-            return _mcp_tool_error(request_id, f"Unknown tool: {name}")
-        if not args.get("url") and not args.get("html"):
-            return _mcp_tool_error(request_id, "Provide 'url' (or 'html' for wcag/seo).")
-        # Same gates as the REST routes, before any payment is read: a URL
-        # this service will not fetch, or a body no browser would render.
-        html_arg = args.get("html")
-        if isinstance(html_arg, str) and len(html_arg) > MAX_HTML_BYTES:
-            return _mcp_tool_error(
-                request_id,
-                f"'html' is {len(html_arg)} bytes; the limit is {MAX_HTML_BYTES}. "
-                "Nothing was charged.",
-            )
-        url_problem = _target_url_problem(args.get("url"))
-        if url_problem is not None:
-            return _mcp_tool_error(
-                request_id, f"'url' {url_problem}. Nothing was charged."
-            )
-
-        auth, err = _authorize_and_rate_limit(
-            x_api_key, x_payment, authorization, request, price_usd=price
+        return await run_in_threadpool(
+            _mcp_tools_call, payload, request, x_api_key, x_payment, authorization
         )
-        if err is not None:
-            import json as _json
-
-            try:
-                challenge = _json.loads(err.body.decode())
-            except Exception:
-                # Never let a formatting problem turn a payment prompt into a
-                # crash: the caller still needs to know what it costs.
-                challenge = {"error": "payment_required", "price_usd": price}
-
-            # Index this as an MCP resource in the Bazaar, not as the HTTP
-            # route the shared 402 builder described. An agent that finds the
-            # tool there calls it over MCP, so the discovery record has to
-            # name the tool and its transport.
-            tool = next((t for t in _mcp_tools() if t["name"] == name), None)
-            if tool is not None:
-                mcp_bazaar = x402_payments.bazaar_extension_for_mcp_tool(
-                    tool_name=name,
-                    description=tool["description"],
-                    input_schema=tool["inputSchema"],
-                    example={"url": "https://example.com"},
-                )
-                if mcp_bazaar:
-                    challenge["extensions"] = mcp_bazaar
-
-            return _mcp_tool_error(
-                request_id,
-                f"Payment required (${price:.2f} for {name}). Attach X-API-Key, "
-                f"or pay per call with a rail listed in `accepts`.",
-                details=challenge,
-            )
-
-        try:
-            result = _mcp_run_tool(name, args)
-        except Exception as exc:
-            # Not billed: _bill only runs on success, same as the REST routes.
-            return _mcp_tool_error(request_id, f"Audit could not complete: {exc}")
-
-        warning = _bill(auth, price_usd=price)
-        if warning:
-            result["billing_warning"] = warning
-        _attach_issued_key(result, auth)
-
-        import json as _json
-
-        envelope = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {
-                "content": [{"type": "text", "text": _json.dumps(result, indent=2)}],
-                "isError": False,
-            },
-        }
-        return _with_receipt(envelope, auth)
 
     return _jsonrpc_error(request_id, -32601, f"Method not found: {method}")
+
+
+def _mcp_tools_call(
+    payload: dict,
+    request: Request,
+    x_api_key: Optional[str],
+    x_payment: Optional[str],
+    authorization: Optional[str],
+):
+    """Execute one paid tool call. Runs in the audit thread pool, never on
+    the event loop.
+
+    Why the split: MAX_CONCURRENT_AUDITS caps anyio's thread pool, and every
+    SYNC route handler runs in that pool -- so while four audits held their
+    Chromium contexts, `/health`, `/.well-known/agent.json`, `/mcp.json` and
+    the MCP handshake queued behind them. Cloud Run's health probe, a crawler
+    scoring the manifest, and an agent's `initialize` all waited on a
+    stranger's page load, and a probe that times out is an instance marked
+    unhealthy at exactly the moment it is earning. Discovery is pure CPU on
+    static data; it belongs on the event loop. Only this -- the part that
+    runs a browser and waits on the facilitator -- belongs in the pool.
+    """
+    request_id = payload.get("id")
+    params = payload.get("params") or {}
+    name = params.get("name")
+    args = params.get("arguments") or {}
+
+    price = _MCP_TOOL_PRICES.get(name)
+    if price is None:
+        return _mcp_tool_error(request_id, f"Unknown tool: {name}")
+    if not args.get("url") and not args.get("html"):
+        return _mcp_tool_error(request_id, "Provide 'url' (or 'html' for wcag/seo).")
+    # Same gates as the REST routes, before any payment is read: a URL
+    # this service will not fetch, or a body no browser would render.
+    html_arg = args.get("html")
+    if isinstance(html_arg, str) and len(html_arg) > MAX_HTML_BYTES:
+        return _mcp_tool_error(
+            request_id,
+            f"'html' is {len(html_arg)} bytes; the limit is {MAX_HTML_BYTES}. "
+            "Nothing was charged.",
+        )
+    url_problem = _target_url_problem(args.get("url"))
+    if url_problem is not None:
+        return _mcp_tool_error(
+            request_id, f"'url' {url_problem}. Nothing was charged."
+        )
+
+    # The x402 MCP transport carries the payment INSIDE the JSON-RPC
+    # call, as `params._meta["x402/payment"]` -- an MCP client has no
+    # access to HTTP headers at all, so a header was never something it
+    # could send. Re-encoded into the header form so the one verify path
+    # (nonce ledger, facilitator loop, logging) serves both transports;
+    # an explicit header still wins when a caller sends both.
+    meta_payment = x402_payments.payment_header_from_meta(
+        (params.get("_meta") or {}).get(x402_payments.MCP_PAYMENT_META_KEY)
+        if isinstance(params.get("_meta"), dict)
+        else None
+    )
+
+    auth, err = _authorize_and_rate_limit(
+        x_api_key, x_payment or meta_payment, authorization, request, price_usd=price
+    )
+    if err is not None:
+        return _mcp_payment_required(request_id, name, price, err)
+
+    try:
+        result = _mcp_run_tool(name, args)
+    except Exception as exc:
+        # Not billed: _bill only runs on success, same as the REST routes.
+        return _mcp_tool_error(request_id, f"Audit could not complete: {exc}")
+
+    warning = _bill(auth, price_usd=price)
+    if warning:
+        result["billing_warning"] = warning
+    _attach_issued_key(result, auth)
+
+    import json as _json
+
+    # `structuredContent` is not optional here. Every tool advertises an
+    # outputSchema, and the official MCP SDK client (mcp >= 1.10) enforces
+    # the spec's consequence on every non-error result: a tool with an
+    # output schema that returns no structuredContent raises RuntimeError in
+    # the CLIENT, after the call. On a paid call that is the worst order of
+    # events this node can produce -- the payment settled, the audit ran,
+    # and the agent's SDK threw the result away on delivery. The dict IS the
+    # structured result; the text is the same JSON for clients that only
+    # read content.
+    tool_result = {
+        "content": [{"type": "text", "text": _json.dumps(result, indent=2)}],
+        "structuredContent": result,
+        "isError": False,
+    }
+    # The settlement receipt, where the x402 MCP client reads it:
+    # `_meta["x402/payment-response"]` on the CallToolResult. The HTTP
+    # header copy below still goes out for clients that can see headers.
+    receipt = x402_payments.receipt_meta(getattr(auth, "pending_payment", None))
+    if receipt:
+        tool_result["_meta"] = receipt
+    envelope = {"jsonrpc": "2.0", "id": request_id, "result": tool_result}
+    return _with_receipt(envelope, auth)
+
+
+def _mcp_payment_required(request_id, name: str, price: float, err: JSONResponse) -> dict:
+    """The MCP paywall, in the shape the x402 MCP client actually pays.
+
+    The x402 MCP protocol (x402.mcp, server and client alike) is precise
+    about this and it is NOT the HTTP 402 shape: the tool result is
+    `isError: true` with a **v2** `PaymentRequired` object in
+    `structuredContent` (and the same JSON as the text content). The client
+    reads `structuredContent` first, parses it with the library's own
+    `parse_payment_required`, signs for the first entry in `accepts`, and
+    retries with the payload in `params._meta["x402/payment"]`.
+
+    What this endpoint served before was the REST 402 body -- a v1 object
+    with a v1 `accepts[]` -- as prose-free JSON text. A v2 MCP client either
+    parsed that as v1 and signed a v1 payment, or found no v2 challenge at
+    all; and whatever it signed was sent in `_meta`, which nothing here read.
+    Every conforming x402 MCP client was answered with the same paywall
+    twice and gave up, and from this side that is indistinguishable from no
+    MCP agent ever calling. The same shape of fault as the unpayable REST
+    402 (#61), one transport over.
+
+    The v2 object is the same challenge the HTTP path encodes into the
+    PAYMENT-REQUIRED header, built by the same function, so the price, the
+    recipient and the network cannot differ between the two transports.
+    `resource.url` is this node's MCP endpoint -- what an agent that finds the
+    tool in the Bazaar connects to -- and the discovery record names the
+    tool and its transport, so it is indexed as an MCP resource rather than
+    as the HTTP route the REST 402 would have described.
+
+    The extra keys (`message`, `price_usd`, `other_rails`, `docs`) are kept
+    for an LLM reading the result: the x402 models ignore unknown fields, so
+    they cost the paying client nothing. When x402 is off there is no v2
+    object to send; the REST body (with its empty `accepts`) goes out
+    unchanged, which the client correctly reads as "nothing here I can pay".
+    """
+    import json as _json
+
+    try:
+        rest_body = _json.loads(err.body.decode())
+    except Exception:
+        # Never let a formatting problem turn a payment prompt into a
+        # crash: the caller still needs to know what it costs.
+        rest_body = {"error": "payment_required", "price_usd": price}
+
+    tool = next((t for t in _mcp_tools() if t["name"] == name), None)
+    mcp_bazaar = {}
+    if tool is not None:
+        mcp_bazaar = x402_payments.bazaar_extension_for_mcp_tool(
+            tool_name=name,
+            description=tool["description"],
+            input_schema=tool["inputSchema"],
+            example={"url": "https://example.com"},
+        )
+
+    challenge = x402_payments.payment_required_v2_dict(
+        price=f"${price:.2f}",
+        resource_url=f"{PUBLIC_BASE_URL}/mcp",
+        description=tool["description"] if tool is not None else _route_description(None),
+        extensions=mcp_bazaar or None,
+    )
+    if challenge:
+        # v2 wins the keys both objects carry (x402Version, accepts, error,
+        # extensions); the REST body contributes the human-facing rest.
+        for key, value in rest_body.items():
+            if key not in ("x402Version", "accepts", "extensions", "error", "resource"):
+                challenge.setdefault(key, value)
+    else:
+        challenge = rest_body
+        if mcp_bazaar:
+            challenge["extensions"] = mcp_bazaar
+
+    message = (
+        f"Payment required (${price:.2f} for {name}). Attach X-API-Key, "
+        f"or pay per call with a rail listed in `accepts`."
+    )
+    challenge = {"message": message, **challenge}
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {
+            "content": [{"type": "text", "text": _json.dumps(challenge, indent=2)}],
+            "structuredContent": challenge,
+            "isError": True,
+        },
+    }
 
 
 @app.post("/billing/checkout")

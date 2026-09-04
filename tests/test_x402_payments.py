@@ -1391,3 +1391,147 @@ def test_a_refused_settlement_is_not_logged_as_settled(monkeypatch, caplog):
     with caplog.at_level(logging.INFO):
         module.settle_sync(pending)
     assert "x402 SETTLED" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# The MCP transport: payment in, receipt out, one challenge for both transports.
+# ---------------------------------------------------------------------------
+
+
+def _signed_mcp_payload():
+    """A real x402 v2 PaymentPayload, signed by a throwaway key against a
+    challenge shaped exactly like this node's -- what the x402 MCP client
+    puts in `_meta["x402/payment"]`."""
+    from eth_account import Account
+    from x402 import x402ClientSync
+    from x402.mechanisms.evm import EthAccountSigner
+    from x402.mechanisms.evm.exact import register_exact_evm_client
+    from x402.schemas import PaymentRequired, PaymentRequirements, ResourceInfo
+
+    account = Account.from_key("0x" + "2" * 63 + "1")
+    client = x402ClientSync()
+    register_exact_evm_client(client, EthAccountSigner(account))
+    challenge = PaymentRequired(
+        x402Version=2,
+        error="payment_required",
+        resource=ResourceInfo(url="https://node.example/mcp", description="d", mimeType="application/json"),
+        accepts=[
+            PaymentRequirements(
+                scheme="exact",
+                network="eip155:8453",
+                asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                amount="30000",
+                payTo=VALID_PAY_TO,
+                maxTimeoutSeconds=300,
+                extra={"name": "USD Coin", "version": "2"},
+            )
+        ],
+    )
+    return client.create_payment_payload(challenge), account
+
+
+def test_a_meta_payment_dict_reencodes_into_the_header_the_verify_path_reads(monkeypatch):
+    from x402.http.utils import decode_payment_signature_header
+
+    module = _load_x402(monkeypatch)
+    payload, account = _signed_mcp_payload()
+    wire = payload.model_dump(by_alias=True)  # what x402.mcp's client sends
+
+    header = module.payment_header_from_meta(wire)
+    assert isinstance(header, str) and header
+    decoded = decode_payment_signature_header(header)
+    assert decoded.payload["signature"] == wire["payload"]["signature"]
+    assert decoded.payload["authorization"]["from"].lower() == account.address.lower()
+    # The nonce the replay guard keys on survives the round trip.
+    assert module._payment_nonce(decoded) == wire["payload"]["authorization"]["nonce"].lower()
+
+
+def test_a_meta_payment_json_string_is_accepted_too(monkeypatch):
+    """The official server accepts the payload as a JSON string as well."""
+    from x402.http.utils import decode_payment_signature_header
+
+    module = _load_x402(monkeypatch)
+    payload, _ = _signed_mcp_payload()
+    document = payload.model_dump_json(by_alias=True)
+    header = module.payment_header_from_meta(document)
+    assert decode_payment_signature_header(header).payload["signature"] == payload.payload["signature"]
+
+
+def test_a_base64_header_in_meta_passes_through_untouched(monkeypatch):
+    module = _load_x402(monkeypatch)
+    from x402.http.utils import encode_payment_signature_header
+
+    payload, _ = _signed_mcp_payload()
+    already = encode_payment_signature_header(payload)
+    assert module.payment_header_from_meta(already) == already
+
+
+@pytest.mark.parametrize("junk", [None, "", "   ", 42, 4.2, True, "{not json", "[unterminated"])
+def test_meta_payment_garbage_is_none_never_an_exception(monkeypatch, junk):
+    module = _load_x402(monkeypatch)
+    assert module.payment_header_from_meta(junk) is None
+
+
+def test_receipt_meta_carries_the_settlement_where_the_mcp_client_reads_it(monkeypatch):
+    from x402.mcp.types import MCPToolResult
+    from x402.mcp.utils import extract_payment_response_from_meta
+
+    module = _load_x402(monkeypatch)
+    pending = module.PendingPayment(None, None, "$0.03")
+    pending.settle_result = _real_settle_response()
+    meta = module.receipt_meta(pending)
+    assert set(meta) == {"x402/payment-response"}
+    assert meta["x402/payment-response"]["transaction"] == pending.settle_result.transaction
+    # Read back with the library's own extractor -- the consumer's parser.
+    receipt = extract_payment_response_from_meta(
+        MCPToolResult(content=[], is_error=False, meta=meta)
+    )
+    assert receipt is not None and receipt.transaction == pending.settle_result.transaction
+
+
+def test_no_receipt_meta_for_a_refused_or_absent_settlement(monkeypatch):
+    from x402.schemas import SettleResponse
+
+    module = _load_x402(monkeypatch)
+    assert module.receipt_meta(None) == {}
+    pending = module.PendingPayment(None, None, "$0.03")
+    assert module.receipt_meta(pending) == {}, "no settlement, no receipt"
+    pending.settle_result = SettleResponse(
+        success=False, error_reason="insufficient_funds", transaction="", network="eip155:8453"
+    )
+    assert module.receipt_meta(pending) == {}, "a receipt on a refused settle is a forged proof of payment"
+
+
+def test_the_mcp_challenge_is_the_header_challenge(monkeypatch):
+    """One builder for both transports: the dict the MCP paywall puts in
+    structuredContent must be byte-for-byte what the PAYMENT-REQUIRED header
+    decodes to, so the two cannot quote different prices or recipients."""
+    from x402.http.utils import decode_payment_required_header
+
+    module = _load_x402(monkeypatch)
+    monkeypatch.setattr(module, "_facilitator_supports", lambda version, network: True)
+    kwargs = dict(price="$0.10", resource_url="https://node.example/mcp",
+                  description="bundle", extensions={"bazaar": {"info": {}, "schema": {}}})
+
+    as_dict = module.payment_required_v2_dict(**kwargs)
+    header = module.payment_required_header(**kwargs)["PAYMENT-REQUIRED"]
+    decoded = decode_payment_required_header(header).model_dump(by_alias=True, exclude_none=True)
+    assert as_dict == decoded
+    assert as_dict["accepts"][0]["amount"] == "100000"
+    assert as_dict["accepts"][0]["payTo"] == VALID_PAY_TO
+    assert as_dict["resource"]["url"] == "https://node.example/mcp"
+    assert "mimeType" in as_dict["resource"] and None not in as_dict["resource"].values()
+
+
+def test_the_mcp_challenge_is_empty_whenever_the_header_would_be(monkeypatch):
+    """Fail-closed together: not configured, or a facilitator that will not
+    verify v2, and there is no structured challenge -- never one naming a
+    recipient the node cannot settle to."""
+    module = _load_x402(monkeypatch, facilitator=None)
+    assert module.payment_required_v2_dict("$0.03") == {}
+    assert module.payment_required_header("$0.03") == {}
+
+    module = _load_x402(monkeypatch)
+    monkeypatch.setattr(module, "_facilitator_supports", lambda version, network: False)
+    assert module.payment_required_v2_dict("$0.03") == {}
+    assert module.payment_required_header("$0.03") == {}

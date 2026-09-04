@@ -91,11 +91,17 @@
                   "description": "axe-core rule id."
                 },
                 "impact": {
-                  "type": "string",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
                   "description": "axe-core impact level."
                 },
                 "help": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "help_url": {
                   "type": "string",
@@ -452,11 +458,17 @@
                       "description": "axe-core rule id."
                     },
                     "impact": {
-                      "type": "string",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
                       "description": "axe-core impact level."
                     },
                     "help": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "help_url": {
                       "type": "string",
