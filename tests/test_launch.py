@@ -32,6 +32,9 @@ def _run(tmp_path, billing_output: str, exit_code: int = 0):
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     (tmp_path / "checkout" / ".git").mkdir(parents=True)  # an existing clone: the reset path
+    # The checkout's own cost sweep, stubbed clean so the flow reaches the deploy.
+    (tmp_path / "checkout" / "scripts").mkdir()
+    (tmp_path / "checkout" / "scripts" / "cost-sweep.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
     env["HUBVIBE_DIR"] = str(tmp_path / "checkout")
     return subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=60)
 

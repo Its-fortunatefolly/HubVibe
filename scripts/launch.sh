@@ -55,6 +55,16 @@ fi
 cd "$DIR" || die "cannot enter $DIR"
 ok "at $(git rev-parse --short HEAD): $(git log -1 --pretty=%s | cut -c1-70)"
 
+step "Anything billing this project that is not the tollbooth? (scripts/cost-sweep.sh)"
+# The August bill was $193.84 and none of it was Cloud Run: a Cloud
+# Workstations cluster in us-central1 billed its control plane every hour.
+# With billing just re-enabled, that meter restarts before the node does.
+# So it is found and, with DELETE_IDLE=1, removed, before anything deploys.
+if ! DELETE_IDLE="${DELETE_IDLE:-1}" bash scripts/cost-sweep.sh; then
+  die "something idle is still billing $PROJECT (see above). Remove it, then run this again.
+        A node that earns cents cannot carry a workstation that costs dollars."
+fi
+
 step "Deploying (scripts/repair-and-deploy.sh)"
 bash scripts/repair-and-deploy.sh || die "the deploy stopped. The STOP above says why; fix that and run this again."
 
