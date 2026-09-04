@@ -18,6 +18,7 @@
 # need to type them in the right order from a phone.
 
 set -uo pipefail
+export CLOUDSDK_CORE_DISABLE_PROMPTS=1  # never hang on a gcloud (y/N)
 
 PROJECT="${PROJECT:-resolver-time}"
 DIR="${HUBVIBE_DIR:-${HOME:-/tmp}/HubVibe-deploy4}"

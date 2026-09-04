@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "cost-sweep.sh"
 LAUNCH = REPO_ROOT / "scripts" / "launch.sh"
 
-CLUSTER = "projects/resolver-time/locations/us-central1/workstationClusters/cluster-1"
+CLUSTER = "https://workstations.googleapis.com/v1/projects/resolver-time/locations/us-central1/workstationClusters/cluster-1"
 
 
 def _run(tmp_path, *, clusters="", vms="", delete=False):
@@ -88,3 +88,22 @@ def test_launch_sweeps_after_the_checkout_and_before_the_deploy():
         "repair-and-deploy.sh ||"
     )
     assert 'DELETE_IDLE="${DELETE_IDLE:-1}"' in text, "launch must remove idle billers by default"
+
+
+def test_gcloud_can_never_prompt_the_sweep(tmp_path):
+    """`gcloud sql instances list` asks "enable the API? (y/N)" on a project
+    without it; with stderr silenced that prompt hung the sweep for the owner
+    on 2026-09-04. Prompts are disabled for every gcloud call."""
+    assert "CLOUDSDK_CORE_DISABLE_PROMPTS=1" in SCRIPT.read_text()
+    assert "CLOUDSDK_CORE_DISABLE_PROMPTS=1" in LAUNCH.read_text()
+
+
+def test_a_short_cluster_name_still_gets_a_region(tmp_path):
+    """value(name) printed the short name, the region parsed to "" and the
+    delete ran with --region= and failed. Listing is by --uri now, and a bare
+    name still falls back to the one region ever billed."""
+    result, log = _run(tmp_path, clusters="cluster-msqekho0", delete=True)
+    deletes = [ln for ln in log.splitlines() if "clusters delete" in ln]
+    assert deletes, log
+    assert "--region=us-central1" in deletes[0]
+    assert "--region= " not in deletes[0]
