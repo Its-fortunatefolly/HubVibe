@@ -144,6 +144,17 @@ Only an audit that produced a result.
   `PAYMENT-RESPONSE` header (`X-PAYMENT-RESPONSE` for v1 clients), exactly
   as the x402 spec describes. The x402 client libraries decode it; the
   bundled `hubvibe_tollbooth.py` keeps it as `last_settlement`.
+- One signed payment buys one audit. A replayed x402 authorization is
+  refused with a 402 before it reaches the facilitator.
+
+### What this service will not fetch
+
+Every audit loads the URL you send from inside the deployment, so the node
+refuses, with a **400** and before any payment is read: addresses that are
+not globally routable (loopback, private ranges, link-local, the cloud
+metadata endpoint), internal hostnames, schemes other than `http`/`https`,
+and names that do not resolve. Raw `html` is capped at 2 MiB. None of that
+costs the caller anything.
 
 ## Discovery
 

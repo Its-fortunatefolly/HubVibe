@@ -337,6 +337,35 @@ def _auth_provider():
     return _StaticAuthProvider(headers)
 
 
+class _FacilitatorClient(HTTPFacilitatorClient):
+    """The library's client, with a short timeout on the one call made under
+    the module lock.
+
+    initialize() fetches /supported synchronously, and _get_server() holds
+    _LOCK while it does, so every 402 being built waits behind it. With the
+    library's 30s default, a facilitator outage made every unpaid request
+    hang up to 30s -- the node down because a third party was. /supported is
+    a static document; 8s is generous. verify/settle keep the full timeout:
+    a settle legitimately waits for on-chain inclusion.
+    """
+
+    _SUPPORTED_TIMEOUT = float(os.environ.get("X402_SUPPORTED_TIMEOUT", "8"))
+
+    def _get_sync_client(self):
+        import httpx
+
+        return httpx.Client(timeout=self._SUPPORTED_TIMEOUT, follow_redirects=True)
+
+
+# After a failed initialize(), do not knock on the facilitator again for this
+# long. Without it, every request during an outage paid the connect timeout
+# under _LOCK, serially. During the window x402 is simply not advertised --
+# fail-closed, fast, and MPP stays on the 402.
+_SERVER_RETRY_SECONDS = float(os.environ.get("X402_FACILITATOR_RETRY_SECONDS", "15"))
+_server_failed_at: Optional[float] = None
+_server_failure: Optional[str] = None
+
+
 def _get_server() -> x402ResourceServer:
     """Build and initialize the resource server once, then reuse it.
 
@@ -351,17 +380,35 @@ def _get_server() -> x402ResourceServer:
 
     The server is only cached after initialize() succeeds, so a facilitator
     that is briefly unreachable results in a retry on the next request
-    rather than a permanently poisoned server object.
+    rather than a permanently poisoned server object -- after a short
+    back-off, so an outage costs one timeout per window, not one per request.
     """
-    global _server
+    global _server, _server_failed_at, _server_failure
+    import time
+
     with _LOCK:
         if _server is None:
-            facilitator = HTTPFacilitatorClient(
+            if (
+                _server_failed_at is not None
+                and time.monotonic() - _server_failed_at < _SERVER_RETRY_SECONDS
+            ):
+                raise RuntimeError(
+                    f"facilitator {_FACILITATOR_URL} unreachable ({_server_failure}); "
+                    f"not retried for {_SERVER_RETRY_SECONDS:.0f}s"
+                )
+            facilitator = _FacilitatorClient(
                 FacilitatorConfig(url=_FACILITATOR_URL, auth_provider=_auth_provider())
             )
             server = x402ResourceServer(facilitator)
             server.register(_NETWORK, ExactEvmServerScheme())
-            server.initialize()
+            try:
+                server.initialize()
+            except Exception as exc:
+                _server_failed_at = time.monotonic()
+                _server_failure = f"{type(exc).__name__}: {exc}"
+                raise
+            _server_failed_at = None
+            _server_failure = None
             _server = server
         return _server
 
@@ -867,31 +914,136 @@ def _log_rejection(stage: str, price: Optional[str], *, result=None, exc=None) -
         pass
 
 
-def _run_coro_sync(coro):
-    """asyncio.run(), but safe on a thread that already hosts a running loop.
+# Every facilitator coroutine runs on ONE long-lived event loop, on its own
+# thread, for the life of the process.
+#
+# Why not asyncio.run() per call: the x402 facilitator client keeps a single
+# httpx.AsyncClient and reuses its pooled keep-alive connections. A pooled
+# connection is bound to the event loop that opened it. With a fresh loop per
+# verify/settle, the second call to reuse a connection raised "Event loop is
+# closed" or "... is bound to a different event loop" -- measured against a
+# keep-alive stub facilitator at 16 concurrent payers: 56 of 96 payments
+# rejected by THIS node, facilitator never asked. Every production facilitator
+# speaks keep-alive; the sequential simulation only passed because its stub
+# closed each connection. That failure has the #61 shape exactly: from
+# outside, more than half the paying agents look like nobody buying.
+#
+# One loop also settles #83 (a worker thread that already hosts Playwright's
+# loop) for good: the caller's thread never runs asyncio at all.
+_FACILITATOR_CALL_TIMEOUT = float(os.environ.get("X402_FACILITATOR_CALL_TIMEOUT", "45"))
+_io_loop: Optional[asyncio.AbstractEventLoop] = None
+_io_loop_lock = threading.Lock()
 
-    Playwright's sync API (app/browser_pool.py) keeps a running event loop in
-    each worker thread for the lifetime of the pooled browser, and anyio
-    REUSES those threads for later requests. So any request landing on a
-    thread that has ever run an audit -- even one whose browser launch failed,
-    because sync_playwright().start() runs first -- finds get_running_loop()
-    succeeding, and a bare asyncio.run() raises "cannot be called from a
-    running event loop" before the facilitator is ever contacted. That is the
-    error the live node logged for the first real paid call on 2026-09-02,
-    and it reproduces deterministically: MAX_CONCURRENT_AUDITS=1, one audit,
-    then one paid call.
 
-    When a loop is present the coroutine is handed to a fresh thread and run
-    there. One short-lived thread per verify/settle, and no deadlock surface:
-    the coroutine awaits only its own facilitator I/O, never anything
-    scheduled on the poisoned loop.
+def _facilitator_loop() -> asyncio.AbstractEventLoop:
+    global _io_loop
+    with _io_loop_lock:
+        if _io_loop is None or _io_loop.is_closed():
+            loop = asyncio.new_event_loop()
+            threading.Thread(
+                target=loop.run_forever, name="x402-facilitator-io", daemon=True
+            ).start()
+            _io_loop = loop
+        return _io_loop
+
+
+def _run_coro_sync(coro, timeout: Optional[float] = None):
+    """Run a facilitator coroutine on the dedicated loop and wait for it.
+
+    Safe from any thread, including one that already hosts a running loop
+    (the #83 case), because nothing here touches the caller's loop. Bounded:
+    a facilitator that never answers must not hold a worker thread forever.
+    """
+    future = asyncio.run_coroutine_threadsafe(coro, _facilitator_loop())
+    try:
+        return future.result(timeout if timeout is not None else _FACILITATOR_CALL_TIMEOUT)
+    except concurrent.futures.TimeoutError:
+        future.cancel()
+        raise TimeoutError(
+            f"facilitator call exceeded {_FACILITATOR_CALL_TIMEOUT:.0f}s"
+        ) from None
+
+
+# ---------------------------------------------------------------------------
+# Replay guard.
+#
+# verify does not consume anything: the facilitator checks the signature and
+# the balance and says "valid". Only settle spends the EIP-3009 nonce, and
+# settle runs AFTER the audit (so a failed audit is never charged). That
+# leaves a window: send the same signed payment N times at once, every copy
+# verifies, every copy gets an audit, the first settle succeeds and the rest
+# fail -- N-1 audits for one payment, each logged as "delivered, not paid".
+# And a payer whose settle failed once could re-send the same signature
+# forever: verify says valid again, another audit, another failed settle.
+#
+# So a nonce is admitted once per node. Kept from first verify until the
+# authorization's own validity window has passed (the facilitator rejects it
+# after that anyway), and dropped only when verify itself fails -- a retry
+# after a facilitator hiccup is legitimate and must go through.
+#
+# Per instance, in memory. Two instances can each admit the same nonce once;
+# the facilitator's own nonce check still makes the second SETTLE fail, so
+# the exposure is one unpaid audit per extra instance, not unbounded.
+# ---------------------------------------------------------------------------
+_NONCE_TTL_SECONDS = _MAX_TIMEOUT_SECONDS + 60
+_nonces: dict = {}
+_nonces_lock = threading.Lock()
+
+
+def _payment_nonce(payload) -> Optional[str]:
+    """The EIP-3009 nonce inside an `exact` payload, or None for other shapes."""
+    try:
+        inner = getattr(payload, "payload", None) or {}
+        auth = inner.get("authorization") or {}
+        nonce = auth.get("nonce")
+        return str(nonce).lower() if nonce else None
+    except Exception:
+        return None
+
+
+def _admit_nonce(nonce: Optional[str]) -> bool:
+    """True the first time a nonce is seen; False on every replay."""
+    import time
+
+    if nonce is None:
+        return True
+    now = time.monotonic()
+    with _nonces_lock:
+        if len(_nonces) > 10_000:
+            for key in [k for k, exp in _nonces.items() if exp < now]:
+                del _nonces[key]
+        expiry = _nonces.get(nonce)
+        if expiry is not None and expiry >= now:
+            return False
+        _nonces[nonce] = now + _NONCE_TTL_SECONDS
+        return True
+
+
+def _release_nonce(nonce: Optional[str]) -> None:
+    if nonce is None:
+        return
+    with _nonces_lock:
+        _nonces.pop(nonce, None)
+
+
+def _log_settled(stage: str, price: Optional[str], result, payer=None) -> None:
+    """One INFO line per settled payment: the revenue counter in the log.
+
+    "The wallet is the counter" is true and is also useless for attribution
+    -- which route, which payer, which hour. This line is what a log query
+    sums. Never raises.
     """
     try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+        logging.getLogger(__name__).info(
+            "x402 SETTLED (%s) price=%s tx=%s network=%s payer=%s amount=%s",
+            stage, price,
+            getattr(result, "transaction", None),
+            getattr(result, "network", None),
+            payer or getattr(result, "payer", None),
+            getattr(result, "amount", None),
+        )
+    except Exception:
+        pass
 
 
 def verify_only_sync(payment_header: str, price: Optional[str] = None):
@@ -906,8 +1058,17 @@ def verify_only_sync(payment_header: str, price: Optional[str] = None):
     if not is_configured():
         return None
     resolved_price = price or _PRICE
+    nonce = None
     try:
         payload = decode_payment_signature_header(payment_header)
+        nonce = _payment_nonce(payload)
+        if not _admit_nonce(nonce):
+            logging.getLogger(__name__).warning(
+                "x402 verify REFUSED: replayed authorization (nonce %s already "
+                "admitted on this node; price=%s). Not sent to the facilitator.",
+                (nonce or "")[:18], resolved_price,
+            )
+            return None
         requirements = _get_requirements(resolved_price)
         server = _get_server()
 
@@ -917,10 +1078,12 @@ def verify_only_sync(payment_header: str, price: Optional[str] = None):
         result = _run_coro_sync(_run())
         if not result.is_valid:
             _log_rejection("verify", resolved_price, result=result)
+            _release_nonce(nonce)
             return None
         return PendingPayment(payload, requirements, resolved_price)
     except Exception as exc:
         _log_rejection("verify", resolved_price, exc=exc)
+        _release_nonce(nonce)
         return None
 
 
@@ -1067,6 +1230,7 @@ def settle_sync(pending) -> bool:
         result = _run_coro_sync(_run())
         if result.success:
             pending.settle_result = result
+            _log_settled("settle", pending.price, result)
             record_settlement_in_stripe(result, pending.requirements[0])
         else:
             # An audit was delivered and not paid for. The reason is the only
@@ -1100,18 +1264,29 @@ async def verify_and_settle(payment_header: str, price: Optional[str] = None) ->
     if not is_configured():
         return False
     resolved_price = price or _PRICE
+    nonce = None
     try:
         payload = decode_payment_signature_header(payment_header)
+        nonce = _payment_nonce(payload)
+        if not _admit_nonce(nonce):
+            logging.getLogger(__name__).warning(
+                "x402 verify REFUSED: replayed authorization (nonce %s already "
+                "admitted on this node; price=%s). Not sent to the facilitator.",
+                (nonce or "")[:18], resolved_price,
+            )
+            return False
         requirements = _get_requirements(resolved_price)
         server = _get_server()
 
         verify_result = await server.verify_payment(payload, requirements[0])
         if not verify_result.is_valid:
             _log_rejection("verify", resolved_price, result=verify_result)
+            _release_nonce(nonce)
             return False
 
         settle_result = await server.settle_payment(payload, requirements[0])
         if settle_result.success:
+            _log_settled("verify+settle", resolved_price, settle_result)
             record_settlement_in_stripe(settle_result, requirements[0])
         else:
             logging.getLogger(__name__).warning(
@@ -1123,6 +1298,7 @@ async def verify_and_settle(payment_header: str, price: Optional[str] = None) ->
         return bool(settle_result.success)
     except Exception as exc:
         _log_rejection("verify+settle", resolved_price, exc=exc)
+        _release_nonce(nonce)
         return False
 
 

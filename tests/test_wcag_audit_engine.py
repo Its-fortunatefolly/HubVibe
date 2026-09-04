@@ -2496,7 +2496,7 @@ def test_mcp_failed_audit_reports_error_and_is_not_billed(monkeypatch):
         "/mcp",
         json={
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "audit_wcag", "arguments": {"url": "https://x.example"}},
+            "params": {"name": "audit_wcag", "arguments": {"url": "https://example.com"}},
         },
         headers={"X-API-Key": "test-key"},
     ).json()
@@ -2702,7 +2702,7 @@ def test_the_api_key_rail_appears_in_accepts_when_it_can_settle(
 
     from fastapi.testclient import TestClient
 
-    body = TestClient(module.app).post("/audit/bundle", json={"url": "https://x"}).json()
+    body = TestClient(module.app).post("/audit/bundle", json={"url": "https://example.com"}).json()
     # Not in `accepts` -- that array belongs to the x402 spec and a non-x402
     # entry in it makes the whole challenge fail client-side validation. The
     # rail is still machine-readable, one key over.
@@ -2731,7 +2731,7 @@ def test_the_api_key_rail_is_omitted_when_no_key_could_be_issued(monkeypatch):
     module = _load_main(monkeypatch, api_key=None)
     assert not module.billing.is_configured()
 
-    body = TestClient(module.app).post("/audit/wcag", json={"url": "https://x"}).json()
+    body = TestClient(module.app).post("/audit/wcag", json={"url": "https://example.com"}).json()
     assert all(a["protocol"] != "api_key" for a in body["accepts"])
 
 
@@ -2997,7 +2997,7 @@ def test_a_v1_only_client_can_still_pay_from_the_body(monkeypatch, load_main_fre
 
     _x402_env(monkeypatch)
     module = load_main_fresh("wcag_main_v1_only")
-    response = TestClient(module.app).post("/audit/wcag", json={"url": "https://x"})
+    response = TestClient(module.app).post("/audit/wcag", json={"url": "https://example.com"})
 
     body_only = {
         k: v for k, v in response.headers.items() if k.lower() != "payment-required"
@@ -3016,7 +3016,7 @@ def test_the_402_carries_the_v2_challenge_header(monkeypatch, load_main_fresh):
 
     _x402_env(monkeypatch)
     module = load_main_fresh("wcag_main_v2_header")
-    response = TestClient(module.app).post("/audit/wcag", json={"url": "https://x"})
+    response = TestClient(module.app).post("/audit/wcag", json={"url": "https://example.com"})
 
     raw = response.headers.get("payment-required")
     assert raw, "no PAYMENT-REQUIRED header -- every v2 client falls back to v1"
@@ -3048,7 +3048,7 @@ def test_a_v2_payment_signature_header_is_actually_read(monkeypatch, load_main_f
 
     TestClient(module.app).post(
         "/audit/wcag",
-        json={"url": "https://x"},
+        json={"url": "https://example.com"},
         headers={"PAYMENT-SIGNATURE": "c2lnbmF0dXJl"},
     )
     assert seen.get("header") == "c2lnbmF0dXJl", (
@@ -3340,3 +3340,210 @@ def test_the_manifest_tells_payers_where_the_receipt_is(monkeypatch):
     module = _load_main(monkeypatch)
     payment = TestClient(module.app).get("/.well-known/agent.json").json()["payment"]
     assert "PAYMENT-RESPONSE" in payment["receipt"]
+
+
+# --- the target URL gate ------------------------------------------------------
+#
+# Every audit fetches the caller's URL from inside the deployment. Without a
+# gate the node was a proxy into wherever it runs: the metadata endpoint,
+# loopback, the VPC. Refused with a 400 before rate limiting and before any
+# payment is read, so it costs the caller nothing and this node no facilitator
+# call. Resolution is checked, not just the name.
+
+
+def _resolves_to(monkeypatch, *addresses):
+    import socket
+
+    def fake(host, port, *a, **k):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (addr, port)) for addr in addresses]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake)
+
+
+def _auth_spy(monkeypatch, module):
+    calls = []
+    original = module._authorize_and_rate_limit
+
+    def spy(*a, **k):
+        calls.append(1)
+        return original(*a, **k)
+
+    monkeypatch.setattr(module, "_authorize_and_rate_limit", spy)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254/computeMetadata/v1/",
+        "http://10.0.0.1/",
+        "http://192.168.1.1/",
+        "http://127.0.0.1:8080/health",
+        "http://[::1]/",
+        "http://100.64.0.1/",
+    ],
+)
+def test_private_and_link_local_targets_are_refused_before_payment(monkeypatch, url):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _auth_spy(monkeypatch, module)
+    ran = []
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: ran.append(1))
+
+    response = TestClient(module.app).post("/audit/wcag", json={"url": url}, headers={"X-API-Key": "test-key"})
+
+    assert response.status_code == 400, response.text
+    assert response.json()["billed"] is False
+    assert "Nothing was charged" in response.json()["detail"]
+    assert calls == [], "payment/auth was consulted for a URL that must never be fetched"
+    assert ran == []
+
+
+@pytest.mark.parametrize("host", ["localhost", "metadata.google.internal", "metadata", "foo.internal", "LOCALHOST."])
+def test_internal_hostnames_are_refused_by_name_without_resolving(monkeypatch, host):
+    import socket
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+
+    def no_dns(*a, **k):
+        raise AssertionError("resolved a hostname that is refused by name")
+
+    monkeypatch.setattr(socket, "getaddrinfo", no_dns)
+    response = TestClient(module.app).post(
+        "/audit/seo", json={"url": f"http://{host}/"}, headers={"X-API-Key": "test-key"}
+    )
+    assert response.status_code == 400
+
+
+def test_a_public_name_that_resolves_to_a_private_address_is_refused(monkeypatch):
+    """The DNS-rebinding shape: an innocent hostname, an A record of 10.0.0.1."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _resolves_to(monkeypatch, "93.184.216.34", "10.0.0.1")
+    response = TestClient(module.app).post(
+        "/audit/wcag", json={"url": "https://innocent.example/"}, headers={"X-API-Key": "test-key"}
+    )
+    assert response.status_code == 400
+
+
+def test_a_public_target_passes_the_gate(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _resolves_to(monkeypatch, "93.184.216.34")
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+    response = TestClient(module.app).post("/audit/wcag", json={"url": "https://innocent.example/"}, headers={"X-API-Key": "test-key"})
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("url", ["ftp://example.com/", "file:///etc/passwd", "javascript:alert(1)", "http:///nohost"])
+def test_non_http_targets_are_refused(monkeypatch, url):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    response = TestClient(module.app).post("/audit/security", json={"url": url}, headers={"X-API-Key": "test-key"})
+    assert response.status_code == 400
+
+
+def test_an_unresolvable_target_is_refused_rather_than_fetched(monkeypatch):
+    import socket
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+
+    def nx(*a, **k):
+        raise socket.gaierror("NXDOMAIN")
+
+    monkeypatch.setattr(socket, "getaddrinfo", nx)
+    response = TestClient(module.app).post(
+        "/audit/wcag", json={"url": "https://nope.invalid/"}, headers={"X-API-Key": "test-key"}
+    )
+    assert response.status_code == 400
+    assert "resolve" in response.json()["detail"]
+
+
+def test_every_paid_route_is_gated():
+    """Static: each /audit route checks the target before authorising."""
+    import re
+
+    text = MAIN_PATH.read_text()
+    routes = re.split(r'\n@app\.post\("/audit', text)[1:]
+    assert len(routes) == 6
+    for chunk in routes:
+        handler = chunk.split("\n@app.")[0]
+        gate = handler.index("_reject_unfetchable_target(payload.url)")
+        auth = handler.index("_authorize_and_rate_limit(")
+        assert gate < auth, f"/audit{handler.splitlines()[0]} authorises before gating the URL"
+
+
+def test_the_gate_can_be_turned_off_for_a_local_node_only_by_env(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("ALLOW_PRIVATE_TARGETS", "1")
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+    response = TestClient(module.app).post(
+        "/audit/wcag", json={"url": "http://127.0.0.1:9/"}, headers={"X-API-Key": "test-key"}
+    )
+    assert response.status_code == 200
+
+
+def test_the_mcp_tool_call_is_gated_too(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _auth_spy(monkeypatch, module)
+    body = TestClient(module.app).post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+              "params": {"name": "audit_wcag", "arguments": {"url": "http://169.254.169.254/"}}},
+        headers={"X-API-Key": "test-key"},
+    ).json()
+    assert body["result"]["isError"] is True
+    assert "Nothing was charged" in body["result"]["content"][0]["text"]
+    assert calls == []
+
+
+# --- the html body has a ceiling ---------------------------------------------
+
+
+def test_an_oversized_html_body_is_refused_before_payment(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _auth_spy(monkeypatch, module)
+    big = "<p>" + "x" * (module.MAX_HTML_BYTES + 1)
+    response = TestClient(module.app).post("/audit/wcag", json={"html": big}, headers={"X-API-Key": "test-key"})
+    assert response.status_code == 422
+    assert calls == []
+
+
+def test_an_html_body_at_the_ceiling_is_accepted(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+    body = "<p>" + "x" * (module.MAX_HTML_BYTES - 3)
+    response = TestClient(module.app).post("/audit/wcag", json={"html": body}, headers={"X-API-Key": "test-key"})
+    assert response.status_code == 200
+
+
+def test_the_mcp_tool_call_refuses_an_oversized_html_body(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _auth_spy(monkeypatch, module)
+    body = TestClient(module.app).post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+              "params": {"name": "audit_wcag", "arguments": {"html": "x" * (module.MAX_HTML_BYTES + 1)}}},
+        headers={"X-API-Key": "test-key"},
+    ).json()
+    assert body["result"]["isError"] is True
+    assert "limit is" in body["result"]["content"][0]["text"]
+    assert calls == []

@@ -221,8 +221,18 @@ class _SlidingWindowLimiter:
 _audit_limiter = _SlidingWindowLimiter(RATE_LIMIT_PER_MINUTE, 60.0)
 
 
+# Largest raw-HTML body an audit accepts. A page is tens of kilobytes; two
+# megabytes is a generous ceiling for anything a browser would render. Without
+# a cap the field was unbounded, and one caller posting a few hundred MB of
+# "html" would take the instance down for everyone queued behind it -- for
+# free, since a 402 costs nothing to trigger.
+MAX_HTML_BYTES = int(os.environ.get("MAX_HTML_BYTES", str(2 * 1024 * 1024)))
+
+
 class AuditRequest(BaseModel):
-    html: Optional[str] = Field(None, description="Raw HTML source to audit")
+    html: Optional[str] = Field(
+        None, description="Raw HTML source to audit", max_length=MAX_HTML_BYTES
+    )
     url: Optional[str] = Field(None, description="Live URL to audit instead of raw HTML")
 
 
@@ -680,6 +690,85 @@ def _bill(auth, price_usd: float) -> Optional[str]:
         return None
     except Exception as exc:
         return f"usage recording failed: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Target URL gate.
+#
+# Every audit fetches the caller's URL from inside this deployment: httpx for
+# SEO/security, a real Chromium for WCAG/performance. A public API that
+# fetches arbitrary URLs is a proxy into wherever it runs unless it refuses
+# to: the cloud metadata endpoint (169.254.169.254, metadata.google.internal),
+# loopback (this very service, its own /billing routes), the VPC, link-local.
+# None of those are "sites" anyone audits, and each is a way to make the node
+# do something on the caller's behalf for a 402 that costs them nothing.
+#
+# Checked BEFORE rate limiting and payment, so a refused URL costs the caller
+# nothing and costs this node no facilitator call. The hostname is resolved
+# here and every address it resolves to must be globally routable -- a name
+# check alone is beaten by a DNS record pointing at 10.0.0.1.
+#
+# ALLOW_PRIVATE_TARGETS=1 turns the gate off for a node under local test,
+# where the target genuinely is 127.0.0.1. Never set it on the deployed node.
+# ---------------------------------------------------------------------------
+_ALLOW_PRIVATE_TARGETS = os.environ.get("ALLOW_PRIVATE_TARGETS") == "1"
+_BLOCKED_TARGET_HOSTS = {"localhost", "metadata", "metadata.google.internal"}
+
+
+def _target_url_problem(url: Optional[str]) -> Optional[str]:
+    """Why `url` must not be fetched, or None when it may be."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "is not a valid URL"
+    if parsed.scheme not in ("http", "https"):
+        return "must start with http:// or https://"
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        return "has no host"
+    if _ALLOW_PRIVATE_TARGETS:
+        return None
+    if host in _BLOCKED_TARGET_HOSTS or host.endswith(".internal") or host.endswith(".localhost"):
+        return "points at an internal host, which this service will not fetch"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, OverflowError):
+        return "does not resolve to any address"
+    for info in infos:
+        raw = str(info[4][0]).split("%")[0]
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            return "resolves to an unparseable address"
+        if not address.is_global:
+            return "resolves to a private, loopback, link-local or reserved address, which this service will not fetch"
+    return None
+
+
+def _reject_unfetchable_target(url: Optional[str]) -> Optional[JSONResponse]:
+    """A 400 the caller can act on, or None when the URL is fetchable.
+
+    400 rather than 402: the request is malformed for this service whatever
+    the caller pays, so it is refused before any payment instrument is read.
+    """
+    problem = _target_url_problem(url)
+    if problem is None:
+        return None
+    return JSONResponse(
+        status_code=400,
+        content={
+            "status": "error",
+            "detail": f"'url' {problem}. Nothing was charged for this request.",
+            "billed": False,
+        },
+    )
 
 
 def _rate_limited_response() -> JSONResponse:
@@ -1736,6 +1825,20 @@ def mcp_streamable_http(
             return _mcp_tool_error(request_id, f"Unknown tool: {name}")
         if not args.get("url") and not args.get("html"):
             return _mcp_tool_error(request_id, "Provide 'url' (or 'html' for wcag/seo).")
+        # Same gates as the REST routes, before any payment is read: a URL
+        # this service will not fetch, or a body no browser would render.
+        html_arg = args.get("html")
+        if isinstance(html_arg, str) and len(html_arg) > MAX_HTML_BYTES:
+            return _mcp_tool_error(
+                request_id,
+                f"'html' is {len(html_arg)} bytes; the limit is {MAX_HTML_BYTES}. "
+                "Nothing was charged.",
+            )
+        url_problem = _target_url_problem(args.get("url"))
+        if url_problem is not None:
+            return _mcp_tool_error(
+                request_id, f"'url' {url_problem}. Nothing was charged."
+            )
 
         auth, err = _authorize_and_rate_limit(
             x_api_key, x_payment, authorization, request, price_usd=price
@@ -1939,6 +2042,9 @@ def audit(
     x_payment: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
 ):
+    refused = _reject_unfetchable_target(payload.url)
+    if refused is not None:
+        return refused
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
     if err:
         return err
@@ -1999,6 +2105,9 @@ def audit_wcag(
     """Identical to /audit -- same axe-core check, same $0.03 price, kept
     as its own path alongside the other 4 audit dimensions so a caller can
     request accessibility specifically without relying on /audit's name."""
+    refused = _reject_unfetchable_target(payload.url)
+    if refused is not None:
+        return refused
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
     if err:
         return err
@@ -2045,6 +2154,9 @@ def audit_seo(
     x_payment: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
 ):
+    refused = _reject_unfetchable_target(payload.url)
+    if refused is not None:
+        return refused
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
     if err:
         return err
@@ -2074,6 +2186,9 @@ def audit_security(
     x_payment: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
 ):
+    refused = _reject_unfetchable_target(payload.url)
+    if refused is not None:
+        return refused
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
     if err:
         return err
@@ -2100,6 +2215,9 @@ def audit_performance(
     x_payment: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
 ):
+    refused = _reject_unfetchable_target(payload.url)
+    if refused is not None:
+        return refused
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
     if err:
         return err
@@ -2130,6 +2248,9 @@ def audit_bundle(
     $0.10 unit, not four separate $0.03 charges -- if any dimension fails
     to run, the whole call fails (502) and nothing is billed, since a
     partial bundle isn't the product being sold here."""
+    refused = _reject_unfetchable_target(payload.url)
+    if refused is not None:
+        return refused
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.10)
     if err:
         return err

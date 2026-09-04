@@ -39,6 +39,14 @@ What it proves, when it exits 0:
   * the Bazaar record rides the payment payload and survives validation
   * the 200 carries a PAYMENT-RESPONSE receipt with the settlement tx hash
   * nothing in the node raised "cannot be called from a running event loop"
+  * a replayed signature is refused without reaching the facilitator
+  * sixteen concurrent payers against a KEEP-ALIVE facilitator all settle
+    (the connection-reuse-across-event-loops bug rejected 56 of 96)
+  * with the facilitator unreachable the node answers fast, offers no x402,
+    and does not re-probe the outage on every request
+  * a second node with the target gate on refuses metadata, loopback,
+    private and non-http URLs with a 400 before any payment is read, and
+    refuses an oversized html body
 
 What it cannot prove: that USDC moves. Only money proves that. It removes
 every reason short of money for the live call to fail.
@@ -234,6 +242,14 @@ def _catalog(state: FacilitatorState, fields: dict) -> str | None:
 
 def _make_handler(state: FacilitatorState, pay_to: str):
     class Handler(BaseHTTPRequestHandler):
+        # Keep-alive, like every production facilitator. With HTTP/1.0 (the
+        # default) each connection closes after one response, and that hid the
+        # cross-event-loop connection reuse bug: 56 of 96 concurrent payments
+        # rejected by the node against a keep-alive stub, zero against this
+        # one before the change. A stub that is easier on the code than the
+        # real thing is not a simulation.
+        protocol_version = "HTTP/1.1"
+
         def log_message(self, *_):  # quiet
             pass
 
@@ -474,6 +490,10 @@ def main() -> int:
             "X402_PAY_TO_ADDRESS": recipient,
             "PUBLIC_BASE_URL": base,
             "AUDIT_API_KEY": "simulate-paid-call",
+            # The audited page lives on 127.0.0.1 here. The deployed node
+            # refuses such targets (see _target_url_problem); the gate itself
+            # is exercised below on a second node WITHOUT this override.
+            "ALLOW_PRIVATE_TARGETS": "1",
             # One worker thread: the thread the API-key audit poisons IS the
             # thread the paid call lands on. This is the #83 reproduction.
             "MAX_CONCURRENT_AUDITS": "1",
@@ -577,8 +597,7 @@ def main() -> int:
                 )
 
         step("Receipt: does the 200 hand the payer the settlement?")
-        tx = settles[0].get("transaction") if settles else None
-        receipt_tx = _paid_call_receipt(base, payer, f"{facilitator}/page")
+        receipt_tx, pay_headers = _paid_call_receipt(base, payer, f"{facilitator}/page")
         with state.lock:
             second_settle = [e for e in state.log if e["path"] == "/settle"]
         tx2 = second_settle[-1].get("transaction") if len(second_settle) == 2 else None
@@ -586,7 +605,82 @@ def main() -> int:
             receipt_tx is not None and tx2 is not None and receipt_tx == tx2,
             f"PAYMENT-RESPONSE header carries the settlement transaction ({receipt_tx})",
         )
-        _ = tx
+
+        step("Replay: the same signed payment sent again")
+        with state.lock:
+            verifies_before = sum(1 for e in state.log if e["path"] == "/verify")
+        status, _, body = _post(
+            f"{base}/audit/wcag", {"url": f"{facilitator}/page"}, headers=pay_headers or {}
+        )
+        with state.lock:
+            verifies_after = sum(1 for e in state.log if e["path"] == "/verify")
+        checks.expect(status == 402, f"a replayed authorization is refused (HTTP {status})")
+        checks.expect(
+            verifies_after == verifies_before,
+            "the replay never reached the facilitator (verify count unchanged)",
+        )
+
+        step("Sixteen payers at once, against a keep-alive facilitator (module level)")
+        ok_count, fail_count, reasons = _hammer_module(facilitator, recipient, threads=16, rounds=4)
+        checks.expect(
+            fail_count == 0,
+            f"{ok_count} of {ok_count + fail_count} concurrent payments verified and settled"
+            + (f" -- failures: {sorted(reasons)[:3]}" if reasons else ""),
+        )
+
+        step("Facilitator outage: the node must stay up and stop advertising x402")
+        dead = f"http://127.0.0.1:{_free_port()}"
+        t_first, t_second, header_during_outage = _outage_probe(dead, recipient)
+        checks.expect(
+            header_during_outage == {},
+            "no x402 offered while the facilitator is unreachable (fail-closed)",
+        )
+        checks.expect(t_first < 10, f"first 402 during the outage took {t_first:.1f}s (<10s)")
+        checks.expect(t_second < 0.5, f"second 402 took {t_second:.2f}s -- the outage is remembered, not re-probed")
+
+        step("A second node with the target gate ON and a dead facilitator")
+        node2_port = _free_port()
+        env2 = dict(env)
+        env2.pop("ALLOW_PRIVATE_TARGETS", None)
+        env2.update({"X402_FACILITATOR_URL": dead, "PUBLIC_BASE_URL": f"http://127.0.0.1:{node2_port}", "PORT": str(node2_port)})
+        node2_log = work / "node2.log"
+        node2 = start_node(node2_port, env2, node2_log)
+        try:
+            base2 = f"http://127.0.0.1:{node2_port}"
+            for bad in (f"{facilitator}/page", "http://169.254.169.254/computeMetadata/v1/",
+                        "http://metadata.google.internal/", "http://localhost:8080/health",
+                        "http://10.0.0.1/", "ftp://example.com/"):
+                status, _, body = _post(f"{base2}/audit/wcag", {"url": bad})
+                checks.expect(
+                    status == 400 and body.get("billed") is False,
+                    f"refuses to fetch {bad} (HTTP {status})",
+                )
+            status, _, body = _post(
+                f"{base2}/audit/wcag", {"url": "http://93.184.216.34/"}, headers={"X-API-Key": "simulate-paid-call"}
+            )
+            # A public IP literal passes the gate; with an internal key the
+            # audit is attempted and fails (no egress here) -- 502, not 400.
+            checks.expect(status in (200, 502), f"a public address passes the gate (HTTP {status})")
+            t0 = time.time()
+            status, headers2, body = _post(f"{base2}/audit/wcag", {"url": "http://93.184.216.34/"})
+            elapsed = time.time() - t0
+            lower2 = {k.lower() for k in headers2}
+            checks.expect(
+                status == 402 and "payment-required" not in lower2
+                and not any(a.get("scheme") == "exact" for a in body.get("accepts") or []),
+                f"unpaid call during a facilitator outage: 402 with no x402 rail (HTTP {status})",
+            )
+            checks.expect(elapsed < 10, f"that 402 took {elapsed:.1f}s (<10s), the node is not hanging on the outage")
+            status, _, body = _post(f"{base2}/audit/wcag", {"html": "<p>" + "x" * (2 * 1024 * 1024 + 1)})
+            checks.expect(status == 422, f"an oversized html body is refused before any payment (HTTP {status})")
+        finally:
+            node2.terminate()
+            try:
+                node2.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                node2.kill()
+            if not args.keep:
+                node2_log.unlink(missing_ok=True)
 
         step("Node log")
         node_text = node_log.read_text(errors="replace")
@@ -618,38 +712,118 @@ def main() -> int:
     return 1 if checks.failed else 0
 
 
-def _paid_call_receipt(base: str, payer, target_url: str):
-    """One more paid call, made directly, to read the response HEADERS the
-    tollbooth client does not expose. Returns the tx hash from the
-    PAYMENT-RESPONSE header, or None when the node sends no receipt."""
-    import httpx
+def _x402_http_client(payer):
     from x402 import max_amount, x402ClientSync
     from x402.http import x402HTTPClientSync
-    from x402.http.utils import decode_payment_response_header
     from x402.mechanisms.evm import EthAccountSigner
     from x402.mechanisms.evm.exact import register_exact_evm_client
 
     client = x402ClientSync()
     register_exact_evm_client(client, EthAccountSigner(payer), policies=[max_amount(150_000)])
-    http_client = x402HTTPClientSync(client)
+    return x402HTTPClientSync(client)
+
+
+def _sign(http_client, headers: dict, body: bytes, request_url: str) -> dict:
+    """Payment headers for a 402, across x402 client versions (2.18 / 2.21)."""
+    import inspect
+
+    handler = http_client.handle_402_response
+    call = [dict(headers), body]
+    if "request_url" in inspect.signature(handler).parameters:
+        call.append(request_url)
+    pay_headers, _ = handler(*call)
+    return pay_headers
+
+
+def _paid_call_receipt(base: str, payer, target_url: str):
+    """One more paid call, made directly, to read the response HEADERS the
+    tollbooth client does not expose. Returns (tx hash from PAYMENT-RESPONSE
+    or None, the payment headers that were sent) so the caller can replay."""
+    import httpx
+    from x402.http.utils import decode_payment_response_header
+
+    http_client = _x402_http_client(payer)
     with httpx.Client(timeout=90) as http:
         first = http.post(f"{base}/audit/wcag", json={"url": target_url})
         if first.status_code != 402:
             print(f"      expected a 402, got {first.status_code}")
-            return None
-        import inspect
-
-        handler = http_client.handle_402_response
-        call = [dict(first.headers), first.content]
-        if "request_url" in inspect.signature(handler).parameters:
-            call.append(f"{base}/audit/wcag")
-        pay_headers, _ = handler(*call)
+            return None, None
+        pay_headers = _sign(http_client, first.headers, first.content, f"{base}/audit/wcag")
         paid = http.post(f"{base}/audit/wcag", json={"url": target_url}, headers=pay_headers)
         print(f"      paid call: HTTP {paid.status_code}")
         header = paid.headers.get("PAYMENT-RESPONSE") or paid.headers.get("X-PAYMENT-RESPONSE")
         if not header:
-            return None
-        return decode_payment_response_header(header).transaction
+            return None, pay_headers
+        return decode_payment_response_header(header).transaction, pay_headers
+
+
+def _load_payments_module(facilitator: str, recipient: str):
+    """The node's x402 module, imported fresh against `facilitator`."""
+    import importlib.util
+
+    os.environ["X402_FACILITATOR_URL"] = facilitator
+    os.environ["X402_PAY_TO_ADDRESS"] = recipient
+    name = f"x402_payments_sim_{abs(hash(facilitator))}"
+    spec = importlib.util.spec_from_file_location(name, SERVICE_DIR / "app" / "x402_payments.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _hammer_module(facilitator: str, recipient: str, *, threads: int, rounds: int):
+    """Drive verify+settle from many threads at once through the node's own
+    payment module -- the exact code path a busy instance runs. Each thread
+    signs its own payments; the facilitator is the keep-alive stub.
+
+    This is where the cross-loop connection-reuse bug lived. Sequential runs
+    cannot see it; this does, every time."""
+    import logging
+
+    from eth_account import Account
+
+    module = _load_payments_module(facilitator, recipient)
+    reasons: set = set()
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            msg = record.getMessage()
+            if "FAILED" in msg or "REJECTED" in msg or "REFUSED" in msg:
+                reasons.add(msg.split(": ", 2)[-1][:90])
+
+    logging.getLogger(module.__name__).addHandler(_Capture())
+    counts = {"ok": 0, "fail": 0}
+    lock = threading.Lock()
+
+    def worker():
+        payer = Account.create()
+        http_client = _x402_http_client(payer)
+        for _ in range(rounds):
+            header = module.payment_required_header("$0.03", resource_url="http://node/audit/wcag")
+            pay = _sign(http_client, header, b"", "http://node/audit/wcag")
+            pending = module.verify_only_sync(pay["PAYMENT-SIGNATURE"], "$0.03")
+            good = pending is not None and module.settle_sync(pending)
+            with lock:
+                counts["ok" if good else "fail"] += 1
+
+    workers = [threading.Thread(target=worker) for _ in range(threads)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    return counts["ok"], counts["fail"], reasons
+
+
+def _outage_probe(dead_facilitator: str, recipient: str):
+    """Time two 402 builds against a facilitator that is not there."""
+    module = _load_payments_module(dead_facilitator, recipient)
+    t0 = time.time()
+    header = module.payment_required_header("$0.03", resource_url="http://node/audit/wcag")
+    t_first = time.time() - t0
+    t0 = time.time()
+    module.payment_required_header("$0.03", resource_url="http://node/audit/wcag")
+    t_second = time.time() - t0
+    return t_first, t_second, header
 
 
 if __name__ == "__main__":

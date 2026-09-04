@@ -177,3 +177,11 @@ def test_help_runs_without_the_service_installed():
     )
     assert result.returncode == 0
     assert "--no-index" in result.stdout
+
+
+def test_the_stub_facilitator_speaks_keep_alive():
+    """HTTP/1.0 closes every connection and hid the cross-event-loop
+    connection-reuse bug (56 of 96 concurrent payments rejected). A stub that
+    is easier on the code than a real facilitator is not a simulation."""
+    handler = sim._make_handler(sim.FacilitatorState(index=True), "0x" + "11" * 20)
+    assert handler.protocol_version == "HTTP/1.1"

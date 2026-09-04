@@ -554,6 +554,26 @@ else
   echo "  (could not parse; check $BASE/.well-known/agent.json by hand)"
 fi
 
+# ---------------------------------------------------------------------------
+# The node must not be a proxy into its own network. Every audit fetches the
+# caller's URL from inside Cloud Run; a URL naming the metadata endpoint,
+# loopback or the VPC has to be refused with a 400 before any payment is read.
+# A deployed node that answers anything else here is exploitable for free.
+# ---------------------------------------------------------------------------
+echo
+echo "Target URL gate"
+for internal in "http://169.254.169.254/computeMetadata/v1/" "http://127.0.0.1:8080/health" "http://metadata.google.internal/"; do
+  GATE_CODE=$(curl -sS -m 45 -o /dev/null -w '%{http_code}' -X POST "$BASE/audit/wcag" \
+    -H 'Content-Type: application/json' -d "{\"url\":\"$internal\"}" 2>/dev/null)
+  if [ "$GATE_CODE" = "400" ]; then
+    pass "refuses to fetch $internal -> 400"
+  else
+    fail "did NOT refuse $internal -> got $GATE_CODE, expected 400. The deployed
+        revision predates the target gate, or ALLOW_PRIVATE_TARGETS is set on
+        the service -- it must never be. Deploy current main."
+  fi
+done
+
 echo
 echo "The paid path: can a caller who CAN pay actually get an audit?"
 # Everything above this point only ever proves that an UNauthenticated call is

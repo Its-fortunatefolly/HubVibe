@@ -458,7 +458,24 @@ fi
 ok "preflight passed"
 
 step "Deploying the current source"
+# Capacity is pinned here rather than inherited from whatever the last
+# revision happened to have. Each setting is a bill-or-outage decision:
+#   --memory/--cpu      four Chromium contexts plus Python need ~2 GiB; the
+#                       512 MiB default OOMs under concurrent audits. Billed
+#                       only while a request is in flight (min-instances 0).
+#   --concurrency       MAX_CONCURRENT_AUDITS (4) audits run per instance;
+#                       at 8 in-flight requests Cloud Run adds an instance
+#                       instead of queueing 80 behind one browser.
+#   --max-instances     the blast radius of a flood of unpaid 402s. 10 x 4
+#                       audits ~ 8 audits/s ~ $20k/day of paid capacity;
+#                       raise it when revenue says so, not before.
+#   --timeout           a bundle is four page loads; 120s covers it and
+#                       stops a hung audit from holding an instance for 5 min.
+#   --cpu-boost         full CPU during cold start, so a paying agent's
+#                       first call after idle is not the one that times out.
 gcloud run deploy "$SERVICE" --source="$SOURCE_DIR" --project="$PROJECT" --region="$REGION" \
+  --memory="${MEMORY:-2Gi}" --cpu="${CPU:-2}" --concurrency="${CONCURRENCY:-8}" \
+  --max-instances="${MAX_INSTANCES:-10}" --timeout="${REQUEST_TIMEOUT:-120}" --cpu-boost \
   || die "deploy failed. The previous revision keeps serving; fix the error above and re-run."
 ok "deployed"
 
