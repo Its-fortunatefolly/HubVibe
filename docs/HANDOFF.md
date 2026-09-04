@@ -9,7 +9,48 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-04, CORRECTION from the billing report: the money was CLOUD WORKSTATIONS, not Cloud Run
+
+The owner opened the billing report. Read off the screen:
+
+> You spent $193.84 between Aug 1 – 31, 2026. This is the same amount from
+> Jul 1 – 31, 2026. Project HubVibe at $193.84 driven by $189.73 from Region
+> us-central1 and $93.71 from Cloud Workstations and $93.71 from SKU Cloud
+> Workstations control plane fee (us-central1)
+
+So the entry below this one is wrong in its first paragraph and this file
+must not repeat it: the charge was not the trial credit and not the warm
+Cloud Run instance. **A Cloud Workstations cluster in us-central1 billed
+about $6.25 a day, every day, for at least July and August — its control
+plane fee runs every hour the cluster exists whether or not a workstation
+is ever opened.** Nothing in this repo has ever used Cloud Workstations;
+the node runs in us-south1. The steady ~$9.80/day line on the chart is that
+cluster plus whatever else sits in us-central1. Cloud Run was a rounding
+error next to it.
+
+This also reframes `BILLING_DISABLED`: with real charges of ~$194/month and
+no revenue, the account was most likely suspended or the owner turned it
+off, not a trial ending. Either way, **re-enabling billing restarts that
+meter within the hour unless the cluster is deleted first.**
+
+Done, in code, so it happens in the right order:
+
+- `scripts/cost-sweep.sh` lists Cloud Workstations clusters (all regions),
+  Compute Engine VMs, Cloud SQL, GKE, and a warm Cloud Run instance; with
+  `DELETE_IDLE=1` it deletes workstations → configs → cluster and nothing
+  else; exits 1 while anything idle still bills.
+- `scripts/launch.sh` runs the sweep with `DELETE_IDLE=1` between the
+  checkout and the deploy. Billing on → junk gone → deploy → paid call, in
+  that order, from one line.
+
+Six tests; the delete-without-consent case proved red. The two guards in
+the entry below (instance cap 3, $5 budget alert) stand and now matter
+more, not less.
+
 ## 2026-09-04, last: what the money actually was, and two guards so it cannot recur
+
+**SUPERSEDED — see the correction above. The billing report shows real
+charges from Cloud Workstations, not a spent trial credit.**
 
 **The "$300 bill" was almost certainly the free-trial credit, not cash.**
 Google's free trial is exactly $300. The #85 commit records the Cloud Run
