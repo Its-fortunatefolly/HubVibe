@@ -9,6 +9,41 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-04, last: what the money actually was, and two guards so it cannot recur
+
+**The "$300 bill" was almost certainly the free-trial credit, not cash.**
+Google's free trial is exactly $300. The #85 commit records the Cloud Run
+bill "reached $300 with zero revenue" from a warm instance; the trial ends
+when the credit is spent, and Google then disables billing on the project
+automatically — which is `reason: BILLING_DISABLED`, read off the screen
+today. So the likeliest state is: nothing owed, trial over, project dark.
+Only the billing page can confirm it
+(https://console.cloud.google.com/billing); this file cannot see it.
+
+**What re-enabling costs, at today's traffic: about $0.25/month.** Cloud
+Run's Always Free tier is 2M requests, 360k GiB-s and 180k vCPU-s a month;
+at min-instances 0 an idle node bills nothing. The only standing charge is
+Artifact Registry storing the ~2 GiB Playwright image past its 0.5 GiB free
+allowance. Cloud Build, Secret Manager, Firestore and Logging are inside
+their free tiers. Per paid audit, ~10 vCPU-s and ~10 GiB-s ≈ $0.0004
+against $0.03 charged, and the first ~18k audits a month are inside the
+free tier entirely.
+
+**Two guards, in code, so this is not a matter of remembering:**
+
+- `--max-instances` default lowered from 10 to **3**. It is the ceiling on
+  a bad day: three instances flat out are ~$12/day worst case under a flood
+  of free 402s, while 3 × 4 audits ≈ 2/s ≈ 170k audits/day ≈ $5k/day of
+  paid capacity — far more than needed until revenue exists.
+  `MAX_INSTANCES=n` raises it.
+- `repair-and-deploy.sh` now installs Google's own **budget alert**
+  (`hubvibe-spend-alert`, $5/month, email at 50% and 100%, scoped to the
+  project) on every run: idempotent, never blocks the deploy, names the
+  manual command when it cannot, and says plainly when no billing account
+  is linked. `SPEND_ALERT_USD=n` changes the amount. Proved by mutation:
+  making it fatal, removing the idempotence check, and restoring the cap
+  each turn a test red.
+
 ## 2026-09-04, night: the paid path under LOAD — one bug that would have rejected half of all payers, and four gates a public tollbooth cannot ship without
 
 Owner's instruction: simulate, assess, fix, simulate again, no corners. So

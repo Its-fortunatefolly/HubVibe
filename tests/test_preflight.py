@@ -390,7 +390,9 @@ def _gcloud_invocations(text):
         m = _INVOCATION.match(line)
         if not m:
             continue
-        if m.group(1) in ("auth", "config"):
+        # `gcloud billing ...` is scoped to a billing ACCOUNT, not a project;
+        # its project, where one is needed, is a positional argument.
+        if m.group(1) in ("auth", "config", "billing"):
             continue
         yield line.strip()
 
@@ -511,5 +513,41 @@ def test_the_deploy_pins_capacity_instead_of_inheriting_it():
     line = deploy[0]
     for flag in ("--memory=", "--cpu=", "--concurrency=", "--max-instances=", "--timeout=", "--cpu-boost"):
         assert flag in line, f"deploy line lacks {flag}"
-    assert 'MAX_INSTANCES:-10' in line, "the default instance cap is not 10"
+    assert 'MAX_INSTANCES:-3' in line, "the default instance cap is not 3 -- the ceiling on a bad day's bill"
     assert 'MEMORY:-2Gi' in line
+
+
+def test_the_deploy_installs_a_spend_alert_and_never_blocks_on_it(tmp_path):
+    """The bill reached $300 with zero revenue because nothing was watching.
+    The deploy now creates Google's own budget alert on the project's billing
+    account. It must be idempotent (one alert, not one per deploy), must name
+    the manual command when it cannot, and must never stop the deploy."""
+    text = SCRIPT.read_text()
+    block = text[text.index("# 5. Spend guard"):text.index('if [ "$PREFLIGHT_FAILED" -ne 0 ]')]
+    assert "gcloud billing budgets create" in block
+    assert "gcloud billing budgets list" in block, "not idempotent: no check for an existing alert"
+    assert "--filter-projects" in block, "the alert is not scoped to this project"
+    assert "PREFLIGHT_FAILED=1" not in block, "a failed alert must not block the deploy"
+    assert "billing/enable?project=" in block, "an unlinked billing account is not explained"
+
+    # Driven: gcloud stub where the project has no billing account. The
+    # deploy must still be reached.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gcloud").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$*" in\n'
+        '  *"secrets describe"*) exit 0 ;;\n'
+        '  *"services describe"*) echo \'{"spec":{"template":{"spec":{"containers":[{"env":[]}]}}}}\' ;;\n'
+        '  *"billing projects describe"*) exit 1 ;;\n'
+        '  *"run deploy"*) echo DEPLOY_INVOKED ;;\n'
+        "  *) exit 0 ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gcloud").chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["SKIP_VERIFY"] = "1"
+    result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=60)
+    assert "no billing account is linked" in result.stdout
+    assert "DEPLOY_INVOKED" in result.stdout, result.stdout
