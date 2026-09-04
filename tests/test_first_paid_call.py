@@ -292,8 +292,10 @@ def _drive(tmp_path, wallet_key, pay_to, extra_env=None):
     challenge = tmp_path / "challenge.json"
     challenge.write_text(_challenge(pay_to=pay_to))
 
+    # The script asks curl for the body then the status code on its own line
+    # (-w '\n%{http_code}'); the stub answers the same way.
     (bin_dir / "curl").write_text(
-        f'#!/usr/bin/env bash\ncat "{challenge}"\n'
+        f'#!/usr/bin/env bash\ncat "{challenge}"\nprintf "\\n402"\n'
     )
     (bin_dir / "curl").chmod(0o755)
 
@@ -370,3 +372,59 @@ def test_a_settled_call_prints_the_transaction_link():
     assert "booth.last_settlement" in pay_block, "the receipt is never read off the client"
     assert "https://basescan.org/tx/$TX" in pay_block
     assert "sent no PAYMENT-RESPONSE receipt" in pay_block
+
+
+def test_a_non_json_response_shows_the_status_and_the_body():
+    """"not JSON -- is the node up?" was all the owner got on 2026-09-04,
+    with the HTTP status and the body discarded. Both go in the message."""
+    import os
+
+    result = subprocess.run(
+        [sys.executable, "-c", _preflight_source()],
+        input="<html><title>503 Service Unavailable</title></html>",
+        capture_output=True, text=True,
+        env={**os.environ, "STATUS": "503"},
+    )
+    detail = result.stdout.strip().partition("\t")[2]
+    assert "HTTP 503" in detail
+    assert "503 Service Unavailable" in detail
+    assert "cold-starting" in detail
+
+
+def test_a_cold_start_5xx_on_the_free_read_is_retried(tmp_path):
+    """min-instances is 0: the first request after idle can get Cloud Run's
+    own 503 page while the container boots. Reading the challenge costs
+    nothing, so the script tries again instead of stopping on it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    challenge = tmp_path / "challenge.json"
+    challenge.write_text(_challenge(pay_to=ADDR_A))
+    counter = tmp_path / "calls"
+    (bin_dir / "curl").write_text(
+        "#!/usr/bin/env bash\n"
+        f'n=$(( $(cat "{counter}" 2>/dev/null || echo 0) + 1 )); echo $n > "{counter}"\n'
+        'if [ "$n" -eq 1 ]; then printf "<html>Service Unavailable</html>\\n503"; exit 0; fi\n'
+        f'cat "{challenge}"\nprintf "\\n402"\n'
+    )
+    (bin_dir / "curl").chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["HOME"] = str(tmp_path)
+    env["HUBVIBE_WALLET_KEY"] = KEY_B
+    env["BASE"] = "https://example.test"
+    env["HUBVIBE_RETRY_SLEEP"] = "0"
+    result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True,
+                            env=env, timeout=180)
+
+    assert "HTTP 503 from the node (attempt 1 of 3" in result.stdout
+    assert "x402 advertised" in result.stdout, result.stdout
+    assert "not JSON" not in result.stdout
+
+
+def test_the_paying_block_still_has_no_loop_after_the_read_retry():
+    """The retry lives on the free read only. This pins where the loop ends
+    relative to where the money starts."""
+    text = SCRIPT.read_text()
+    read_block = text[text.index('step "Reading the live 402'):text.index('step "Paying for one real call')]
+    assert "for attempt in 1 2 3" in read_block

@@ -434,3 +434,30 @@ def test_an_empty_secret_list_is_reported_as_no_project_not_a_missing_secret(tmp
     assert "gcloud config set project resolver-time" in result.stdout
     assert "no secret named" not in result.stdout
     assert "DEPLOY_INVOKED" not in result.stdout
+
+
+def test_an_empty_secret_list_prints_what_gcloud_actually_said(tmp_path):
+    """On 2026-09-04 the project WAS set and --project WAS passed, and the
+    script still printed 'gcloud config set project' -- a guess, because it
+    had thrown gcloud's stderr away. The message gcloud printed is the fault;
+    it must reach the owner, with the fix that matches it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gcloud").write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$*" in\n'
+        '  *"secrets describe"*) exit 1 ;;\n'
+        '  *"secrets list"*) echo "ERROR: (gcloud.secrets.list) PERMISSION_DENIED: '
+        'Permission secretmanager.secrets.list denied for resource projects/resolver-time" >&2; exit 1 ;;\n'
+        "  *) exit 0 ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "gcloud").chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["SKIP_VERIFY"] = "1"
+    result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True,
+                            env=env, timeout=60)
+    assert "gcloud said: ERROR: (gcloud.secrets.list) PERMISSION_DENIED" in result.stdout
+    assert "roles/secretmanager.viewer" in result.stdout
+    assert "DEPLOY_INVOKED" not in result.stdout
