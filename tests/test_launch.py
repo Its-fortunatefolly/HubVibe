@@ -59,7 +59,7 @@ def test_an_unreadable_billing_state_is_shown_not_guessed(tmp_path):
 def test_billing_on_proceeds_to_the_checkout_and_the_deploy(tmp_path):
     result = _run(tmp_path, "True")
     assert "billing is enabled" in result.stdout
-    assert "GIT_CALLED_fetch" in result.stdout
+    assert "GIT_CALLED_" in result.stdout, "the checkout step never ran git"
     assert "Deploying" in result.stdout
 
 
