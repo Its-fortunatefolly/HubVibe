@@ -372,3 +372,72 @@ def test_an_uninspectable_handler_falls_back_to_the_pinned_arity(mock_http, monk
 
     assert booth.audit("https://example.com")["pass"] is True
     assert seen["argc"] == 2
+
+
+# --- the settlement receipt -------------------------------------------------
+
+
+def _b64(obj: dict) -> str:
+    import base64
+    import json
+
+    return base64.b64encode(json.dumps(obj).encode()).decode()
+
+
+def _paid_booth(mock_http, monkeypatch, paid_response: httpx.Response):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(402, json={"price": "$0.03"})
+        return paid_response
+
+    mock_http(handler)
+    booth = _client(wallet_key=THROWAWAY_KEY, budget_usd=1.0)
+    monkeypatch.setattr(
+        booth._http_client,
+        "handle_402_response",
+        lambda headers, body: ({"PAYMENT-SIGNATURE": "signed"}, object()),
+    )
+    return booth
+
+
+def test_the_settlement_receipt_is_kept_from_the_payment_response_header(mock_http, monkeypatch):
+    """The receipt is the payer's only on-chain reference. The client keeps
+    it where a script can print it -- first-paid-call.sh prints the Basescan
+    link for exactly this transaction hash."""
+    receipt = {"success": True, "transaction": "0x" + "cd" * 32, "network": "eip155:8453"}
+    booth = _paid_booth(
+        mock_http, monkeypatch,
+        httpx.Response(200, json={"pass": True}, headers={"PAYMENT-RESPONSE": _b64(receipt)}),
+    )
+    assert booth.last_settlement is None, "nothing paid yet"
+
+    assert booth.audit("https://example.com", endpoint="wcag")["pass"] is True
+    assert booth.last_settlement == receipt
+
+
+def test_the_v1_receipt_header_name_is_read_too(mock_http, monkeypatch):
+    receipt = {"success": True, "transaction": "0x" + "ef" * 32, "network": "base"}
+    booth = _paid_booth(
+        mock_http, monkeypatch,
+        httpx.Response(200, json={"pass": True}, headers={"X-PAYMENT-RESPONSE": _b64(receipt)}),
+    )
+    booth.audit("https://example.com", endpoint="wcag")
+    assert booth.last_settlement["transaction"] == "0x" + "ef" * 32
+
+
+def test_a_paid_200_without_a_receipt_still_delivers(mock_http, monkeypatch):
+    booth = _paid_booth(mock_http, monkeypatch, httpx.Response(200, json={"pass": True}))
+    assert booth.audit("https://example.com", endpoint="wcag")["pass"] is True
+    assert booth.last_settlement is None
+
+
+def test_a_malformed_receipt_never_turns_a_paid_audit_into_an_error(mock_http, monkeypatch):
+    booth = _paid_booth(
+        mock_http, monkeypatch,
+        httpx.Response(200, json={"pass": True}, headers={"PAYMENT-RESPONSE": "%%%not-base64"}),
+    )
+    assert booth.audit("https://example.com", endpoint="wcag")["pass"] is True
+    assert booth.last_settlement is None

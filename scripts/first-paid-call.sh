@@ -437,7 +437,11 @@ except Exception as exc:
         detail = detail[:300] + " ...[truncated]"
     print("FAIL\t%s: %s" % (type(exc).__name__, detail))
     sys.exit()
-print("OK\t%.4f\t%s" % (booth.spent_usd, json.dumps(result)[:400]))
+# The tx hash rides ahead of the result: it is the one field a human needs
+# next, and json.dumps never emits a raw tab, so the columns stay stable.
+receipt = booth.last_settlement or {}
+print("OK\t%.4f\t%s\t%s" % (booth.spent_usd, receipt.get("transaction") or "",
+                            json.dumps(result)[:400]))
 ' 2>&1)
 
 case "$PAID" in
@@ -453,8 +457,21 @@ case "$PAID" in
 esac
 
 SPENT=$(printf '%s' "$PAID" | cut -f2)
+TX=$(printf '%s' "$PAID" | cut -f3)
 ok "settled \$$SPENT and the audit returned a result"
-printf '%s\n' "$PAID" | cut -f3 | sed 's/^/        /'
+printf '%s\n' "$PAID" | cut -f4- | sed 's/^/        /'
+
+# The receipt is the proof. A settled payment has a transaction hash, and
+# the node hands it back in the PAYMENT-RESPONSE header (x402 spec step 10).
+# Print the explorer link for it, so "did the money move" is one tap and not
+# a wallet-app hunt. A node whose deployed revision predates the receipt
+# sends no header; say so rather than printing an empty link.
+if [ -n "$TX" ]; then
+  ok "on-chain: https://basescan.org/tx/$TX"
+else
+  warn "the node sent no PAYMENT-RESPONSE receipt (deployed revision predates it)."
+  warn "look for the transfer at https://basescan.org/address/$PAY_TO"
+fi
 
 # ---------------------------------------------------------------------------
 # Did the payment register us?

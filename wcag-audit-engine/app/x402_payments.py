@@ -778,12 +778,52 @@ class PendingPayment:
     audit that ran" true for machine payers, not just for subscribers.
     """
 
-    __slots__ = ("payload", "requirements", "price")
+    __slots__ = ("payload", "requirements", "price", "settle_result")
 
     def __init__(self, payload, requirements, price: str):
         self.payload = payload
         self.requirements = requirements
         self.price = price
+        # The facilitator's SettleResponse once settle_sync succeeds, so the
+        # delivery can hand the payer the receipt. None until then.
+        self.settle_result = None
+
+
+def receipt_headers(pending) -> dict:
+    """The x402 settlement receipt, as response headers, or {}.
+
+    Spec step 10-11: after settling, the resource server returns the
+    facilitator's settle response to the client in `PAYMENT-RESPONSE` (v2;
+    `X-PAYMENT-RESPONSE` for v1 clients -- the library's client reads either).
+    It carries the transaction hash, the network and the payer. Without it a
+    paying agent has proof of nothing: it sent a signature, got an audit, and
+    has no on-chain reference to reconcile against its wallet. Found by
+    `scripts/simulate-paid-call.py`, which was the first thing to look at the
+    headers of a paid 200 -- every earlier test stopped at the status code.
+
+    Sent under both names because the node accepts both payment headers
+    (X-PAYMENT and PAYMENT-SIGNATURE) and does not track which the caller
+    used; an extra header costs nothing and a missing one costs the receipt.
+
+    Never raises and never withholds the audit: {} on anything unexpected.
+    The money has moved by the time this runs; a receipt that cannot be
+    encoded is a bookkeeping gap, not a reason to fail the delivery.
+    """
+    result = getattr(pending, "settle_result", None)
+    if result is None or not getattr(result, "success", False):
+        return {}
+    try:
+        from x402.http.utils import encode_payment_response_header
+
+        encoded = encode_payment_response_header(result)
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "x402 settled but the receipt could not be encoded (%s: %s); the "
+            "audit is delivered without a PAYMENT-RESPONSE header.",
+            type(exc).__name__, exc,
+        )
+        return {}
+    return {"PAYMENT-RESPONSE": encoded, "X-PAYMENT-RESPONSE": encoded}
 
 
 def _log_rejection(stage: str, price: Optional[str], *, result=None, exc=None) -> None:
@@ -1026,6 +1066,7 @@ def settle_sync(pending) -> bool:
 
         result = _run_coro_sync(_run())
         if result.success:
+            pending.settle_result = result
             record_settlement_in_stripe(result, pending.requirements[0])
         else:
             # An audit was delivered and not paid for. The reason is the only

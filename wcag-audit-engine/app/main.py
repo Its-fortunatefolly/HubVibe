@@ -618,6 +618,32 @@ def _attach_issued_key(result: dict, auth) -> None:
     )
 
 
+def _with_receipt(content, auth):
+    """Return `content`, carrying the x402 settlement receipt headers when
+    this call was paid per-call and settled.
+
+    Routes return plain dicts, which FastAPI serialises with no headers of
+    ours on them. A settled x402 payment has a receipt to deliver -- the
+    facilitator's settle response, transaction hash included -- and the spec
+    puts it in the PAYMENT-RESPONSE header of the 200. So a paid delivery
+    becomes a JSONResponse with those headers; every other delivery is
+    returned exactly as before.
+    """
+    pending = getattr(auth, "pending_payment", None)
+    headers = x402_payments.receipt_headers(pending) if pending is not None else {}
+    if not headers:
+        return content
+    return JSONResponse(content=content, headers=headers)
+
+
+def _deliver(result: dict, auth):
+    """The last line of every paid route: attach what the payer is owed
+    besides the audit -- a prepaid key it just bought, the settlement
+    receipt -- and return."""
+    _attach_issued_key(result, auth)
+    return _with_receipt(result, auth)
+
+
 def _bill(auth, price_usd: float) -> Optional[str]:
     """Collect payment for an audit that actually produced a result.
 
@@ -1131,6 +1157,11 @@ def agent_manifest(request: Request):
             "note": (
                 "Only methods actually configured on this deployment are listed; "
                 "an empty list means no machine payment rail is live right now."
+            ),
+            "receipt": (
+                "A settled x402 payment returns the facilitator's settle "
+                "response -- transaction hash, network, payer -- on the 200 in "
+                "the PAYMENT-RESPONSE header (X-PAYMENT-RESPONSE for v1 clients)."
             ),
         },
         "limits": {
@@ -1754,7 +1785,7 @@ def mcp_streamable_http(
 
         import json as _json
 
-        return {
+        envelope = {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
@@ -1762,6 +1793,7 @@ def mcp_streamable_http(
                 "isError": False,
             },
         }
+        return _with_receipt(envelope, auth)
 
     return _jsonrpc_error(request_id, -32601, f"Method not found: {method}")
 
@@ -1950,12 +1982,10 @@ def audit(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
-    _attach_issued_key(result, auth)
-
     remediation = _remediation_notes(violations)
     if remediation is not None:
         result["remediation"] = remediation
-    return result
+    return _deliver(result, auth)
 
 
 @app.post("/audit/wcag")
@@ -2004,8 +2034,7 @@ def audit_wcag(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
-    _attach_issued_key(result, auth)
-    return result
+    return _deliver(result, auth)
 
 
 @app.post("/audit/seo")
@@ -2034,8 +2063,7 @@ def audit_seo(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
-    _attach_issued_key(result, auth)
-    return result
+    return _deliver(result, auth)
 
 
 @app.post("/audit/security")
@@ -2061,8 +2089,7 @@ def audit_security(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
-    _attach_issued_key(result, auth)
-    return result
+    return _deliver(result, auth)
 
 
 @app.post("/audit/performance")
@@ -2088,8 +2115,7 @@ def audit_performance(
     warning = _bill(auth, price_usd=0.03)
     if warning:
         result["billing_warning"] = warning
-    _attach_issued_key(result, auth)
-    return result
+    return _deliver(result, auth)
 
 
 @app.post("/audit/bundle")
@@ -2151,5 +2177,4 @@ def audit_bundle(
     warning = _bill(auth, price_usd=0.10)
     if warning:
         result["billing_warning"] = warning
-    _attach_issued_key(result, auth)
-    return result
+    return _deliver(result, auth)

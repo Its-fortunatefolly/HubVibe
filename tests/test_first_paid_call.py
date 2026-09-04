@@ -358,3 +358,15 @@ def test_an_unreadable_balance_hands_over_the_basescan_link(tmp_path):
     payer = Account.from_key(KEY_B).address
     assert "proceeding without the check" in result.stdout
     assert f"https://basescan.org/address/{payer}" in result.stdout
+
+
+def test_a_settled_call_prints_the_transaction_link():
+    """The receipt is the proof. After a settlement the script must print
+    the Basescan link for the transaction the node handed back in
+    PAYMENT-RESPONSE, and must say so plainly when the node sent none --
+    an empty link would read as a settlement with no transaction."""
+    text = SCRIPT.read_text()
+    pay_block = text[text.index("Paying for one real call"):]
+    assert "booth.last_settlement" in pay_block, "the receipt is never read off the client"
+    assert "https://basescan.org/tx/$TX" in pay_block
+    assert "sent no PAYMENT-RESPONSE receipt" in pay_block

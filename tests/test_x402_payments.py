@@ -57,12 +57,16 @@ def _load_x402(monkeypatch, *, facilitator="https://facilitator.example",
     return module
 
 
-def _install_fake_server(monkeypatch, module, *, valid=True, settled=True):
+def _install_fake_server(monkeypatch, module, *, valid=True, settled=True,
+                         settle_response=None):
     """Stand in for x402ResourceServer with the REAL library's shape.
 
     initialize() is deliberately a plain MagicMock (sync, returns a
     non-awaitable) because that is exactly what the real method is -- an
     AsyncMock here would hide the very bug this file exists to catch.
+
+    `settle_response` replaces the MagicMock settle result with a real
+    x402 SettleResponse, for tests that encode it into the receipt header.
     """
     server = MagicMock()
     server.initialize = MagicMock(return_value=None)
@@ -79,6 +83,8 @@ def _install_fake_server(monkeypatch, module, *, valid=True, settled=True):
     settle_result = MagicMock()
     settle_result.success = settled
     settle_result.transaction = "0xsettledtx"
+    if settle_response is not None:
+        settle_result = settle_response
 
     async def _verify(*a, **k):
         return verify_result
@@ -1025,3 +1031,86 @@ def test_no_bare_asyncio_run_remains_on_the_payment_path():
         and node.lineno not in ok_lines
     ]
     assert stray == [], f"bare asyncio.run() at lines {stray} -- use _run_coro_sync"
+
+
+# --- the settlement receipt -------------------------------------------------
+#
+# x402 spec step 10: after settling, the resource server hands the
+# facilitator's settle response back to the payer in PAYMENT-RESPONSE. Until
+# this, a paying agent got an audit and no transaction hash -- proof of
+# nothing to reconcile against its wallet. Found by simulate-paid-call.py,
+# the first thing to read the headers of a paid 200; every test before it
+# stopped at the status code.
+
+_RECEIPT_TX = "0x" + "ab" * 32
+
+
+def _real_settle_response():
+    from x402.schemas import SettleResponse
+
+    return SettleResponse(
+        success=True, transaction=_RECEIPT_TX, network="eip155:8453", payer="0x" + "11" * 20
+    )
+
+
+def test_settle_sync_keeps_the_settlement_for_the_receipt(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module, settle_response=_real_settle_response())
+
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    assert pending.settle_result is None, "nothing to receipt before settlement"
+    assert module.settle_sync(pending) is True
+    assert pending.settle_result.transaction == _RECEIPT_TX
+
+
+def test_receipt_headers_decode_with_the_x402_client(monkeypatch):
+    """Both header names, same value, and the x402 library's own decoder --
+    the one a paying client uses -- reads the transaction back out."""
+    from x402.http.utils import decode_payment_response_header
+
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module, settle_response=_real_settle_response())
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    module.settle_sync(pending)
+
+    headers = module.receipt_headers(pending)
+
+    assert set(headers) == {"PAYMENT-RESPONSE", "X-PAYMENT-RESPONSE"}
+    assert headers["X-PAYMENT-RESPONSE"] == headers["PAYMENT-RESPONSE"]
+    decoded = decode_payment_response_header(headers["PAYMENT-RESPONSE"])
+    assert decoded.success is True
+    assert decoded.transaction == _RECEIPT_TX
+
+
+def test_no_receipt_for_a_refused_settlement(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module, settled=False)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_result is None
+    assert module.receipt_headers(pending) == {}
+
+
+def test_no_receipt_before_settlement_and_none_without_a_payment(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    assert module.receipt_headers(pending) == {}
+    assert module.receipt_headers(None) == {}
+
+
+def test_an_unencodable_receipt_is_logged_and_never_raises(monkeypatch, caplog):
+    """The money has moved by the time the receipt is built. A receipt that
+    cannot be encoded is a bookkeeping gap to log, never a reason to turn a
+    paid, delivered audit into a 500."""
+    import types
+
+    module = _load_x402(monkeypatch)
+    pending = module.PendingPayment(None, None, "$0.03")
+    pending.settle_result = types.SimpleNamespace(success=True)  # no model_dump_json
+
+    with caplog.at_level(logging.WARNING):
+        assert module.receipt_headers(pending) == {}
+    assert "receipt could not be encoded" in caplog.text
