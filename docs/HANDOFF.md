@@ -9,6 +9,28 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-05, later: OWNER AFFIRMED BOTH WALLETS — do not re-open recipient identity
+
+Stated directly by the owner, in one exchange, so this is settled fact and
+not to be re-litigated (recipient-identity confusion has already cost this
+project a full fire drill — see 2026-08-29 "the x402 recipient is
+UNIDENTIFIED"):
+
+- `0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd` (`hubvibe.base.eth`) —
+  **the owner's**, affirmed again 2026-09-05. Stays the default pay-to
+  everywhere. All x402 revenue lands here.
+- `0x37555E884c5EbA10f6E816DbecEA30965B9b38C0` — **also the owner's**
+  (their Coinbase/Base app; EIP-55 checksum verified programmatically).
+  A valid alternate recipient: switching to it is one override,
+  `X402_PAY_TO_ADDRESS=0x37555E884c5EbA10f6E816DbecEA30965B9b38C0`, on
+  go-live.sh or vps-install.sh. Not on any blocklist.
+
+The owner also holds a Solana address (`22FwA5g…nNTSv`) and a Bitcoin
+address (`bc1q8s6…7n3gw`). **Neither can receive USDC on Base** — x402 on
+this node pays an EVM address on Base mainnet only; funds sent to the SOL
+or BTC address on the wrong network are unrecoverable. The UUID the owner
+pasted alongside is a Coinbase internal account id, not a chain address.
+
 ## 2026-09-05: the node can now run OFF Google entirely — one command on any flat-rate box
 
 Context, owner-stated: billing on `resolver-time` cannot be re-enabled (the
