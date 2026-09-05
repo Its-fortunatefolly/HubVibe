@@ -9,6 +9,46 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-05, night: one command answers "what is the money doing"
+
+Owner asked for a shell command that reports the payment state.
+`scripts/payment-status.sh` — read-only, runs from any machine with curl +
+python3 (Cloud Shell, the VPS, a laptop), no checkout needed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Its-fortunatefolly/HubVibe/main/scripts/payment-status.sh | bash
+```
+
+Four sections, in the order that decides whether a dollar can move:
+
+1. **WALLETS** — USDC balances of BOTH affirmed wallets, read off Base by
+   `eth_call` to the USDC contract. x402 revenue lands on-chain and never
+   appears in Stripe, so this is the revenue counter. An unreadable RPC
+   degrades to a Basescan link and **must never read as zero** (mutation-proved).
+2. **NODE** — health, then a real unpaid POST to `/audit/wcag`: the price,
+   the recipient, the network, whether the v2 PAYMENT-REQUIRED header is
+   present, which other rails are offered, and whether a Bazaar record rides
+   the 402.
+3. **THE MATCH** — is the recipient the node advertises actually one of the
+   owner's affirmed wallets? This is the section that matters. The 2026-08
+   failure (an unidentified address deployed for weeks) passed every format
+   gate; shape is not ownership. A non-affirmed address is a loud STOP that
+   also blocks the "nothing structural" verdict.
+4. **PAYER** — can the first paid call be made from here: is there a key
+   file, does its wallet hold ≥ $0.03 USDC on Base, and is it (wrongly) one
+   of the receiving wallets — a self-transfer proves nothing.
+
+Ends with a one-line verdict naming the exact next command for whichever
+state it found.
+
+Ten tests drive the REAL script against a fake node serving a real-shaped
+402 (owner wallet / alternate wallet / stranger wallet / no-x402 / dead
+node). Six mutations, each proved red — including one that first survived:
+a spelling-based key-leak check let `print(open(WALLET_FILE).read())`
+through, so it now asserts the FLOW invariant (every read of the wallet file
+must feed straight into `Account.from_key`, nowhere else). Suite 664 passed
+/ 1 skipped, lint 0.
+
 ## 2026-09-05, evening: THE IDENTITY IS NOW A DOMAIN THE OWNER OWNS — hubvibe-io.com
 
 The owner bought **hubvibe-io.com** and confirmed the receiving wallet
