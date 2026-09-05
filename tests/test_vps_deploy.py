@@ -24,8 +24,24 @@ UNAFFIRMED = "0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256"
 TEST_CONSTANT = "0x32b08c5e927c69877d0fcab35618c265674922bc"
 
 
-def _run(*args, env=None):
-    merged = {"PATH": "/usr/bin:/bin", "HOME": "/tmp"}
+def _run(*args, env=None, tmp_path=None):
+    """Drive the installer with docker STUBBED to fail its plugin check.
+
+    The machine running the tests may genuinely have Docker (this repo's
+    sandbox does), and without the stub the happy-path test sailed past the
+    Docker gate, wrote deploy/vps/.env into the working tree and started a
+    real compose build -- a test with side effects on the repo and the
+    host. The stub makes every run stop deterministically at the compose
+    check, which is the first line past the money gates.
+    """
+    import os
+    import tempfile
+
+    stub_dir = tempfile.mkdtemp(dir=str(tmp_path) if tmp_path else None)
+    stub = Path(stub_dir) / "docker"
+    stub.write_text("#!/bin/sh\nexit 1\n")
+    stub.chmod(0o755)
+    merged = {"PATH": f"{stub_dir}:/usr/bin:/bin", "HOME": "/tmp"}
     if env:
         merged.update(env)
     return subprocess.run(
@@ -77,12 +93,15 @@ def test_an_unpayable_recipient_stops_the_install_before_docker(address, why):
 
 
 def test_the_affirmed_default_passes_the_gate_and_proceeds_to_docker():
-    """With a good recipient, the next stop is the Docker check -- on this
-    sandbox that fails (no docker on the stripped PATH), which is exactly
-    the proof the gate passed."""
+    """With a good recipient, the next stop is the Docker check -- where the
+    stubbed docker fails its compose-plugin probe, which is exactly the
+    proof the money gate passed and nothing was written."""
     result = _run("audits.example.com")
     assert "passes every gate" in result.stdout
     assert "Checking Docker" in result.stdout
+    assert result.returncode == 1, "the stubbed docker must stop the run before any write"
+    assert "Compose plugin is missing" in result.stdout
+    assert not (VPS_DIR / ".env").exists(), "the test run wrote .env into the repo"
 
 
 def _compose() -> dict:
