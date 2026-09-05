@@ -1,0 +1,62 @@
+# The whole service on one flat-rate box: the audit engine plus Caddy for
+# automatic HTTPS. No metered anything -- the bill for this stack is the
+# machine it runs on, and a machine cannot surprise-bill.
+#
+#   bash scripts/vps-install.sh yourdomain.com     # from the repo root
+#
+# does everything: writes .env beside this file, builds, starts, checks.
+# See deploy/vps/README.md for the two manual steps (domain + DNS record).
+#
+# Sizing: MAX_CONCURRENT_AUDITS in .env is the real capacity knob -- each
+# in-flight audit holds a Chromium context, so it is a memory ceiling. The
+# default of 2 fits a 4 GB box with room for the OS; raise it and mem_limit
+# together when the box grows.
+
+services:
+  hubvibe:
+    build:
+      context: ../../wcag-audit-engine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # The public identity every manifest and 402 advertises. The domain,
+      # never the box: agents cache this URL, and the domain is what lets
+      # the box change hosts later without losing them.
+      PUBLIC_BASE_URL: https://${DOMAIN}
+      # One instance, one file: SQLite replaces Firestore off-Google.
+      KEY_STORE: sqlite
+      KEY_STORE_SQLITE_PATH: /data/hubvibe-keys.db
+      # Exactly one trusted proxy (Caddy) appends the client address to
+      # X-Forwarded-For, so the rate limiter reads one hop back.
+      RATE_LIMIT_PROXY_DEPTH: "1"
+    volumes:
+      - hubvibe_data:/data
+    # Chromium under memory pressure takes the whole box with it; cap the
+    # container so the worst case is a restarted service, not a dead host.
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - hubvibe
+
+volumes:
+  hubvibe_data:
+  caddy_data:
+  caddy_config:

@@ -196,6 +196,16 @@ def human_plans_live() -> list:
 
 _db = None
 
+# Which store holds the api_key -> record mapping (and prepaid balances,
+# quotas, leads, reports). "firestore" is the Cloud Run deployment's store
+# and the default; "sqlite" backs the same operations with one local file
+# (KEY_STORE_SQLITE_PATH), which is what makes this service deployable on a
+# host that is not Google -- the per-call rails never needed Google, but the
+# key the MPP top-up sells has to be written SOMEWHERE, and until this
+# existed that somewhere was Firestore only.
+_KEY_STORE_BACKEND = (os.environ.get("KEY_STORE") or "firestore").strip().lower()
+_KEY_STORE_SQLITE_PATH = os.environ.get("KEY_STORE_SQLITE_PATH", "/data/hubvibe-keys.db")
+
 
 def _any_sellable_price() -> bool:
     """True if Stripe has at least one Price this service can charge.
@@ -219,13 +229,65 @@ def is_configured() -> bool:
     return bool(stripe_key_looks_valid() and _WEBHOOK_SECRET and _any_sellable_price())
 
 
+def _load_keystore_sqlite():
+    """Import the sibling module under either load style (package import, or
+    the by-file-path loading main.py documents), same discipline as main.py's
+    _load_sibling_module: one instance per process, cached in sys.modules."""
+    try:
+        from . import keystore_sqlite
+
+        return keystore_sqlite
+    except ImportError:
+        import importlib.util
+        import sys
+        from pathlib import Path
+
+        name = "wcag_audit_engine_keystore_sqlite"
+        cached = sys.modules.get(name)
+        if cached is not None:
+            return cached
+        module_path = Path(__file__).resolve().parent / "keystore_sqlite.py"
+        spec = importlib.util.spec_from_file_location(name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
+
+
 def _firestore():
     global _db
     if _db is None:
-        from google.cloud import firestore
+        if _KEY_STORE_BACKEND == "sqlite":
+            _db = _load_keystore_sqlite().SqliteKeyStore(_KEY_STORE_SQLITE_PATH)
+        elif _KEY_STORE_BACKEND == "firestore":
+            from google.cloud import firestore
 
-        _db = firestore.Client()
+            _db = firestore.Client()
+        else:
+            # Refuse to guess: a typo'd backend silently falling through to
+            # Firestore on a box with no Google credentials would fail every
+            # keyed call at runtime with the least useful possible error.
+            raise ValueError(
+                f"KEY_STORE is {_KEY_STORE_BACKEND!r}; it must be 'firestore' or 'sqlite'"
+            )
     return _db
+
+
+def _run_transactional(fn):
+    """Run fn(transaction) atomically on whichever key store is live.
+
+    The SQLite store brings its own transaction runner (BEGIN IMMEDIATE, so
+    two debits of one key serialize); Firestore's is the library's own
+    `transactional` decorator. One helper rather than a branch in each
+    caller, so the two spots that need atomicity -- the prepaid debit and
+    the quota increment -- cannot end up on different contracts.
+    """
+    db = _firestore()
+    if hasattr(db, "run_in_transaction"):
+        return db.run_in_transaction(fn)
+    from google.cloud import firestore
+
+    return firestore.transactional(fn)(db.transaction())
 
 
 def create_checkout_session(
@@ -512,12 +574,9 @@ def spend_prepaid(api_key: str, cents: int) -> bool:
     if cents <= 0:
         return False
 
-    from google.cloud import firestore
-
     try:
         ref = _firestore().collection("api_keys").document(api_key)
 
-        @firestore.transactional
         def _debit(transaction):
             snapshot = ref.get(transaction=transaction)
             if not snapshot.exists:
@@ -531,7 +590,7 @@ def spend_prepaid(api_key: str, cents: int) -> bool:
             transaction.update(ref, {"prepaid_balance_cents": balance - cents})
             return True
 
-        return bool(_debit(_firestore().transaction()))
+        return bool(_run_transactional(_debit))
     except Exception:
         _warn_key_store_unavailable_for_prepaid()
         return False
@@ -580,14 +639,10 @@ def check_and_increment_quota(customer_id: str, plan: Optional[str] = None) -> b
     """
     import datetime
 
-    from google.cloud import firestore
-
     try:
         period = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m")
-        db = _firestore()
-        ref = db.collection("quota_usage").document(f"{customer_id}:{period}")
+        ref = _firestore().collection("quota_usage").document(f"{customer_id}:{period}")
 
-        @firestore.transactional
         def _increment(transaction):
             snapshot = ref.get(transaction=transaction)
             count = snapshot.get("count") if snapshot.exists else 0
@@ -600,7 +655,7 @@ def check_and_increment_quota(customer_id: str, plan: Optional[str] = None) -> b
             )
             return True
 
-        return _increment(db.transaction())
+        return _run_transactional(_increment)
     except Exception:
         return True
 
