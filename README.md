@@ -288,6 +288,8 @@ scripts/simulate-paid-call.py
                           the whole x402 paid path, locally, for free
 scripts/first-paid-call.sh
                           the same paid path against the live node, for $0.03
+scripts/vps-install.sh    the whole service on any flat-rate box, one command
+deploy/vps/               compose + Caddy TLS + SQLite key store (no Google)
 tests/
 ```
 

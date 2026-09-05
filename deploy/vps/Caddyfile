@@ -1,0 +1,7 @@
+# Caddy terminates TLS (certificates from Let's Encrypt, renewed
+# automatically) and proxies to the service. reverse_proxy appends the real
+# client address to X-Forwarded-For, which is exactly what the app's rate
+# limiter reads at RATE_LIMIT_PROXY_DEPTH=1.
+{$DOMAIN} {
+	reverse_proxy hubvibe:8080
+}

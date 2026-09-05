@@ -9,6 +9,78 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-05: the node can now run OFF Google entirely — one command on any flat-rate box
+
+Context, owner-stated: billing on `resolver-time` cannot be re-enabled (the
+~$194/month Cloud Workstations charge — see the 2026-09-04 correction — is
+disputed/unpaid). Owner asked whether to move off Cloud Run and said ok to
+building it. The strategic read, recorded so it is not re-litigated: **the
+host was never the constraint** — moving does not create demand; it makes
+the node live without Google's permission and caps the only cost class that
+ever hurt this project (metered billing). The identity fix is the domain,
+not the host: once every manifest advertises a domain the owner controls,
+changing hosts is a DNS record. Returning to Cloud Run later (right shape
+once traffic is real and spiky) is: deploy there, flip the A record.
+
+**What was blocking a non-Google deploy, and what closed it:** the per-call
+rails (x402, MPP) never touched Google, but the API-key store — subscriber
+keys, the prepaid balances the MPP top-up SELLS, monthly quotas, one-off
+reports — was Firestore-only, so the top-up rail would take $0.50 and be
+unable to write the key it just sold. Closed with
+`app/keystore_sqlite.py`: a shim implementing exactly the Firestore
+surface billing.py uses (documents, add, snapshot semantics including
+`.get(field)` raising KeyError like the real client, transactions with
+update/set-merge), selected by `KEY_STORE=sqlite`
+(`KEY_STORE_SQLITE_PATH`, default `/data/hubvibe-keys.db`). Transactions
+run under `BEGIN IMMEDIATE`, so two concurrent debits of one key serialize
+— proved with a 16-thread race on a balance covering 8: exactly 8 win.
+billing.py keeps ONE code path; the two transactional spots route through
+`_run_transactional`, which uses the store's own runner for SQLite and
+Firestore's `transactional` otherwise. Firestore remains the default; an
+unknown backend raises instead of guessing.
+
+**The deploy stack — `deploy/vps/`:** compose file (service + Caddy 2 for
+automatic Let's Encrypt TLS), `Caddyfile`, `.env.example`, and
+`scripts/vps-install.sh`. The installer validates the x402 recipient
+BEFORE touching Docker — same gates as go-live.sh: 0x+40-hex shape, the
+zero address refused, both UNAFFIRMED addresses refused by name; "Nothing
+was installed" on refusal. Then: Docker via get.docker.com if absent,
+`.env` written mode 600 (never overwritten on re-run — it may hold live
+Stripe keys; only DOMAIN is updated), compose up, health-wait, and it
+prints the DNS step and the first-paid-call command. Stripe rails ride
+along only when their vars are exported in the installing shell; absent
+they stay off, fail-closed as everywhere. `RATE_LIMIT_PROXY_DEPTH=1`
+matches Caddy (it appends the client to X-Forwarded-For). The SQLite path
+sits on a named volume — a test pins that, because balances on a container
+filesystem are destroyed by every restart. `mem_limit: 3g` so Chromium
+under pressure restarts the container, not the box.
+
+**The owner's whole runbook** (also in `deploy/vps/README.md`): buy a
+domain, point an A record at the box, then on the box:
+`git clone … && cd HubVibe && bash scripts/vps-install.sh yourdomain.com`,
+then from anywhere `BASE=https://yourdomain.com bash scripts/first-paid-call.sh`.
+A 4 GB box runs `MAX_CONCURRENT_AUDITS=2` ≈ 30–50k audits/day of capacity.
+
+Tests: 13 keystore (real billing functions against the real file, no fakes
+— including the wire-level proof: a prepaid key issued into SQLite buys
+exactly two $0.03 calls through the real `/audit/wcag` route and is 402'd
+on the third) + 15 deploy-stack (the installer driven for real through
+every branch that runs without Docker, compose/Caddyfile parsed not
+grepped). Nine mutations, each red: DEFERRED transactions (race),
+snapshot.get returning None (quota silently unenforced), the balance check
+dropped (overdraft), update-as-replace (second spend of a funded key
+refused), the zero-address and unaffirmed gates disabled, the SQLite path
+off the volume, the env file left world-readable, a re-run rewriting .env.
+Existing fake-Firestore billing tests untouched and green.
+
+**Also recorded, owner-side, about the $200:** the debt lives on the
+billing ACCOUNT, not the project — a new billing account can be linked
+(`gcloud billing projects link resolver-time --billing-account=NEW`), and
+Google billing support (free, no support plan) routinely credits idle-
+resource charges; the Workstations control-plane fee for a cluster never
+used is the strongest such case. Worth filing in parallel; no longer the
+blocker either way.
+
 ## 2026-09-04, evening: the MCP paywall could not be paid by any x402 MCP client, and five more ways a payer was turned away
 
 Owner's instruction: make sure the 402, the facilitator and the wallet are
