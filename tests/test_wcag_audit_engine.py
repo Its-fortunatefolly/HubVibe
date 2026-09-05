@@ -2896,7 +2896,7 @@ def test_every_sitemap_url_is_a_route_this_service_serves(monkeypatch):
     locs = re.findall(r"<loc>([^<]+)</loc>", sitemap)
     assert locs, "sitemap.xml lists nothing"
 
-    base = "https://hubvibe-831480473793.us-south1.run.app"
+    base = "https://hubvibe-io.com"
     for loc in locs:
         assert loc.startswith(base), f"{loc} is not on this service"
         path = loc[len(base):] or "/"

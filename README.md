@@ -4,7 +4,7 @@
 headers, and performance — deterministic rules against the real rendered page,
 priced per call, payable by software with no account and no human in the loop.
 
-Live: **https://hubvibe-831480473793.us-south1.run.app**
+Live: **https://hubvibe-io.com**
 
 Every check is a deterministic rule run against the live page. Nothing here is
 a language model judging whether a site looks compliant, and a check that could
@@ -51,7 +51,7 @@ Gate a promotion on it:
   run: ./deploy-production.sh
 ```
 
-Keys come from [`/billing/checkout`](https://hubvibe-831480473793.us-south1.run.app/billing/checkout).
+Keys come from [`/billing/checkout`](https://hubvibe-io.com/billing/checkout).
 Or skip the key entirely — see the second way in.
 
 ## 2 — Point your agent at it: no key, no signup, pay per call
@@ -59,7 +59,7 @@ Or skip the key entirely — see the second way in.
 An unauthenticated call is not an error here. It is the price sheet:
 
 ```bash
-curl -i -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
+curl -i -X POST https://hubvibe-io.com/audit/wcag \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com"}'
 ```
@@ -100,9 +100,9 @@ land.
 
 **How machines find this node without being told the URL:** every 402
 carries x402 Bazaar discovery data, so facilitators index it by capability
-and price; the MCP endpoint at [`/mcp`](https://hubvibe-831480473793.us-south1.run.app/mcp)
+and price; the MCP endpoint at [`/mcp`](https://hubvibe-io.com/mcp)
 is listed in the official registry as `io.github.Its-fortunatefolly/hubvibe`;
-and [`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json)
+and [`/.well-known/agent.json`](https://hubvibe-io.com/.well-known/agent.json)
 is generated from the same catalog the routes charge from, so the advertised
 price is the charged price by construction.
 
@@ -162,11 +162,11 @@ Agents shouldn't have to read documentation to use this:
 
 | | |
 |---|---|
-| [`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json) | Full manifest — pricing, live rails, limits, per-endpoint examples |
-| [`/openapi.json`](https://hubvibe-831480473793.us-south1.run.app/openapi.json) | OpenAPI 3.1 |
-| [`/mcp.json`](https://hubvibe-831480473793.us-south1.run.app/mcp.json) | MCP tool definitions |
-| [`/llms.txt`](https://hubvibe-831480473793.us-south1.run.app/llms.txt) | Plain-text summary |
-| [`/docs`](https://hubvibe-831480473793.us-south1.run.app/docs) | Interactive reference |
+| [`/.well-known/agent.json`](https://hubvibe-io.com/.well-known/agent.json) | Full manifest — pricing, live rails, limits, per-endpoint examples |
+| [`/openapi.json`](https://hubvibe-io.com/openapi.json) | OpenAPI 3.1 |
+| [`/mcp.json`](https://hubvibe-io.com/mcp.json) | MCP tool definitions |
+| [`/llms.txt`](https://hubvibe-io.com/llms.txt) | Plain-text summary |
+| [`/docs`](https://hubvibe-io.com/docs) | Interactive reference |
 
 ## Integrations
 

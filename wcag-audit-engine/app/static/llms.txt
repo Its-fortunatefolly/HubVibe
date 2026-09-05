@@ -6,7 +6,7 @@
 > nothing here is an LLM guessing at quality, and a check that couldn't
 > run is never reported as a false pass.
 
-Base URL: https://hubvibe-831480473793.us-south1.run.app
+Base URL: https://hubvibe-io.com
 
 Machine-readable discovery:
 - /.well-known/agent.json -- full manifest: pricing, live payment rails,

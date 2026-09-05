@@ -9,6 +9,40 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-05, evening: THE IDENTITY IS NOW A DOMAIN THE OWNER OWNS — hubvibe-io.com
+
+The owner bought **hubvibe-io.com** and confirmed the receiving wallet
+stays their Base wallet (`0x837C…77dd`). Every living surface now names
+the domain instead of the Cloud Run URL — 54 replacements across main.py's
+PUBLIC_BASE_URL default, server.json (all three URLs), every static
+discovery file (llms.txt, robots.txt, sitemap.xml, index.html, mcp.json),
+all three integrations' defaults, six scripts' BASE defaults, action.yml
+(both spots), README, and docs/index.html. docs/HANDOFF.md history is
+deliberately untouched — old entries describe the old world.
+
+`SERVICE_VERSION`, `server.json` and the static mcp.json move together to
+**1.2.0** (a host move is an identity change, and the registry republish
+needs a version it has never served; the three-way test pins them equal).
+
+**DNS observed from the sandbox:** hubvibe-io.com already resolves, to
+`2.57.91.91` — either registrar parking or hosting the owner bought; the
+sandbox egress policy blocks probing it, so which one is unverified. If
+that IP is NOT the owner's box, the A record must be repointed to the VPS
+before `vps-install.sh` (Caddy can only get a certificate once the name
+reaches the box).
+
+**Two consequences, both queued, neither yet done:**
+1. The ACTION repo (`hubvibe-audit-action`) still defaults `base-url` to
+   the run.app URL. Regenerate with `scripts/publish-action-repo.sh` and
+   push its main + retag v1/v1.0.0 (owner-side in Cloud Shell if the git
+   proxy still drops tag refs).
+2. The MCP registry still serves the run.app entry; republish server.json
+   1.2.0 (`./mcp-publisher publish`, human browser login).
+
+Old URL note: the run.app URL keeps working whenever the Cloud Run service
+serves again (PUBLIC_BASE_URL is set per-deploy), but nothing advertises
+it anymore. The domain is the identity; hosts change with a DNS record.
+
 ## 2026-09-05, later: OWNER AFFIRMED BOTH WALLETS — do not re-open recipient identity
 
 Stated directly by the owner, in one exchange, so this is settled fact and

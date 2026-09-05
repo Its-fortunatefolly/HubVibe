@@ -29,7 +29,7 @@ Pick ONE auth path:
                            payments per call. Fund it with USDC on Base.
 
 Optional:
-  HUBVIBE_BASE_URL         default https://hubvibe-831480473793.us-south1.run.app
+  HUBVIBE_BASE_URL         default https://hubvibe-io.com
   HUBVIBE_MAX_PRICE_USD    per-call ceiling, default 0.25
   HUBVIBE_BUDGET_USD       total this process may ever spend, default 5.00
 
@@ -58,7 +58,7 @@ from typing import Any, Optional
 
 import httpx
 
-DEFAULT_BASE_URL = "https://hubvibe-831480473793.us-south1.run.app"
+DEFAULT_BASE_URL = "https://hubvibe-io.com"
 
 # USDC on Base has 6 decimals. x402's max_amount policy works in atomic
 # units, so dollars have to be converted before it can be applied.

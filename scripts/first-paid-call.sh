@@ -61,7 +61,7 @@
 
 set -uo pipefail
 
-BASE="${BASE:-https://hubvibe-831480473793.us-south1.run.app}"
+BASE="${BASE:-https://hubvibe-io.com}"
 ROUTE="${ROUTE:-/audit/wcag}"
 TARGET_URL="${TARGET_URL:-https://example.com}"
 FACILITATOR="${FACILITATOR:-https://facilitator.xpay.sh}"
