@@ -12,7 +12,7 @@
 
 set -uo pipefail
 
-BASE="${1:-https://hubvibe-831480473793.us-south1.run.app}"
+BASE="${1:-https://hubvibe-io.com}"
 FAILURES=0
 PASSES=0
 

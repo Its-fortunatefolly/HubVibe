@@ -51,7 +51,7 @@ except ImportError:
     x402_payments = _load_sibling_module("x402_payments")  # type: ignore
 
 PUBLIC_BASE_URL = os.environ.get(
-    "PUBLIC_BASE_URL", "https://hubvibe-831480473793.us-south1.run.app"
+    "PUBLIC_BASE_URL", "https://hubvibe-io.com"
 )
 
 # One version number for this service, quoted by everything that publishes
@@ -63,7 +63,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.1.2"
+SERVICE_VERSION = "1.2.0"
 
 # Each in-flight audit holds a Chromium browser (see browser_pool), so the
 # ceiling on concurrent audits is really a memory ceiling, not a CPU one.

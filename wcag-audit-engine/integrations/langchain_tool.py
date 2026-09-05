@@ -27,7 +27,7 @@ import httpx
 from langchain_core.tools import tool
 
 HUBVIBE_BASE_URL = os.environ.get(
-    "HUBVIBE_BASE_URL", "https://hubvibe-831480473793.us-south1.run.app"
+    "HUBVIBE_BASE_URL", "https://hubvibe-io.com"
 )
 
 

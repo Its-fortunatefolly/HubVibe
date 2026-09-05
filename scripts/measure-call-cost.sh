@@ -28,7 +28,7 @@ set -uo pipefail
 PROJECT="${PROJECT:-resolver-time}"
 SERVICE="${SERVICE:-hubvibe}"
 REGION="${REGION:-us-south1}"
-BASE_URL="${BASE_URL:-https://hubvibe-831480473793.us-south1.run.app}"
+BASE_URL="${BASE_URL:-https://hubvibe-io.com}"
 ENDPOINT="bundle"
 TARGET_URL="${TARGET_URL:-https://example.com}"
 CALLS=10

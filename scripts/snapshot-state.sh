@@ -20,7 +20,7 @@ set -uo pipefail
 PROJECT="${PROJECT:-resolver-time}"
 SERVICE="${SERVICE:-hubvibe}"
 REGION="${REGION:-us-south1}"
-BASE="${BASE:-https://hubvibe-831480473793.us-south1.run.app}"
+BASE="${BASE:-https://hubvibe-io.com}"
 OUT="hubvibe-snapshot-$(date +%Y%m%d-%H%M%S).txt"
 
 section() { printf '\n\n================================================================\n== %s\n================================================================\n' "$1"; }
