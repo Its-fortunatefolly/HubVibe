@@ -34,7 +34,6 @@ def _run(*args, env=None, tmp_path=None):
     host. The stub makes every run stop deterministically at the compose
     check, which is the first line past the money gates.
     """
-    import os
     import tempfile
 
     stub_dir = tempfile.mkdtemp(dir=str(tmp_path) if tmp_path else None)
@@ -189,6 +188,19 @@ def test_the_installer_refuses_to_run_in_google_cloud_shell(tmp_path):
     result = _run("hubvibe-io.com", env={"DEVSHELL_PROJECT_ID": "resolver-time"}, tmp_path=tmp_path)
     assert result.returncode == 1
     assert "Cloud Shell" in result.stdout
+
+
+def test_container_logs_are_rotated():
+    """Docker's json-file driver keeps every line forever unless told
+    otherwise. One INFO line per settlement plus the access log fills a
+    small box's disk in months, and a full disk takes the node down."""
+    compose = _compose()
+    for name in ("hubvibe", "caddy"):
+        logging = compose["services"][name].get("logging") or {}
+        assert logging.get("driver") == "json-file", f"{name}: no rotating log driver"
+        options = logging.get("options") or {}
+        assert options.get("max-size"), f"{name}: no max-size on its logs"
+        assert options.get("max-file"), f"{name}: no max-file on its logs"
 
 
 def test_caddy_serves_www_as_a_redirect_and_caps_request_bodies():

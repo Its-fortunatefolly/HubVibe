@@ -593,6 +593,44 @@ def spend_prepaid(api_key: str, cents: int) -> bool:
         return False
 
 
+def refund_prepaid(api_key: str, cents: int) -> bool:
+    """Put `cents` back on a prepaid key whose audit failed to run.
+
+    The debit is taken at authentication, before the audit, so a key with no
+    balance is refused before a browser is spent on it. The other half of
+    that ordering is this: an audit that then fails must hand the cents back,
+    or "you are charged only for an audit that produced a result" is true for
+    x402 payers and false for prepaid ones. Transactional for the same reason
+    the debit is. Never raises; a refund that could not be made is logged at
+    ERROR, because it is money the caller is owed.
+    """
+    if cents <= 0:
+        return False
+    try:
+        ref = _firestore().collection("api_keys").document(api_key)
+
+        def _credit(transaction):
+            snapshot = ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return False
+            balance = snapshot.to_dict().get("prepaid_balance_cents")
+            if balance is None:
+                return False
+            transaction.update(ref, {"prepaid_balance_cents": int(balance) + int(cents)})
+            return True
+
+        refunded = bool(_run_transactional(_credit))
+    except Exception:
+        refunded = False
+    if not refunded:
+        logging.getLogger(__name__).error(
+            "could not refund %d cents to a prepaid key after a failed audit; "
+            "the caller is owed it.",
+            cents,
+        )
+    return refunded
+
+
 _prepaid_store_warned = False
 
 

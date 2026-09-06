@@ -453,6 +453,12 @@ class AuthContext:
         # account and no second channel, so the response IS the delivery
         # mechanism -- drop it and the money is taken with nothing handed back.
         "issued_key",
+        # What authentication already took, so a failed audit can hand it
+        # back (_unbill_failed_audit): the prepaid key debited for this call
+        # and how many cents, and the MPP credential marked as spent.
+        "prepaid_key",
+        "prepaid_cents",
+        "mpp_credential",
     )
 
     def __init__(
@@ -462,6 +468,9 @@ class AuthContext:
         payment_method: str = "api_key",
         pending_payment=None,
         issued_key: Optional[str] = None,
+        prepaid_key: Optional[str] = None,
+        prepaid_cents: int = 0,
+        mpp_credential: Optional[str] = None,
     ):
         self.stripe_billable = stripe_billable
         self.customer_id = customer_id
@@ -470,6 +479,9 @@ class AuthContext:
         # see _bill. None for every other payment method.
         self.pending_payment = pending_payment
         self.issued_key = issued_key
+        self.prepaid_key = prepaid_key
+        self.prepaid_cents = prepaid_cents
+        self.mpp_credential = mpp_credential
 
 
 def _bazaar_extension_for_path(path: Optional[str]) -> dict:
@@ -698,8 +710,11 @@ def _authenticate(
     host: Optional[str] = None,
     price_usd: float = 0.03,
     path: Optional[str] = None,
+    client_ip: Optional[str] = None,
 ):
-    """Returns an AuthContext on success, or a 402 JSONResponse on failure.
+    """Returns an AuthContext on success, or a 402 JSONResponse on failure
+    (a 429 when a key that did not authenticate came from an address that
+    is over its limit -- see below).
 
     Three independent paths, checked cheapest-first, any one sufficient:
     1. X-API-Key -- internal test key, or a real Stripe-issued key that
@@ -715,7 +730,13 @@ def _authenticate(
        match the realm the challenge was originally issued with.
     """
     if x_api_key:
-        if API_KEY and secrets.compare_digest(x_api_key, API_KEY):
+        # Compared as bytes: compare_digest on str raises TypeError for a
+        # non-ASCII character, and a header can carry one (Starlette decodes
+        # header bytes as latin-1). A stray byte in a key must be a 402, not
+        # a 500.
+        if API_KEY and secrets.compare_digest(
+            x_api_key.encode("utf-8"), API_KEY.encode("utf-8")
+        ):
             # Internal/testing key: unlimited, unmetered, never billed,
             # never quota-limited.
             return AuthContext(stripe_billable=False, payment_method="internal")
@@ -724,9 +745,13 @@ def _authenticate(
             # A prepaid key carries its own money and has no Stripe Customer
             # behind it, so it is spent rather than metered or quota-checked.
             if record is not None and record.get("prepaid_balance_cents") is not None:
-                if billing.spend_prepaid(x_api_key, round(price_usd * 100)):
+                call_cents = round(price_usd * 100)
+                if billing.spend_prepaid(x_api_key, call_cents):
                     return AuthContext(
-                        stripe_billable=False, payment_method="prepaid"
+                        stripe_billable=False,
+                        payment_method="prepaid",
+                        prepaid_key=x_api_key,
+                        prepaid_cents=call_cents,
                     )
                 # Out of credit: fall through to the 402, which offers a
                 # top-up. Refusing loudly beats serving on an empty balance.
@@ -738,6 +763,16 @@ def _authenticate(
                     customer_id=record["customer_id"],
                     payment_method="stripe",
                 )
+
+    if x_api_key and client_ip:
+        # The key did not authenticate, so it earns no rate-limit bucket of
+        # its own: the limiter keys on the presented key, and a caller minting
+        # a fresh bogus key per request would otherwise never meet it at all.
+        # Charge the address the request came from instead -- before any
+        # payment instrument below is read, so an over-limit caller costs
+        # this node no facilitator call.
+        if not _audit_limiter.check(client_ip):
+            return _rate_limited_response()
 
     refusal = None
     if x_payment:
@@ -780,6 +815,11 @@ def _authenticate(
                     stripe_billable=False,
                     payment_method="mpp-topup",
                     issued_key=key,
+                    # If this first audit fails, the call it paid for goes
+                    # back on the key, so the payer leaves holding everything
+                    # it bought.
+                    prepaid_key=key,
+                    prepaid_cents=call_cents if key else 0,
                 )
         if credential and mpp_payments.verify_and_settle_sync(credential, realm=host):
             # Already charged/settled (Stripe PaymentIntent or on-chain
@@ -787,7 +827,9 @@ def _authenticate(
             # further to bill. Note the credential itself carries the
             # price (embedded in its HMAC-bound challenge), so there's
             # nothing further to pass here beyond the realm check.
-            return AuthContext(stripe_billable=False, payment_method="mpp")
+            return AuthContext(
+                stripe_billable=False, payment_method="mpp", mpp_credential=credential
+            )
 
     if refusal:
         reason, detail = refusal
@@ -847,6 +889,7 @@ def _authorize_and_rate_limit(
         host=_mpp_realm(request),
         price_usd=price_usd,
         path=request.url.path,
+        client_ip=_client_ip(request),
     )
     if isinstance(auth, JSONResponse):
         return None, auth
@@ -902,6 +945,41 @@ def _deliver(result: dict, auth):
     receipt -- and return."""
     _attach_issued_key(result, auth)
     return _with_receipt(result, auth)
+
+
+def _unbill_failed_audit(auth) -> None:
+    """Undo what authentication took, for an audit that did not run.
+
+    x402 needs nothing here: it is settled only in _bill, which the failure
+    paths never reach. A prepaid debit taken at authentication goes back on
+    the key -- including the call a top-up just paid for, so the key the
+    payer receives holds everything it bought -- and an MPP credential is
+    released, so the same receipt is accepted on the retry instead of being
+    refused as already spent. Without this, "charged only for an audit that
+    produced a result" was true for x402 and false for every other rail.
+    """
+    key = getattr(auth, "prepaid_key", None)
+    cents = getattr(auth, "prepaid_cents", 0) or 0
+    if key and cents:
+        billing.refund_prepaid(key, cents)
+    credential = getattr(auth, "mpp_credential", None)
+    if credential:
+        mpp_payments.release_credential(credential)
+
+
+def _failed_audit_response(auth, detail: str) -> JSONResponse:
+    """The 502 every paid route answers with when the audit could not run:
+    nothing charged, and anything the payer is owed regardless -- the prepaid
+    key a top-up just bought -- still delivered."""
+    _unbill_failed_audit(auth)
+    content = {
+        "status": "error",
+        "pass": None,
+        "detail": f"{detail}. Nothing was charged for this request.",
+        "billed": False,
+    }
+    _attach_issued_key(content, auth)
+    return JSONResponse(status_code=502, content=content)
 
 
 def _bill(auth, price_usd: float) -> Optional[str]:
@@ -1554,8 +1632,10 @@ async def agent_manifest(request: Request):
         "guarantees": [
             "You are charged only for an audit that produced a result. A check "
             "that could not run returns HTTP 502, is never settled, and is "
-            "never reported as a pass -- a payment is verified to grant access "
-            "but only settled after the audit has actually delivered.",
+            "never reported as a pass -- an x402 payment is verified to grant "
+            "access but only settled after the audit has actually delivered, a "
+            "prepaid key debited for it is refunded, and an MPP credential it "
+            "consumed is accepted again on the retry.",
             "Rate-limited requests are rejected before any payment is settled, "
             "so a 429 never costs you anything.",
             "Results are deterministic rule-based checks against the live page, "
@@ -2242,8 +2322,14 @@ def _mcp_tools_call(
     try:
         result = _mcp_run_tool(name, args)
     except Exception as exc:
-        # Not billed: _bill only runs on success, same as the REST routes.
-        return _mcp_tool_error(request_id, f"Audit could not complete: {exc}")
+        # Not billed: _bill only runs on success, same as the REST routes,
+        # and whatever authentication already took is handed back.
+        _unbill_failed_audit(auth)
+        details = {"billed": False}
+        _attach_issued_key(details, auth)
+        return _mcp_tool_error(
+            request_id, f"Audit could not complete: {exc}. Nothing was charged.", details
+        )
 
     warning = _bill(auth, price_usd=price)
     if warning:
@@ -2539,14 +2625,7 @@ def audit(
         # Honest failure: an audit that didn't run is never reported as a
         # compliance pass, and it is never billed -- callers only pay for
         # an audit that actually happened.
-        return JSONResponse(
-            status_code=502,
-            content={
-                "status": "error",
-                "pass": None,
-                "detail": f"Audit could not complete: {exc}",
-            },
-        )
+        return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
     violations = raw.get("violations", [])
     result = {
@@ -2603,15 +2682,7 @@ def audit_wcag(
     try:
         raw = _run_axe(payload.html, payload.url)
     except Exception as exc:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "status": "error",
-                "pass": None,
-                "detail": f"Audit could not complete: {exc}. Nothing was charged for this request.",
-                "billed": False,
-            },
-        )
+        return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
     violations = raw.get("violations", [])
     result = {
@@ -2661,15 +2732,7 @@ def audit_seo(
     try:
         result = audits.run_seo_audit(payload.html, payload.url)
     except Exception as exc:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "status": "error",
-                "pass": None,
-                "detail": f"Audit could not complete: {exc}. Nothing was charged for this request.",
-                "billed": False,
-            },
-        )
+        return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
     warning = _bill(auth, price_usd=0.03)
     if warning:
@@ -2695,15 +2758,7 @@ def audit_security(
     try:
         result = audits.run_security_audit(payload.url)
     except Exception as exc:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "status": "error",
-                "pass": None,
-                "detail": f"Audit could not complete: {exc}. Nothing was charged for this request.",
-                "billed": False,
-            },
-        )
+        return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
     warning = _bill(auth, price_usd=0.03)
     if warning:
@@ -2729,15 +2784,7 @@ def audit_performance(
     try:
         result = audits.run_performance_audit(payload.url)
     except Exception as exc:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "status": "error",
-                "pass": None,
-                "detail": f"Audit could not complete: {exc}. Nothing was charged for this request.",
-                "billed": False,
-            },
-        )
+        return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
     warning = _bill(auth, price_usd=0.03)
     if warning:
@@ -2789,15 +2836,7 @@ def audit_bundle(
         seo_result = audits.run_seo_audit(None, payload.url, response=shared_response)
         security_result = audits.run_security_audit(payload.url, response=shared_response)
     except Exception as exc:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "status": "error",
-                "pass": None,
-                "detail": f"Bundle audit could not complete: {exc}. Nothing was charged for this request.",
-                "billed": False,
-            },
-        )
+        return _failed_audit_response(auth, f"Bundle audit could not complete: {exc}")
 
     result = {
         "status": "ok",

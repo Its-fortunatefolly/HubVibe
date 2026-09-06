@@ -667,3 +667,25 @@ def settle_topup_sync(authorization_header: str, realm: Optional[str] = None):
         return cents
     except Exception:
         return None
+
+
+def release_credential(authorization_header: str) -> None:
+    """Forget a per-call credential whose audit then failed to run.
+
+    A credential is marked used when it verifies, before the audit, so two
+    concurrent calls cannot both spend it. If the audit fails, the payer has
+    paid (a Stripe charge is confirmed at verification; a tempo transfer was
+    broadcast before the call) and received nothing. Releasing the mark lets
+    the SAME credential be presented again on the retry: Stripe replays the
+    confirmed PaymentIntent under its idempotency key rather than charging
+    twice, and the tempo receipt is simply re-read. Never raises.
+    """
+    try:
+        decoded = json.loads(_b64url_decode(authorization_header))
+        payload = decoded.get("payload") or {}
+        for field in ("spt", "hash"):
+            value = payload.get(field)
+            if isinstance(value, str):
+                _used_credentials.discard(value)
+    except Exception:
+        pass

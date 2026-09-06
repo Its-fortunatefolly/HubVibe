@@ -79,7 +79,8 @@ WWW-Authenticate: Payment ...
 An agent reads the 402, signs an x402 payment (USDC on Base), retries with
 `X-PAYMENT`, and gets the audit. Payment is **verified before the audit runs
 and settled only after it produces a result** — a failed audit is never
-charged, on any rail.
+charged: x402 is settled only after delivery, a prepaid key is refunded, and
+an MPP credential a failed audit consumed is accepted again on the retry.
 
 For Python agents and swarms, the bundled tollbooth client does the whole
 loop — challenge, budget check, signing, retry — with two hard spending
@@ -134,9 +135,11 @@ Which are live is deployment-specific. Read `accepts` in any 402, or
 
 Only an audit that produced a result.
 
-- An audit that could not run returns **502** and is never settled. x402
-  payments are *verified* to grant access but only *settled* after the audit
-  has delivered.
+- An audit that could not run returns **502** with `billed: false` and is
+  never settled. x402 payments are *verified* to grant access but only
+  *settled* after the audit has delivered; a prepaid key debited for the
+  call is refunded, and a prepaid key bought by an MPP top-up is still
+  returned on the 502, holding everything it bought.
 - A rate-limited request returns **429** with `Retry-After`, checked before any
   payment is touched, so it costs nothing.
 - A settled x402 payment gets a receipt: the facilitator's settle response
