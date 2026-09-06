@@ -152,12 +152,15 @@ def test_the_env_example_names_every_variable_the_stack_reads():
 
 def test_the_installer_writes_only_intended_defaults():
     """The .env the installer writes is read straight off the script text:
-    the affirmed wallet and the xpay facilitator as defaults, overridable,
+    the affirmed wallet and an https facilitator as defaults, overridable,
     and never an AUDIT_API_KEY (an unmetered bypass has no place in a
-    default production env)."""
+    default production env). WHICH facilitator is pinned by
+    test_the_deploy_default_facilitator_matches_the_scripts_that_pay, not
+    by name here -- naming it here is how the installer and the paying
+    scripts drifted apart in the first place."""
     script = SCRIPT.read_text()
     assert 'DEFAULT_X402_PAY_TO="0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"' in script
-    assert "facilitator.xpay.sh" in script
+    assert 'FACILITATOR="${X402_FACILITATOR_URL:-https://' in script
     assert 'chmod 600 "$ENV_FILE"' in script, "the env file holds Stripe keys; it must not be world-readable"
     writes = script.split("Writing deploy/vps/.env", 1)[1]
     assert "AUDIT_API_KEY=" not in writes.split("---")[0].replace("for var in", ""), (
@@ -215,3 +218,32 @@ def test_caddy_serves_www_as_a_redirect_and_caps_request_bodies():
             capture_output=True, text=True, timeout=60, env={"DOMAIN": "example.com", "PATH": "/usr/bin:/bin"},
         )
         assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_the_deploy_default_facilitator_matches_the_scripts_that_pay():
+    """A node installed against one facilitator while first-paid-call.sh
+    checks another indexes nothing and reports it as failure. The live box
+    was installed on xpay.sh after #66 moved everything else to Dexter;
+    pinning them together is what stops that recurring."""
+    import re
+
+    def default(path, var):
+        text = (REPO_ROOT / path).read_text()
+        m = re.search(rf'^{var}="\$\{{[A-Z0-9_]+:-(https://[^}}"]+)\}}"', text, re.M)
+        assert m, f"no default facilitator found in {path}"
+        return m.group(1)
+
+    installer = default("scripts/vps-install.sh", "FACILITATOR")
+    payer = default("scripts/first-paid-call.sh", "FACILITATOR")
+    assert installer == payer, (
+        f"vps-install.sh installs against {installer} but first-paid-call.sh "
+        f"checks {payer} -- a paid call would register the node nowhere"
+    )
+
+    env_example = (VPS_DIR / ".env.example").read_text()
+    assert f"X402_FACILITATOR_URL={installer}" in env_example, (
+        ".env.example names a different facilitator than the installer writes"
+    )
+    # And the only safe way to change it on a live box is named where an
+    # operator reading the file will see it.
+    assert "switch-facilitator.sh" in env_example

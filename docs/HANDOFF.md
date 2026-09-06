@@ -9,6 +9,59 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-06, evening: the live node settles through a facilitator that indexes NOTHING
+
+Found while setting up the first paid call. **The live box was installed on
+`facilitator.xpay.sh`** (vps-install.sh wrote it into `deploy/vps/.env` on
+2026-09-06), while PR #66 had already moved `first-paid-call.sh` and
+`go-live-x402.sh` to `x402.dexter.cash` — and left `vps-install.sh` and
+`deploy/vps/.env.example` behind. Consequences, both silent:
+
+- xpay.sh runs no `/discovery/resources`, and a facilitator's index is the
+  ONLY path into the Bazaar. A paid call through the live node proves
+  settlement and registers the node **nowhere** — the exact deadlock
+  `first-paid-call.sh` exists to break.
+- The script would then check Dexter's index, find nothing, and report a
+  successful payment as a failure.
+
+**Fixed so it cannot recur:** `vps-install.sh` and `.env.example` now default
+to Dexter, and `test_the_deploy_default_facilitator_matches_the_scripts_that_pay`
+reads both defaults off the script text and fails if they ever disagree
+again. `.env.example` also names the safe way to change it on a running box.
+
+**`scripts/switch-facilitator.sh` (new).** Changing this by hand on a live
+node is genuinely dangerous: the node reads `/supported` at startup and
+refuses to advertise a rail the facilitator cannot verify, so a facilitator
+that is down or lists the wrong network turns a live node into one that
+answers `/health` 200 and **sells nothing**, with no error anywhere. The
+script edits `.env`, restarts, reads a real unpaid 402, and rolls back —
+restarting again — if the x402 rail vanished or the recipient/price moved.
+Then it reports whether the new facilitator actually serves an index.
+Nine tests drive the real script (docker and curl stubbed, a fake node whose
+402 changes with `.env`) through: rail survives, rail dies → rollback, rail
+changes → rollback, same-URL no-op, non-https refused, index absent →
+said out loud. Four mutations proved red.
+
+**On the box, before the first paid call:**
+`cd ~/HubVibe && git pull -q origin main && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
+
+Neither facilitator is reachable from the sandbox (egress policy), so
+Dexter's `/supported` is UNVERIFIED here — which is precisely why the switch
+verifies itself against the live 402 and reverts.
+
+Also in this change: `first-paid-call.sh` derives the named wallet across the
+recovery phrase's first ten accounts (`HUBVIBE_EXPECT_ADDRESS`). A wallet app
+shows account 0 by default but the funded address may be any account under
+the same seed; deriving only the first would have failed as "wrong phrase"
+when the phrase was right.
+
+**Money state:** the owner sent **2 USDC on Base** to `hubvibe.base.eth`
+(0x837C…77dd) — the RECEIVING wallet, tx `0x7cc9…6eda47`. The throwaway payer
+0x5bce…5d06 is retired at the owner's instruction ("get rid of 0x5"). So the
+buyer for the self-payment is one of the owner's own wallets, and paying from
+0x837C to itself needs `HUBVIBE_ALLOW_SELF_PAYMENT=1` (the guard is
+deliberate and overridable). Suite 730 passed / 1 skipped, lint 0.
+
 ## 2026-09-06: the node is LIVE on the owner's box at hubvibe-io.com; human tiers retired
 
 **Live.** Hostinger KVM at `2.25.172.160`; `@` and `www` A records point at
