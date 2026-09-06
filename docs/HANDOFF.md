@@ -305,11 +305,9 @@ UNIDENTIFIED"):
   `X402_PAY_TO_ADDRESS=0x37555E884c5EbA10f6E816DbecEA30965B9b38C0`, on
   go-live.sh or vps-install.sh. Not on any blocklist.
 
-The owner also holds a Solana address (`22FwA5g…nNTSv`) and a Bitcoin
-address (`bc1q8s6…7n3gw`). **Neither can receive USDC on Base** — x402 on
-this node pays an EVM address on Base mainnet only; funds sent to the SOL
-or BTC address on the wrong network are unrecoverable. The UUID the owner
-pasted alongside is a Coinbase internal account id, not a chain address.
+Only an EVM address on Base mainnet can receive x402 revenue here. Funds
+sent to a Solana or Bitcoin address, or on any other network, are
+unrecoverable; an exchange's internal account id is not a chain address.
 
 ## 2026-09-05: the node can now run OFF Google entirely — one command on any flat-rate box
 
@@ -649,7 +647,7 @@ The owner ran the direct command and read it off the screen:
 
 ```
 gcloud secrets list --project=resolver-time
-ERROR: (gcloud.secrets.list) [ladywikert@gmail.com] does not have permission to
+ERROR: (gcloud.secrets.list) [<owner account>] does not have permission to
 access projects instance [resolver-time] (or it may not exist): This API method
 requires billing to be enabled. Please enable billing on project #resolver-time
 by visiting https://console.developers.google.com/billing/enable?project=resolver-time
