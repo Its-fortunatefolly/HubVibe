@@ -13,9 +13,11 @@ frozen here. A number written in a brief is wrong one merge later.
 
 ## What this is
 
-A machine-payable site auditing API on Google Cloud Run. Software agents POST
-a URL, get HTTP 402 carrying the price and the rails that can settle it, pay,
-and receive an audit. No account, no signup, no human.
+A machine-payable site auditing API, live at https://hubvibe-io.com on the
+owner's own box (an old Cloud Run revision still serves as a stopgap).
+Software agents POST a URL, get HTTP 402 carrying the price and the rails
+that can settle it, pay, and receive an audit. No account, no signup, no
+human.
 
 Paid routes: `/audit/wcag`, `/audit/seo`, `/audit/security`,
 `/audit/performance`, `/audit/bundle`, plus `/audit` (alias of wcag).
@@ -27,9 +29,8 @@ Paid routes: `/audit/wcag`, `/audit/seo`, `/audit/security`,
 $0.03 per single audit, $0.10 per bundle, ~98% gross margin. Revenue at that
 rate needs enormous call volume, so the whole game is machine traffic.
 
-A human plan tier exists on the website — **leave it alone.** It is a passive
-billboard kept only because a prior session drifted into building it. Do not
-build SaaS features, checkout UIs, dashboards, or logins.
+The human plan tiers are retired (2026-09-06): per call is the only price.
+Do not build SaaS features, checkout UIs, dashboards, or logins.
 
 ## Where the truth lives
 
@@ -38,13 +39,13 @@ build SaaS features, checkout UIs, dashboards, or logins.
 | What is on main, what is verified | `docs/HANDOFF.md` — current and maintained |
 | Does the deployed node work | `bash scripts/verify-live.sh` — it prints its own commit and warns if the checkout is stale |
 | How many tests | `python -m pytest -q` — read it off the run |
-| Who receives x402 payments | `gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format=json` |
+| Who receives x402 payments | `BASE=https://hubvibe-io.com bash scripts/payment-status.sh` |
 
-Fixed facts: Cloud Run project `resolver-time`, service `hubvibe`, region
+Fixed facts: the node runs from `deploy/vps` on the owner's box; the Cloud
+Run stopgap is project `resolver-time`, service `hubvibe`, region
 `us-south1`. Facilitator `facilitator.xpay.sh` (keyless, Base mainnet, zero
 fee). Coinbase CDP is **abandoned, not pending** — its review wants proof of a
-DBA that does not exist. Do not suggest Coinbase; it was only ever the
-signature verifier, never in the money path.
+DBA that does not exist, and its code is gone. Do not suggest Coinbase.
 
 ## Things already settled — do not re-litigate
 
@@ -71,11 +72,12 @@ signature verifier, never in the money path.
 - **The sandbox cannot reach** `*.run.app`, `api.stripe.com`, or facilitator
   hosts, and has no `gcloud`. It cannot deploy or verify live. The owner runs
   those in Cloud Shell. **Never claim a live fact without seeing its output.**
-- **Setting env vars is not a deploy.** `gcloud run services update
-  --update-env-vars` keeps the same container image. Use
-  `scripts/repair-and-deploy.sh` (or `go-live.sh`, which hands off to it),
-  which deploy source. This exact mistake hid every merged fix from production
-  for days.
+- **Setting env vars is not a deploy.** On the box a deploy is `git pull`
+  then `docker compose up -d --build` in `deploy/vps`. On Cloud Run,
+  `gcloud run services update --update-env-vars` keeps the same container
+  image; use `scripts/repair-and-deploy.sh` (or `go-live.sh`, which hands
+  off to it), which deploy source. This exact mistake hid every merged fix
+  from production for days.
 - **A stale checkout is not a pass.** `verify-live.sh` prints its own commit and
   the check count; a run whose count is lower than the current checker's is an
   old script that never asked the new questions. This has cost three cycles.
@@ -92,7 +94,8 @@ signature verifier, never in the money path.
 
 ## The open work
 
-Read `## What is left` in `docs/HANDOFF.md`. It is maintained; this list is not.
+Read `## Live state` and `## Owner runbook` in `docs/HANDOFF.md`. They are
+maintained; this list is not.
 
 The standing goal is the first paid call — one $0.03 payment that proves the
 settle side (never once exercised) and registers the node in whatever Bazaar
@@ -101,7 +104,7 @@ index processes it:
 ```bash
 bash scripts/first-paid-call.sh --new-wallet   # only if no wallet yet
 # fund the printed address with USDC on Base -- $1 is plenty, NO ETH needed
-bash scripts/first-paid-call.sh
+BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh
 ```
 
 No ETH because x402's exact-EVM scheme signs an EIP-3009 authorization
