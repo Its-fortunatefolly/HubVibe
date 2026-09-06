@@ -44,6 +44,10 @@ fi
 mkdir -p "$TARGET/scripts"
 cp "$REPO_ROOT/action.yml" "$TARGET/action.yml"
 cp "$REPO_ROOT/scripts/render_audit_summary.py" "$TARGET/scripts/render_audit_summary.py"
+# action.yml calls this by $GITHUB_ACTION_PATH, so a published copy without it
+# turns the wallet path into "No such file or directory" at run time -- on the
+# one code path that spends money.
+cp "$REPO_ROOT/scripts/x402_pay.py" "$TARGET/scripts/x402_pay.py"
 
 cat > "$TARGET/README.md" <<'MARKDOWN'
 # HubVibe WCAG SEO and Security Audit
@@ -133,17 +137,39 @@ Not buried in log output. A reviewer opens the Checks tab and sees the rule, its
 
 Concretely: a repo merging 100 pull requests a month, running the full bundle on each, spends **$10/month**. Running only the accessibility check, **$3/month**. No subscription, no seat licence, no minimum — you are billed for calls you make.
 
-You can also pay per call over HTTP 402 with no account at all, which is what the API is really built for. See [`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json) — it lists live prices and the payment rails that can actually settle right now, and it is generated from the same catalog the routes charge from, so it cannot drift from what you are billed.
+You can also pay per call over HTTP 402 with no account at all, which is what the API is really built for. See [`/.well-known/agent.json`](https://hubvibe-io.com/.well-known/agent.json) — it lists live prices and the payment rails that can actually settle right now, and it is generated from the same catalog the routes charge from, so it cannot drift from what you are billed.
 
 ## Try it before wiring it up
 
 An unauthenticated call tells you the price and how to pay — no signup:
 
 ```bash
-curl -i -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
+curl -i -X POST https://hubvibe-io.com/audit/wcag \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com"}'
 ```
+
+## Paying per run, without an account
+
+If the deployment you point at advertises a machine-payment rail — check
+[`/.well-known/agent.json`](https://hubvibe-io.com/.well-known/agent.json),
+which lists only rails that can actually settle right now — this action can pay
+its own way per call from a funded wallet, with no signup and no checkout:
+
+```yaml
+- uses: Its-fortunatefolly/hubvibe-audit-action@v1
+  with:
+    url: https://your-deploy-preview.example
+    wallet-key: ${{ secrets.HUBVIBE_WALLET_KEY }}
+```
+
+Fund it with what you intend to spend and no more — a float, not a treasury.
+`max-price-usd` (default `0.15`) is a hard per-call ceiling: the run refuses to
+sign above it, so a misquoted price cannot drain the wallet. If no such rail is
+advertised, the run reports the payment challenge instead of spending anything.
+
+Prefer a prepaid key? Set `api-key` and it takes precedence — you are never
+charged twice.
 
 ## Inputs
 
@@ -151,6 +177,8 @@ curl -i -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
 |---|---|---|---|
 | `url` | yes | — | The live URL to audit. |
 | `api-key` | no | — | Your key. Without it the run reports the service's 402 and how to pay. |
+| `wallet-key` | no | — | EVM private key (repo secret), funded, used to settle the payment challenge per call when the deployment advertises a crypto rail. |
+| `max-price-usd` | no | `0.15` | Hard ceiling on what one call may spend with `wallet-key`. Above it the run refuses to sign. |
 | `endpoint` | no | `bundle` | `wcag`, `seo`, `security`, `performance`, or `bundle`. |
 | `fail-on-violation` | no | `true` | `false` reports findings without failing the build. |
 | `fail-on-error` | no | `true` | `false` makes infrastructure failures a warning. |
@@ -183,7 +211,7 @@ curl -i -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
 
 ## Getting a key
 
-Keys come from [the service](https://hubvibe-831480473793.us-south1.run.app). Store it as a repository secret named `HUBVIBE_API_KEY`.
+Keys come from [the service](https://hubvibe-io.com). Store it as a repository secret named `HUBVIBE_API_KEY`.
 
 If you would rather not hold a key at all, the endpoints accept per-call machine payment over HTTP 402 — nothing to store, nothing to rotate.
 

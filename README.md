@@ -4,7 +4,7 @@
 headers, and performance — deterministic rules against the real rendered page,
 priced per call, payable by software with no account and no human in the loop.
 
-Live: **https://hubvibe-831480473793.us-south1.run.app**
+Live: **https://hubvibe-io.com**
 
 Every check is a deterministic rule run against the live page. Nothing here is
 a language model judging whether a site looks compliant, and a check that could
@@ -51,7 +51,7 @@ Gate a promotion on it:
   run: ./deploy-production.sh
 ```
 
-Keys come from [`/billing/checkout`](https://hubvibe-831480473793.us-south1.run.app/billing/checkout).
+Keys come from [`/billing/checkout`](https://hubvibe-io.com/billing/checkout).
 Or skip the key entirely — see the second way in.
 
 ## 2 — Point your agent at it: no key, no signup, pay per call
@@ -59,7 +59,7 @@ Or skip the key entirely — see the second way in.
 An unauthenticated call is not an error here. It is the price sheet:
 
 ```bash
-curl -i -X POST https://hubvibe-831480473793.us-south1.run.app/audit/wcag \
+curl -i -X POST https://hubvibe-io.com/audit/wcag \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com"}'
 ```
@@ -100,9 +100,9 @@ land.
 
 **How machines find this node without being told the URL:** every 402
 carries x402 Bazaar discovery data, so facilitators index it by capability
-and price; the MCP endpoint at [`/mcp`](https://hubvibe-831480473793.us-south1.run.app/mcp)
+and price; the MCP endpoint at [`/mcp`](https://hubvibe-io.com/mcp)
 is listed in the official registry as `io.github.Its-fortunatefolly/hubvibe`;
-and [`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json)
+and [`/.well-known/agent.json`](https://hubvibe-io.com/.well-known/agent.json)
 is generated from the same catalog the routes charge from, so the advertised
 price is the charged price by construction.
 
@@ -139,6 +139,22 @@ Only an audit that produced a result.
   has delivered.
 - A rate-limited request returns **429** with `Retry-After`, checked before any
   payment is touched, so it costs nothing.
+- A settled x402 payment gets a receipt: the facilitator's settle response
+  (transaction hash, network, payer) comes back on the 200 in the
+  `PAYMENT-RESPONSE` header (`X-PAYMENT-RESPONSE` for v1 clients), exactly
+  as the x402 spec describes. The x402 client libraries decode it; the
+  bundled `hubvibe_tollbooth.py` keeps it as `last_settlement`.
+- One signed payment buys one audit. A replayed x402 authorization is
+  refused with a 402 before it reaches the facilitator.
+
+### What this service will not fetch
+
+Every audit loads the URL you send from inside the deployment, so the node
+refuses, with a **400** and before any payment is read: addresses that are
+not globally routable (loopback, private ranges, link-local, the cloud
+metadata endpoint), internal hostnames, schemes other than `http`/`https`,
+and names that do not resolve. Raw `html` is capped at 2 MiB. None of that
+costs the caller anything.
 
 ## Discovery
 
@@ -146,11 +162,11 @@ Agents shouldn't have to read documentation to use this:
 
 | | |
 |---|---|
-| [`/.well-known/agent.json`](https://hubvibe-831480473793.us-south1.run.app/.well-known/agent.json) | Full manifest — pricing, live rails, limits, per-endpoint examples |
-| [`/openapi.json`](https://hubvibe-831480473793.us-south1.run.app/openapi.json) | OpenAPI 3.1 |
-| [`/mcp.json`](https://hubvibe-831480473793.us-south1.run.app/mcp.json) | MCP tool definitions |
-| [`/llms.txt`](https://hubvibe-831480473793.us-south1.run.app/llms.txt) | Plain-text summary |
-| [`/docs`](https://hubvibe-831480473793.us-south1.run.app/docs) | Interactive reference |
+| [`/.well-known/agent.json`](https://hubvibe-io.com/.well-known/agent.json) | Full manifest — pricing, live rails, limits, per-endpoint examples |
+| [`/openapi.json`](https://hubvibe-io.com/openapi.json) | OpenAPI 3.1 |
+| [`/mcp.json`](https://hubvibe-io.com/mcp.json) | MCP tool definitions |
+| [`/llms.txt`](https://hubvibe-io.com/llms.txt) | Plain-text summary |
+| [`/docs`](https://hubvibe-io.com/docs) | Interactive reference |
 
 ## Integrations
 
@@ -268,6 +284,13 @@ wcag-audit-engine/        the audit service (this is the product)
 privacy-compliance-scanner/
 dead-end-resolver/
 scripts/verify-live.sh    verifies a deployed node from outside
+scripts/simulate-paid-call.py
+                          the whole x402 paid path, locally, for free
+scripts/first-paid-call.sh
+                          the same paid path against the live node, for $0.03
+scripts/payment-status.sh what the money is doing: wallet balances, live 402, verdict
+scripts/vps-install.sh    the whole service on any flat-rate box, one command
+deploy/vps/               compose + Caddy TLS + SQLite key store (no Google)
 tests/
 ```
 
@@ -282,6 +305,15 @@ pytest tests/ -q
 whole discovery surface, every paid route answering 402 rather than 404, and
 that the 402 is actually machine-actionable. Green unit tests do not prove a
 deploy; this does.
+
+`scripts/simulate-paid-call.py` proves the paid path itself without spending
+anything: it boots the real service with the live x402 configuration against
+a stub facilitator that recovers the EIP-712 signer from every payment it is
+sent, then drives it with the real client through `first-paid-call.sh`. It
+checks that verify happens before the audit and settle after it, that the
+Bazaar record rides the payment and passes the x402 validator, and that the
+200 carries the settlement receipt. Needs a Chromium Playwright can launch
+(`python -m playwright install chromium`).
 
 ## Honest limits
 

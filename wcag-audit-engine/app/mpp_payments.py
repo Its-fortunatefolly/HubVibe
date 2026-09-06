@@ -73,7 +73,9 @@ import calendar
 import hashlib
 import hmac
 import json
+import logging
 import os
+import re
 import time
 from typing import Optional
 
@@ -90,6 +92,23 @@ _CHALLENGE_TTL_SECONDS = int(os.environ.get("MPP_CHALLENGE_TTL_SECONDS", "300"))
 _STRIPE_NETWORK_PROFILE_ID = os.environ.get("MPP_STRIPE_NETWORK_PROFILE_ID")
 _STRIPE_PRICE_CENTS = os.environ.get("MPP_STRIPE_PRICE_CENTS", "3")
 _STRIPE_CURRENCY = os.environ.get("MPP_STRIPE_CURRENCY", "usd")
+
+# Stripe's own minimum for a card payment made with a Shared Payment Token:
+# "Stripe requires a minimum 0.50 USD charge (or the equivalent amount) for
+# card payments made with SPT" -- https://docs.stripe.com/payments/machine/mpp
+#
+# This is the whole reason this rail cannot simply be switched on. Every route
+# here is priced at $0.03 or $0.10, all of them under the floor, so a caller
+# that took the mpp-stripe challenge and issued an SPT for it would have the
+# PaymentIntent rejected by Stripe on amount alone -- a rail advertised and
+# unable to settle, which is the exact failure that made the x402 rail
+# unpayable for months. The floor is enforced here rather than discovered at
+# charge time so the rail is simply not offered where it cannot work.
+#
+# Overridable because it is Stripe's number, not ours, and it is stated in USD
+# for card SPTs; a deployment charging in another currency or reading a revised
+# minimum should not have to edit code to say so.
+_STRIPE_MIN_CENTS = int(os.environ.get("MPP_STRIPE_MIN_CENTS", "50"))
 
 # Defaults below are Tempo mainnet's real, official values (chain ID, RPC,
 # and the actual USDC.e token contract) -- pulled directly from Tempo's own
@@ -119,12 +138,109 @@ def _secret_key() -> Optional[bytes]:
 
 
 def stripe_configured() -> bool:
+    """Whether this deployment holds everything the SPT rail needs.
+
+    Configuration only. Whether the rail can settle a PARTICULAR charge also
+    depends on the amount -- see stripe_available_for.
+    """
     return bool(_secret_key() and stripe.api_key and _STRIPE_NETWORK_PROFILE_ID)
+
+
+# What one MPP `stripe` top-up buys, in cents. Must clear _STRIPE_MIN_CENTS or
+# Stripe rejects the charge on amount alone.
+#
+# This is the answer to a constraint that cannot be argued with: SPT has a
+# 0.50 USD floor and this service sells $0.03 calls, so the rail can only ever
+# settle if what it sells is a BLOCK of calls rather than one call. The agent
+# pays once, above the floor, and leaves with a prepaid key worth what it paid.
+_STRIPE_TOPUP_CENTS = int(os.environ.get("MPP_STRIPE_TOPUP_CENTS", "50"))
+
+
+def topup_available() -> bool:
+    """Whether the SPT rail can sell a prepaid block on this deployment."""
+    return stripe_configured() and _STRIPE_TOPUP_CENTS >= _STRIPE_MIN_CENTS
+
+
+def topup_cents() -> int:
+    return _STRIPE_TOPUP_CENTS
+
+
+def stripe_available_for(price_cents: int) -> bool:
+    """Whether the SPT rail can actually settle a charge of this size.
+
+    Configured is not the same as usable. Stripe rejects a card SPT charge
+    below its minimum outright, so offering the rail at $0.03 would hand an
+    agent a challenge, take its token, and fail at the API -- the caller
+    cannot buy and we cannot sell. Splitting this out of stripe_configured()
+    keeps "the operator set the variables" and "money can move" as separate
+    facts, which is the distinction the zero-address and the unpayable-402
+    bugs both turned on.
+    """
+    try:
+        return stripe_configured() and int(price_cents) >= _STRIPE_MIN_CENTS
+    except (TypeError, ValueError):
+        return False
+
+
+_tempo_recipient_warned = False
+
+
+def _warn_tempo_recipient(reason: str) -> None:
+    """Say so, once and loudly. A silent fail-closed here reads as "tempo was
+    never configured", which sends the next person hunting for a missing
+    variable that is in fact present and merely wrong."""
+    global _tempo_recipient_warned
+    if _tempo_recipient_warned:
+        return
+    _tempo_recipient_warned = True
+    logging.getLogger(__name__).error(
+        "MPP_TEMPO_RECIPIENT_ADDRESS is set but %s. The tempo rail will NOT be "
+        "advertised until this is corrected -- advertising it would invite "
+        "agents to pay into an address that cannot receive.",
+        reason,
+    )
+
+
+def _tempo_recipient_is_usable() -> bool:
+    """Shape-check the tempo recipient before the rail is ever advertised.
+
+    `bool(_TEMPO_RECIPIENT_ADDRESS)` was the whole test, so any truthy string
+    turned the rail on. That is not hypothetical twice over: the x402 rail
+    shipped a 16-hex address and later the zero address through exactly this
+    gap, and on 2026-08-29 `mppx validate` -- the protocol's own reference
+    client -- reported `Valid recipient address` FAILING on all six routes
+    against a recipient of 39 hex characters, a truncated paste of the
+    test-suite constant. Every one of our own checks was green at the time,
+    because none of them looked.
+
+    A shape check proves shape, and shape is not payability -- so the zero
+    address is rejected explicitly, as it is for x402: it satisfies every
+    format gate and can never receive a transfer.
+    """
+    address = _TEMPO_RECIPIENT_ADDRESS
+    if not address:
+        return False
+    if not re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
+        _warn_tempo_recipient(
+            "is not a valid EVM address (needs 0x + exactly 40 hex characters; "
+            "this one has %d)" % max(len(address) - 2, 0)
+        )
+        return False
+    if set(address[2:].lower()) == {"0"}:
+        _warn_tempo_recipient(
+            "is the zero address (0x + 40 zeros): well-formed but unownable, "
+            "so no payment could ever arrive"
+        )
+        return False
+    return True
 
 
 def tempo_configured() -> bool:
     return bool(
-        _secret_key() and _TEMPO_RPC_URL and _TEMPO_TOKEN_ADDRESS and _TEMPO_RECIPIENT_ADDRESS
+        _secret_key()
+        and _TEMPO_RPC_URL
+        and _TEMPO_TOKEN_ADDRESS
+        and _tempo_recipient_is_usable()
     )
 
 
@@ -218,7 +334,30 @@ def www_authenticate_headers(realm: Optional[str] = None, price_usd: Optional[fl
         str(round(price_usd * 1_000_000)) if price_usd is not None else _TEMPO_PRICE_BASE_UNITS
     )
     headers = []
-    if stripe_configured():
+    # The top-up challenge. Offered whenever the per-call price is BELOW
+    # Stripe's floor -- which is exactly when a per-call SPT charge is
+    # impossible and a block is the only thing the rail can sell. Above the
+    # floor the per-call challenge below is the better offer and this would
+    # just be noise.
+    if topup_available() and not stripe_available_for(stripe_price_cents):
+        headers.append(
+            _www_authenticate_header(
+                _build_challenge(
+                    realm,
+                    "stripe",
+                    "topup",
+                    {
+                        "amount": str(_STRIPE_TOPUP_CENTS),
+                        "currency": _STRIPE_CURRENCY,
+                        "methodDetails": {
+                            "networkId": _STRIPE_NETWORK_PROFILE_ID,
+                            "paymentMethodTypes": ["card", "link"],
+                        },
+                    },
+                )
+            )
+        )
+    if stripe_available_for(stripe_price_cents):
         challenge = _build_challenge(
             realm,
             "stripe",
@@ -260,15 +399,16 @@ def accepts_entries(price_usd: Optional[float] = None) -> list:
     credential, so it deliberately carries no HMAC binding or opaque token.
     """
     entries = []
-    if stripe_configured():
+    stripe_price_cents = (
+        str(round(price_usd * 100)) if price_usd is not None else _STRIPE_PRICE_CENTS
+    )
+    if stripe_available_for(stripe_price_cents):
         entries.append(
             {
                 "protocol": "mpp",
                 "method": "stripe",
                 "asset": _STRIPE_CURRENCY,
-                "amount_minor_units": (
-                    str(round(price_usd * 100)) if price_usd is not None else _STRIPE_PRICE_CENTS
-                ),
+                "amount_minor_units": stripe_price_cents,
                 "send_via_header": "Authorization: Payment ...",
                 "challenge_in": "WWW-Authenticate",
             }
@@ -291,6 +431,54 @@ def accepts_entries(price_usd: Optional[float] = None) -> list:
             }
         )
     return entries
+
+
+def discovery_offers(price_usd: float, description: Optional[str] = None) -> list:
+    """Offers for the `x-payment-info` OpenAPI extension, one per usable method.
+
+    This is MPP's capability-discovery surface: the reference tooling (the
+    `mppx` package -- its validator AND its client-side discovery) walks a
+    service's OpenAPI document and treats an operation as payable only if it
+    carries `x-payment-info`. Without it this node's openapi.json says
+    "nothing paid here" to every MPP-aware agent, however correct the 402s
+    are -- verified directly: `mppx validate` against a booted copy of this
+    service reported `endpoints: []` and skipped its entire challenge and
+    payment validation suite. Same lesson as the Bazaar record: a surface
+    consumed by someone else's parser has to be shaped for their parser.
+
+    Unlike the Bazaar this surface needs no facilitator: it lives in our own
+    OpenAPI document, so making it right is entirely within reach.
+
+    The offer shape mirrors mppx's own `Metadata.paymentOffer` -- `amount`
+    (integer string in the method's own units), `currency`, `description`,
+    `intent`, `method` -- and the same per-method gating as the challenges:
+    a method that cannot settle this amount is not offered. Discovery is
+    advisory (the runtime 402 stays authoritative, mppx's schema says so in
+    its docstring), but advisory does not excuse advertising a dead rail.
+    """
+    offers = []
+    stripe_cents = str(round(price_usd * 100))
+    if stripe_available_for(stripe_cents):
+        offers.append(
+            {
+                "amount": stripe_cents,
+                "currency": _STRIPE_CURRENCY,
+                **({"description": description} if description else {}),
+                "intent": "charge",
+                "method": "stripe",
+            }
+        )
+    if tempo_configured():
+        offers.append(
+            {
+                "amount": str(round(price_usd * 1_000_000)),
+                "currency": _TEMPO_TOKEN_ADDRESS,
+                **({"description": description} if description else {}),
+                "intent": "charge",
+                "method": "tempo",
+            }
+        )
+    return offers
 
 
 def _verify_challenge_binding(challenge: dict, expected_realm: Optional[str] = None) -> bool:
@@ -326,6 +514,12 @@ def _verify_stripe(challenge: dict, payload: dict) -> bool:
         return False
     try:
         request_obj = json.loads(_b64url_decode(challenge["request"]))
+        # Re-checked here, not just where the challenge is built: a challenge
+        # minted by an older revision (or by a deployment with a lower floor)
+        # stays valid for its whole TTL, and burning a caller's single-use SPT
+        # on a charge Stripe will reject is worse than refusing it outright.
+        if not stripe_available_for(int(request_obj["amount"])):
+            return False
         intent = stripe.PaymentIntent.create(
             amount=int(request_obj["amount"]),
             currency=request_obj["currency"],
@@ -424,6 +618,12 @@ def verify_and_settle_sync(authorization_header: str, realm: Optional[str] = Non
         payload = decoded["payload"]
         if not _verify_challenge_binding(challenge, realm):
             return False
+        # A top-up buys credit, not this call. Refusing it here rather than
+        # letting it read as a per-call payment is the difference between
+        # "you bought $0.50 of credit" and "you paid $0.50 for a $0.03
+        # audit and got nothing back" -- see settle_topup_sync.
+        if challenge.get("intent") == "topup":
+            return False
         method = challenge.get("method")
         if method == "stripe":
             return _verify_stripe(challenge, payload)
@@ -432,3 +632,38 @@ def verify_and_settle_sync(authorization_header: str, realm: Optional[str] = Non
         return False
     except Exception:
         return False
+
+
+def settle_topup_sync(authorization_header: str, realm: Optional[str] = None):
+    """Settle a `topup` credential and return the cents bought, or None.
+
+    Separate from verify_and_settle_sync because the two mean different
+    things to the caller: that one says "this call is paid for", this one says
+    "this much credit was purchased". Collapsing them would let a $0.50 top-up
+    be consumed as payment for one $0.03 audit, silently keeping the other
+    $0.47 -- which is theft dressed as a rounding decision.
+
+    The amount is read from the HMAC-bound challenge rather than from the
+    caller, so an agent cannot claim to have bought more credit than it paid
+    for. Same fail-closed contract as everything else here: any exception, any
+    binding failure, any wrong intent all resolve to None.
+    """
+    try:
+        decoded = json.loads(_b64url_decode(authorization_header))
+        challenge = decoded["challenge"]
+        payload = decoded["payload"]
+        if challenge.get("intent") != "topup":
+            return None
+        if challenge.get("method") != "stripe":
+            return None
+        if not _verify_challenge_binding(challenge, realm):
+            return None
+        request_obj = json.loads(_b64url_decode(challenge["request"]))
+        cents = int(request_obj["amount"])
+        if cents < _STRIPE_MIN_CENTS:
+            return None
+        if not _verify_stripe(challenge, payload):
+            return None
+        return cents
+    except Exception:
+        return None

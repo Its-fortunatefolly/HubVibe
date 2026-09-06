@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 mcp-publisher
 .venv/
+.sim-paid-call/
+
+# Written by scripts/vps-install.sh on the box; may hold live Stripe keys.
+deploy/vps/.env

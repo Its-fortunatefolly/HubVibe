@@ -171,11 +171,21 @@ you — it needs your Stripe account):
    (-> `STRIPE_PRICE_ONEOFF_REPORT`). A tier with no Price ID set is not
    offered: it is omitted from `/.well-known/agent.json` and its checkout
    refuses, rather than half-working.
-2. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`,
-   aggregation = count).
+2. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`).
+   Note its aggregation -> `STRIPE_METER_AGGREGATION` (`count` or `sum`,
+   default `count`). It cannot be changed after the meter is created.
 3. **Product catalog**: create a recurring Price with `usage_type: metered`
-   attached to that meter (e.g. $0.03 per unit). Note the Price ID ->
-   `STRIPE_METERED_PRICE_ID`.
+   attached to that meter. Note the Price ID -> `STRIPE_METERED_PRICE_ID`,
+   **and what one unit costs** -> `STRIPE_METER_UNIT_CENTS` (default `1`,
+   i.e. $0.01/unit).
+
+   These two are not bookkeeping. Usage is reported as **the price of the
+   call in meter units** — a $0.03 audit is 3 units of a $0.01 Price, a
+   $0.10 bundle is 10 — so a Price or an aggregation that disagrees with
+   these variables invoices the wrong amount on every call, uniformly and
+   invisibly. Reconcile the Price BEFORE attaching it to a subscription;
+   an unattached metered Price charges nobody, which is exactly why a
+   mismatch here can sit unnoticed indefinitely.
 4. **Developers > Webhooks**: add an endpoint at
    `https://<your-service>/billing/webhook` subscribed to
    `checkout.session.completed`. Note the signing secret.
@@ -285,6 +295,23 @@ Building the discovery data can never break a payment challenge: if it
 throws, the 402 still goes out with its price and rails intact. Losing the
 index is survivable; losing the sale is not.
 
+#### Paying over MCP
+
+`/mcp` speaks the x402 MCP protocol (`x402.mcp` in the library), which is
+not the HTTP 402 shape. An unpaid `tools/call` answers with an `isError`
+result whose `structuredContent` (and text) is the **v2** `PaymentRequired`
+-- the same challenge the HTTP path encodes into `PAYMENT-REQUIRED`, built
+by the same function, with `resource.url` naming `/mcp` and a Bazaar record
+that names the tool and its transport. The client signs for `accepts[0]`
+and retries with the `PaymentPayload` in `params._meta["x402/payment"]`
+(the official `x402.mcp` client does this automatically); the facilitator's
+settle response comes back in the result's `_meta["x402/payment-response"]`,
+beside the `PAYMENT-RESPONSE` header. The `_meta` payload is re-encoded into
+the header form and verified by the same path as an HTTP payment, so the
+replay guard, the facilitator loop and the logging are shared rather than
+duplicated. An explicit `X-PAYMENT` / `PAYMENT-SIGNATURE` header on the POST
+still works and wins when both are present.
+
 ### Getting paid without Stripe subscriptions: MPP
 
 `/audit` also accepts [MPP](https://docs.stripe.com/payments/machine/mpp)
@@ -324,11 +351,22 @@ Until each method's vars are set, it isn't offered (no `WWW-Authenticate`
 header on a 402 for that method) and stays inert:
 
 - **stripe** method needs `MPP_STRIPE_NETWORK_PROFILE_ID` (your Stripe
-  Business Network Profile ID -- Dashboard → "Stripe profile" → Get
-  started, in **live** mode; no Product/Price needed, unlike the
-  subscription flow above). `MPP_STRIPE_PRICE_CENTS` (default `3`, i.e.
-  $0.03), `MPP_STRIPE_CURRENCY` (default `usd`), and
-  `MPP_STRIPE_API_VERSION` (default `2026-05-27.preview`) are optional.
+  profile ID, `profile_...` -- Dashboard → "Stripe profile" → Get started,
+  in **live** mode; no Product/Price needed, unlike the subscription flow
+  above). `MPP_STRIPE_PRICE_CENTS` (default `3`, i.e. $0.03),
+  `MPP_STRIPE_CURRENCY` (default `usd`), and `MPP_STRIPE_API_VERSION`
+  (default `2026-05-27.preview`) are optional.
+
+  **It carries a floor: Stripe requires a minimum 0.50 USD charge for card
+  payments made with a Shared Payment Token.** This rail is therefore not
+  offered on any route priced below `MPP_STRIPE_MIN_CENTS` (default `50`) --
+  no `WWW-Authenticate` challenge, no `accepts` entry, not listed in
+  `payment.methods` -- and a stale challenge under the floor is refused
+  before an SPT is spent on it. Configured is not the same as usable: at the
+  $0.03/$0.10 machine rates this rail stays dark on purpose, because
+  advertising it would take a caller's single-use token and then fail at the
+  Stripe API every time. For sub-50c machine payments through Stripe, use
+  stablecoins (below) — their minimum is 1 cent — or price a route at 50c+.
 - **tempo** method needs only `MPP_TEMPO_RECIPIENT_ADDRESS` -- everything
   else defaults to Tempo mainnet's real values (sourced from Tempo's own
   SDK, not guessed): `MPP_TEMPO_RPC_URL` defaults to
@@ -336,6 +374,53 @@ header on a 402 for that method) and stays inert:
   mainnet USDC.e contract `0x20C000000000000000000000b9537d11c60E8b50`, and
   `MPP_TEMPO_CHAIN_ID` defaults to `4217`. `MPP_TEMPO_PRICE_BASE_UNITS`
   defaults to `30000` ($0.03 at USDC's 6 decimals).
+
+  **This method is not actually Tempo-specific — it runs on any EVM chain.**
+  Verification is `eth_getTransactionReceipt` over JSON-RPC plus standard
+  ERC-20 `Transfer` log matching, so only the four values above tie it to a
+  chain. To take direct USDC on **Base** into a self-custody wallet, point
+  them at Base and the same code verifies Base:
+
+  ```
+  MPP_TEMPO_RPC_URL=https://mainnet.base.org
+  MPP_TEMPO_CHAIN_ID=8453
+  MPP_TEMPO_TOKEN_ADDRESS=<USDC on Base -- verify, see below>
+  MPP_TEMPO_RECIPIENT_ADDRESS=<your Base wallet>
+  ```
+
+  Verified against the reference implementation: `npx mppx@latest validate`
+  against a node configured this way passes every server-side check --
+  including `Valid recipient address` and `Valid currency address (mainnet)`,
+  with chain 8453 correctly read as mainnet. (Its payment-roundtrip phase
+  still fails, because it auto-provisions a *Tempo testnet* wallet to pay
+  with; that is the validator's convenience feature not applying to a Base
+  mainnet config, not a fault in the server.)
+
+  USDC on Base is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` — the value
+  Stripe's Dashboard assistant gives for this account, matching the one this
+  configuration was validated against.
+
+  **Confirm it against the chain anyway before deploying it.** Two documents
+  agreeing is not the chain agreeing, and a wrong `MPP_TEMPO_TOKEN_ADDRESS`
+  makes `_receipt_matches` reject every real payment -- fail-closed, but
+  silently unsellable, which is this repo's most expensive failure mode. USDC
+  exposes `symbol()`, selector `0x95d89b41`:
+
+  ```bash
+  curl -s https://mainnet.base.org -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"<candidate address>","data":"0x95d89b41"},"latest"]}'
+  ```
+
+  The result hex-decodes to `USDC` for the right contract, and to nothing for
+  a wrong one.
+
+  **A caveat worth knowing:** the challenge still advertises `method="tempo"`
+  while naming chain 8453 in `methodDetails.chainId`. The reference validator
+  reads the chain id and accepts it, and any client that reads the challenge
+  rather than assuming defaults will too -- but it is an off-label
+  configuration. For Base specifically, **x402 is the native rail** and is
+  already implemented here; this is the option for callers that would rather
+  broadcast their own transfer and hand over a hash.
 
   The simplest way to get `MPP_TEMPO_RECIPIENT_ADDRESS`: let Stripe custody
   and auto-convert the funds instead of running your own wallet, via

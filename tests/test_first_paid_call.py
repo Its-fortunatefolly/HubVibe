@@ -16,6 +16,7 @@ The preflight is extracted and driven against synthetic challenges here, so
 every rejection path is exercised without a network or a wallet.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -262,3 +263,168 @@ def test_an_unreadable_key_file_says_so_instead_of_printing_nothing(tmp_path):
     )
     assert "does not contain a readable private key" in result.stdout
     assert "HUBVIBE_FORCE_NEW_WALLET=1" in result.stdout
+
+
+# --- the paying wallet must not be the recipient ---------------------------
+#
+# The owner's Base wallet is the natural thing to reach for and it is also
+# X402_PAY_TO_ADDRESS, so this mistake is one paste away. Nothing else catches
+# it: verified by running the script against a node whose payTo was the
+# payer's own address -- the x402 client produced a signature without
+# complaint. The failure would land at the facilitator, on the one call whose
+# entire purpose is to prove the facilitator settles a real payment.
+#
+# These drive the whole shell script with curl stubbed, because the guard is
+# in the shell after the embedded preflight, and the preflight-only harness
+# above cannot see it.
+
+# Deterministic throwaway keys. Never funded; they exist so the payer address
+# is known to the test rather than generated per run.
+KEY_A = "0x" + "11" * 32
+ADDR_A = "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+KEY_B = "0x" + "22" * 32
+
+
+def _drive(tmp_path, wallet_key, pay_to, extra_env=None):
+    """Run the real script with curl stubbed to serve one challenge."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    challenge = tmp_path / "challenge.json"
+    challenge.write_text(_challenge(pay_to=pay_to))
+
+    # The script asks curl for the body then the status code on its own line
+    # (-w '\n%{http_code}'); the stub answers the same way.
+    (bin_dir / "curl").write_text(
+        f'#!/usr/bin/env bash\ncat "{challenge}"\nprintf "\\n402"\n'
+    )
+    (bin_dir / "curl").chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["HOME"] = str(tmp_path)
+    env["HUBVIBE_WALLET_KEY"] = wallet_key
+    env["BASE"] = "https://example.test"
+    env.pop("HUBVIBE_ALLOW_SELF_PAYMENT", None)
+    if extra_env:
+        env.update(extra_env)
+
+    return subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=180
+    )
+
+
+def test_paying_from_the_recipient_wallet_is_refused(tmp_path):
+    result = _drive(tmp_path, wallet_key=KEY_A, pay_to=ADDR_A)
+    assert "The paying wallet IS the recipient" in result.stdout
+    assert result.returncode == 1
+    # It must stop BEFORE spending: no payment attempt, no settlement report.
+    assert "Paying for one real call" not in result.stdout
+
+
+def test_the_recipient_check_is_case_insensitive(tmp_path):
+    """EIP-55 checksummed and all-lowercase spellings are the same address.
+    Comparing them raw would let the mistake through on a lowercase paste --
+    which is exactly the form a wallet app's copy button produces."""
+    result = _drive(tmp_path, wallet_key=KEY_A, pay_to=ADDR_A.lower())
+    assert "The paying wallet IS the recipient" in result.stdout
+    assert result.returncode == 1
+
+
+def test_a_different_paying_wallet_passes_the_guard(tmp_path):
+    """The guard must stop one specific mistake, not become a gate on the
+    normal case it exists to protect."""
+    result = _drive(tmp_path, wallet_key=KEY_B, pay_to=ADDR_A)
+    assert "The paying wallet IS the recipient" not in result.stdout
+
+
+def test_the_self_payment_refusal_is_overridable(tmp_path):
+    """It may well be a valid transfer. Refusing to let the owner try it is
+    not this script's call -- refusing to let them do it BY ACCIDENT is."""
+    result = _drive(
+        tmp_path, wallet_key=KEY_A, pay_to=ADDR_A,
+        extra_env={"HUBVIBE_ALLOW_SELF_PAYMENT": "1"},
+    )
+    assert "self-transfer, allowed by override" in result.stdout
+    assert "The paying wallet IS the recipient" not in result.stdout
+
+
+def test_an_unreadable_balance_hands_over_the_basescan_link(tmp_path):
+    """The Base RPC has failed from Cloud Shell on every run so far, and the
+    script proceeds without the check -- so a rejection cannot be told apart
+    from an empty wallet. When the script cannot answer that question it must
+    hand over the page that can, for the exact paying address."""
+    from eth_account import Account
+
+    result = _drive(tmp_path, wallet_key=KEY_B, pay_to=ADDR_A,
+                    extra_env={"BASE_RPC": "http://127.0.0.1:9"})
+    payer = Account.from_key(KEY_B).address
+    assert "proceeding without the check" in result.stdout
+    assert f"https://basescan.org/address/{payer}" in result.stdout
+
+
+def test_a_settled_call_prints_the_transaction_link():
+    """The receipt is the proof. After a settlement the script must print
+    the Basescan link for the transaction the node handed back in
+    PAYMENT-RESPONSE, and must say so plainly when the node sent none --
+    an empty link would read as a settlement with no transaction."""
+    text = SCRIPT.read_text()
+    pay_block = text[text.index("Paying for one real call"):]
+    assert "booth.last_settlement" in pay_block, "the receipt is never read off the client"
+    assert "https://basescan.org/tx/$TX" in pay_block
+    assert "sent no PAYMENT-RESPONSE receipt" in pay_block
+
+
+def test_a_non_json_response_shows_the_status_and_the_body():
+    """"not JSON -- is the node up?" was all the owner got on 2026-09-04,
+    with the HTTP status and the body discarded. Both go in the message."""
+    import os
+
+    result = subprocess.run(
+        [sys.executable, "-c", _preflight_source()],
+        input="<html><title>503 Service Unavailable</title></html>",
+        capture_output=True, text=True,
+        env={**os.environ, "STATUS": "503"},
+    )
+    detail = result.stdout.strip().partition("\t")[2]
+    assert "HTTP 503" in detail
+    assert "503 Service Unavailable" in detail
+    assert "cold-starting" in detail
+
+
+def test_a_cold_start_5xx_on_the_free_read_is_retried(tmp_path):
+    """min-instances is 0: the first request after idle can get Cloud Run's
+    own 503 page while the container boots. Reading the challenge costs
+    nothing, so the script tries again instead of stopping on it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    challenge = tmp_path / "challenge.json"
+    challenge.write_text(_challenge(pay_to=ADDR_A))
+    counter = tmp_path / "calls"
+    (bin_dir / "curl").write_text(
+        "#!/usr/bin/env bash\n"
+        f'n=$(( $(cat "{counter}" 2>/dev/null || echo 0) + 1 )); echo $n > "{counter}"\n'
+        'if [ "$n" -eq 1 ]; then printf "<html>Service Unavailable</html>\\n503"; exit 0; fi\n'
+        f'cat "{challenge}"\nprintf "\\n402"\n'
+    )
+    (bin_dir / "curl").chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["HOME"] = str(tmp_path)
+    env["HUBVIBE_WALLET_KEY"] = KEY_B
+    env["BASE"] = "https://example.test"
+    env["HUBVIBE_RETRY_SLEEP"] = "0"
+    result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True,
+                            env=env, timeout=180)
+
+    assert "HTTP 503 from the node (attempt 1 of 3" in result.stdout
+    assert "x402 advertised" in result.stdout, result.stdout
+    assert "not JSON" not in result.stdout
+
+
+def test_the_paying_block_still_has_no_loop_after_the_read_retry():
+    """The retry lives on the free read only. This pins where the loop ends
+    relative to where the money starts."""
+    text = SCRIPT.read_text()
+    read_block = text[text.index('step "Reading the live 402'):text.index('step "Paying for one real call')]
+    assert "for attempt in 1 2 3" in read_block

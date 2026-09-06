@@ -61,7 +61,7 @@
 
 set -uo pipefail
 
-BASE="${BASE:-https://hubvibe-831480473793.us-south1.run.app}"
+BASE="${BASE:-https://hubvibe-io.com}"
 ROUTE="${ROUTE:-/audit/wcag}"
 TARGET_URL="${TARGET_URL:-https://example.com}"
 # Dexter has a live discovery index at /discovery/resources; xpay.sh does not.
@@ -195,20 +195,58 @@ else
 fi
 
 step "Reading the live 402 challenge from $BASE$ROUTE"
-CHALLENGE=$(curl -sS -m 30 -X POST "$BASE$ROUTE" \
-  -H 'Content-Type: application/json' \
-  -d "{\"url\":\"$TARGET_URL\"}" 2>/dev/null)
-[ -n "$CHALLENGE" ] || die "no response from $BASE$ROUTE"
+# min-instances is 0 (#85), so the first request after an idle spell cold-
+# starts a browser-sized container. That can run past 30 seconds, and while
+# it boots Cloud Run answers with its own HTML error page -- which this step
+# used to report as "the response was not JSON -- is the node up?" with the
+# status and the body thrown away (2026-09-04). This read is free, so it gets
+# a longer timeout and two retries on a 5xx or a timeout. The PAYMENT below
+# is never retried; that rule is unchanged.
+RETRY_SLEEP="${HUBVIBE_RETRY_SLEEP:-10}"
+CHALLENGE=""
+STATUS="000"
+for attempt in 1 2 3; do
+  RAW=$(curl -sS -m 120 -w '\n%{http_code}' -X POST "$BASE$ROUTE" \
+    -H 'Content-Type: application/json' \
+    -d "{\"url\":\"$TARGET_URL\"}" 2>/dev/null)
+  STATUS="${RAW##*$'\n'}"
+  CHALLENGE="${RAW%$'\n'*}"
+  case "$STATUS" in
+    000|5??)
+      if [ "$attempt" -lt 3 ]; then
+        warn "HTTP $STATUS from the node (attempt $attempt of 3 -- a cold start?); retrying in ${RETRY_SLEEP}s"
+        sleep "$RETRY_SLEEP"
+        continue
+      fi
+      ;;
+  esac
+  break
+done
+[ -n "$CHALLENGE" ] || die "no response body from $BASE$ROUTE (HTTP $STATUS after 3 attempts).
+      Is the service up?  gcloud run services describe hubvibe --project=resolver-time --region=us-south1 --format='value(status.url,status.conditions[0].message)'"
+export STATUS
 
 # One python pass over the challenge: it has to answer four questions, and
 # reading it four times invites the four answers to disagree.
 PREFLIGHT=$(printf '%s' "$CHALLENGE" | python3 -c '
 import json, sys
+import os
 
+raw = sys.stdin.read()
 try:
-    body = json.load(sys.stdin)
+    body = json.loads(raw)
 except Exception:
-    print("FAIL\tthe response was not JSON -- is the node up?")
+    # Show what came back. "not JSON" alone sent the owner guessing whether
+    # the node was up; the status and the first line of the body say.
+    excerpt = " ".join(raw.split())[:200]
+    status = os.environ.get("STATUS", "?")
+    where = ("Cloud Run answered for the service, so the container did not "
+             "answer in time: still cold-starting, or the latest revision "
+             "failed to start. Check: gcloud run services describe hubvibe "
+             "--project=resolver-time --region=us-south1"
+             if status.startswith("5") else "is the node up?")
+    print("FAIL\tthe response was not JSON (HTTP %s). It said: %r -- %s"
+          % (status, excerpt, where))
     sys.exit()
 
 # accepts[] is the x402 spec array as of #61: spec-shaped entries only, no
@@ -267,6 +305,53 @@ ok "x402 advertised: $PRICE to $PAY_TO on $NETWORK"
 ok "the Bazaar record on this 402 is well-formed and will survive validation"
 
 # ---------------------------------------------------------------------------
+# The paying wallet must not BE the recipient.
+#
+# It is an easy mistake and nothing else catches it: the owner's Base wallet
+# is the natural thing to reach for, and it is also X402_PAY_TO_ADDRESS. The
+# x402 client raises no objection -- verified by running this script against a
+# node whose payTo was the payer's own address; a signature was produced
+# normally.
+#
+# So the failure would land at the facilitator, on the one call whose entire
+# purpose is to prove the facilitator settles. `exact` has the payer sign an
+# EIP-3009 transferWithAuthorization from -> to; with from == to that is a
+# degenerate self-transfer nothing here has ever tested. Whatever came back,
+# it would say nothing about whether a real buyer can pay -- the question this
+# call exists to answer -- while consuming the bootstrap attempt.
+#
+# Overridable, because a self-transfer may well be valid and refusing to let
+# the owner try it is not this script's call to make.
+# ---------------------------------------------------------------------------
+PAYER=$(python3 -c '
+import os
+from eth_account import Account
+try:
+    print(Account.from_key(os.environ["HUBVIBE_WALLET_KEY"].strip()).address)
+except Exception:
+    print("")
+' 2>/dev/null)
+
+if [ -n "$PAYER" ] && [ "$(printf '%s' "$PAYER" | tr 'A-Z' 'a-z')" = \
+                        "$(printf '%s' "$PAY_TO" | tr 'A-Z' 'a-z')" ]; then
+  if [ -z "${HUBVIBE_ALLOW_SELF_PAYMENT:-}" ]; then
+    printf '\n  \033[31mSTOP\033[0m  The paying wallet IS the recipient.\n\n'
+    printf '      paying:    %s\n' "$PAYER"
+    printf '      paying to: %s\n\n' "$PAY_TO"
+    printf '  x402 would sign this without complaining, so nothing before the\n'
+    printf '  facilitator stops it -- but it is a self-transfer, and this call\n'
+    printf '  exists to prove the facilitator settles a REAL payment. Whatever\n'
+    printf '  came back would not answer that.\n\n'
+    printf '  Pay from a different wallet. The money still lands in yours:\n\n'
+    printf '      bash scripts/first-paid-call.sh --new-wallet\n\n'
+    printf '  then send that address ~$1 of USDC on Base and re-run.\n\n'
+    printf '  (To try the self-payment anyway: HUBVIBE_ALLOW_SELF_PAYMENT=1)\n\n'
+    exit 1
+  fi
+  warn "paying wallet IS the recipient -- self-transfer, allowed by override"
+fi
+
+# ---------------------------------------------------------------------------
 # Does the wallet actually hold the asset this challenge asks for?
 #
 # Without this, an unfunded or wrongly-funded wallet fails deep inside the
@@ -317,7 +402,14 @@ case "$BAL" in
     ok "$(printf '%s' "$BAL" | cut -d'|' -f2) holds \$$(printf '%s' "$BAL" | cut -d'|' -f3) USDC"
     ;;
   SKIP*)
+    # The RPC has failed from Cloud Shell on every run so far (HTTPError from
+    # mainnet.base.org), which left "is the wallet funded?" as the one open
+    # question after two rejected attempts. When this script cannot answer
+    # it, hand the human the page that can -- one tap on a phone, no gcloud.
+    SKIP_ADDR=$(printf '%s' "$BAL" | cut -d'|' -f2)
     warn "$(printf '%s' "$BAL" | cut -d'|' -f3)"
+    warn "check the balance yourself before reading a rejection as anything else:"
+    warn "  https://basescan.org/address/$SKIP_ADDR"
     ;;
   FAIL\|0x*)
     WALLET_ADDR=$(printf '%s' "$BAL" | cut -d'|' -f2)
@@ -386,7 +478,11 @@ except Exception as exc:
         detail = detail[:300] + " ...[truncated]"
     print("FAIL\t%s: %s" % (type(exc).__name__, detail))
     sys.exit()
-print("OK\t%.4f\t%s" % (booth.spent_usd, json.dumps(result)[:400]))
+# The tx hash rides ahead of the result: it is the one field a human needs
+# next, and json.dumps never emits a raw tab, so the columns stay stable.
+receipt = booth.last_settlement or {}
+print("OK\t%.4f\t%s\t%s" % (booth.spent_usd, receipt.get("transaction") or "",
+                            json.dumps(result)[:400]))
 ' 2>&1)
 
 case "$PAID" in
@@ -402,8 +498,21 @@ case "$PAID" in
 esac
 
 SPENT=$(printf '%s' "$PAID" | cut -f2)
+TX=$(printf '%s' "$PAID" | cut -f3)
 ok "settled \$$SPENT and the audit returned a result"
-printf '%s\n' "$PAID" | cut -f3 | sed 's/^/        /'
+printf '%s\n' "$PAID" | cut -f4- | sed 's/^/        /'
+
+# The receipt is the proof. A settled payment has a transaction hash, and
+# the node hands it back in the PAYMENT-RESPONSE header (x402 spec step 10).
+# Print the explorer link for it, so "did the money move" is one tap and not
+# a wallet-app hunt. A node whose deployed revision predates the receipt
+# sends no header; say so rather than printing an empty link.
+if [ -n "$TX" ]; then
+  ok "on-chain: https://basescan.org/tx/$TX"
+else
+  warn "the node sent no PAYMENT-RESPONSE receipt (deployed revision predates it)."
+  warn "look for the transfer at https://basescan.org/address/$PAY_TO"
+fi
 
 # ---------------------------------------------------------------------------
 # Did the payment register us?

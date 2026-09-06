@@ -73,7 +73,7 @@ signature verifier, never in the money path.
   those in Cloud Shell. **Never claim a live fact without seeing its output.**
 - **Setting env vars is not a deploy.** `gcloud run services update
   --update-env-vars` keeps the same container image. Use
-  `scripts/repair-and-deploy.sh` (or `go-live-x402.sh`, which hands off to it),
+  `scripts/repair-and-deploy.sh` (or `go-live.sh`, which hands off to it),
   which deploy source. This exact mistake hid every merged fix from production
   for days.
 - **A stale checkout is not a pass.** `verify-live.sh` prints its own commit and
