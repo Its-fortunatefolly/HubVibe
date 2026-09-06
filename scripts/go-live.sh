@@ -40,9 +40,15 @@ REGION="${REGION:-us-south1}"
 PROJECT="${PROJECT:-resolver-time}"
 RAILS="${RAILS:-both}"
 
-# Keyless, Base mainnet, zero fee, no business review. CDP is unavailable
-# rather than pending -- its review asks for a DBA that does not exist.
-FACILITATOR="${X402_FACILITATOR:-https://facilitator.xpay.sh}"
+# Dexter: free, keyless, Base mainnet, x402 v2, auto-indexes paid endpoints in
+# its marketplace on first settlement so agents can find this node by
+# capability -- no registration, no API key, no business review. The previous
+# default (xpay.sh) settles but runs no discovery index, so every caller who
+# would have found this node through capability search never arrived. CDP is
+# unavailable rather than pending -- its review asks for a DBA that does not
+# exist -- and the CDP guard already ignores CDP credentials for non-Coinbase
+# hosts, so this is exactly one env var.
+FACILITATOR="${X402_FACILITATOR:-https://x402.dexter.cash}"
 
 STRIPE_SECRET_NAME="${STRIPE_SECRET_NAME:-SECRET_STRIPE_KEY}"
 # Preview-only and version-pinned. An older version 404s the endpoint, which
