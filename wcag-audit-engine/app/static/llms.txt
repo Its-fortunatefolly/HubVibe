@@ -62,9 +62,9 @@ costs a real browser page load, so every audit is paid for.
 Up to three rails, all fail-closed (no valid credential/payment means no
 audit runs, and nothing partially executes on a rejected payment):
 
-1. Stripe API key -- `X-API-Key` header, issued with a human plan. Plans are
-   priced per site watched, not per scan; machine callers should use the
-   per-call rails below instead.
+1. API key -- `X-API-Key` header: a prepaid key bought through the MPP
+   top-up rail (a $0.50 block, spent at the per-call rates). There are no
+   subscriptions; machine callers should use the per-call rails below.
 2. x402 -- on-chain payment via the x402 protocol; verified and settled
    through a facilitator, never trusted client-side.
 3. MPP (Machine Payments Protocol) -- Stripe Shared Payment Tokens (fiat)
@@ -107,6 +107,5 @@ https://github.com/its-fortunatefolly/hubvibe/tree/main/wcag-audit-engine/integr
 Machine, per call (this is the product): $0.03 per single-dimension audit,
 $0.10 per bundle. No account, no minimum.
 
-Human plans, priced per site watched rather than per scan: $29.99 one-off
-report, $79/mo for 5 sites daily, $249/mo for 50 sites daily. See
-/.well-known/agent.json for the authoritative live pricing.
+There are no subscriptions: per call is the only price.
+See /.well-known/agent.json for the authoritative live pricing.

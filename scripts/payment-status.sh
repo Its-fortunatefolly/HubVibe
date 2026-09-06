@@ -34,7 +34,10 @@
 set -uo pipefail
 
 BASE="${BASE:-https://hubvibe-io.com}"
-BASE_RPC="${BASE_RPC:-https://mainnet.base.org}"
+# Comma-separated, tried in order. The public Base RPCs sit behind bot
+# filters that answer HTTP 403 to Python's default User-Agent; the request
+# below sends its own, and the next endpoint is tried on any failure.
+BASE_RPC="${BASE_RPC:-https://mainnet.base.org,https://base.publicnode.com,https://base-rpc.publicnode.com}"
 WALLET_FILE="${HUBVIBE_WALLET_FILE:-${HOME:-/tmp}/.hubvibe-wallet-key}"
 export BASE BASE_RPC WALLET_FILE
 export EXPECTED_PAY_TO="${X402_PAY_TO_ADDRESS:-0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd}"
@@ -48,7 +51,11 @@ import urllib.error
 import urllib.request
 
 BASE = os.environ["BASE"].rstrip("/")
-RPC = os.environ["BASE_RPC"]
+RPCS = [u.strip() for u in os.environ["BASE_RPC"].split(",") if u.strip()]
+# mainnet.base.org (Cloudflare) answers 403 to "Python-urllib/3.x" -- found
+# 2026-09-06 when this script reported the chain unreachable from a machine
+# where curl read it fine. Name ourselves, and never fall back to zero.
+USER_AGENT = "hubvibe-payment-status/1.0"
 WALLET_FILE = os.environ["WALLET_FILE"]
 EXPECTED = os.environ["EXPECTED_PAY_TO"]
 
@@ -88,15 +95,20 @@ def usdc_balance(address):
         "jsonrpc": "2.0", "id": 1, "method": "eth_call",
         "params": [{"to": USDC, "data": data}, "latest"],
     }).encode()
-    try:
-        req = urllib.request.Request(RPC, data=body, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=25) as response:
-            result = json.load(response).get("result")
-        if not result or result == "0x":
-            return 0.0
-        return int(result, 16) / 1_000_000
-    except Exception:
-        return None
+    for rpc in RPCS:
+        try:
+            req = urllib.request.Request(
+                rpc, data=body,
+                headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+            )
+            with urllib.request.urlopen(req, timeout=25) as response:
+                result = json.load(response).get("result")
+            if not result or result == "0x":
+                return 0.0
+            return int(result, 16) / 1_000_000
+        except Exception:
+            continue
+    return None
 
 
 def get(url, timeout=30):

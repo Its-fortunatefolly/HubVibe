@@ -117,27 +117,9 @@ Two audiences, priced in different units on purpose:
 
 - **Machines, per call** ($0.03 individual, $0.10 bundle): x402 or MPP, no
   subscription, no signup — see the two sections below. This is the product.
-- **Humans, per site watched** — three Stripe-backed plans:
-
-  | Plan | Price | Covers | Monthly call cap |
-  |---|---|---|---|
-  | Single report | $29.99 once | one site, all four checks, one report page | n/a (one purchase) |
-  | Pro | $79/month | 5 sites, audited daily, with history | 2,000 |
-  | Agency | $249/month | 50 sites, audited daily, client-ready reports | 10,000 |
-
-  Pricing per *site* rather than per *scan* is deliberate: denominating in
-  scans invited the obvious arithmetic against the $0.03 machine rate and
-  made the plan strictly worse than paying per call.
-
-  The caps are sized to each plan's own promise with headroom (Agency at 50
-  sites × 4 checks × 31 days is 6,200 calls), because the cap exists to stop
-  runaway abuse, not to meter value — marginal cost is ~$0.00007 per audit.
-  The plan is recorded on the API key at checkout, so
-  `billing.check_and_increment_quota` enforces the cap the customer actually
-  bought; a legacy key with no plan recorded falls back to
-  `SAAS_MONTHLY_QUOTA`. Past the cap the bare `X-API-Key` stops being
-  sufficient and the call falls through to x402/MPP — not a special code
-  path, just the existing three-way auth check.
+- **Humans**: there are no subscriptions or plans (retired 2026-09-06 —
+  per call is the only price). Card payers buy a $0.50 prepaid block
+  through the MPP top-up rail and spend it at the same per-call rates.
 
 Every real call also still reports a Stripe Meter Event
 (`billing.record_usage`) regardless of which auth path was used to bill it
@@ -165,12 +147,10 @@ required to make it work):
 One-time setup in the Stripe Dashboard (not something this code can do for
 you — it needs your Stripe account):
 
-1. **Product catalog**: create the three human plans as Prices, *not*
-   `usage_type: metered` — a recurring $79/month (-> `STRIPE_PRICE_PRO`), a
-   recurring $249/month (-> `STRIPE_PRICE_AGENCY`), and a one-time $29.99
-   (-> `STRIPE_PRICE_ONEOFF_REPORT`). A tier with no Price ID set is not
-   offered: it is omitted from `/.well-known/agent.json` and its checkout
-   refuses, rather than half-working.
+1. **Product catalog**: no subscription Prices are needed — the human
+   plans are retired (`STRIPE_PRICE_PRO` / `STRIPE_PRICE_AGENCY` /
+   `STRIPE_PRICE_ONEOFF_REPORT` are ignored; `/billing/checkout` refuses a
+   plan). Only the metered Price below and the MPP profile matter.
 2. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`).
    Note its aggregation -> `STRIPE_METER_AGGREGATION` (`count` or `sum`,
    default `count`). It cannot be changed after the meter is created.
@@ -502,14 +482,13 @@ gcloud run deploy hubvibe \
   --cpu=2 \
   --concurrency=4 \
   --min-instances=1 \
-  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,STRIPE_PRICE_ONEOFF_REPORT=price_...,STRIPE_PRICE_PRO=price_...,STRIPE_PRICE_AGENCY=price_...,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
+  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
 
 `STRIPE_PRICE_ONEOFF_REPORT`, `STRIPE_PRICE_PRO` and `STRIPE_PRICE_AGENCY`
-are the three human plans. A tier with no Price ID set is not offered — it
-is omitted from `/.well-known/agent.json` and its checkout refuses, rather
-than half-working.
+belong to the retired human plans and can be omitted; nothing offers a
+plan and `/billing/checkout` refuses one.
 
 **Redeploying code only:** leave every flag off.
 

@@ -92,9 +92,7 @@ facilitator: https://facilitator.xpay.sh  (keyless, Base mainnet, both v1+v2 voc
 NEVER use as recipient: 0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256 (unidentified),
                         0x32b08c5e927c69877d0fcab35618c265674922bc (test constant), the zero address
 Stripe account: acct_1U28tvDA21T9EAQB
-payment links: report $29.99 https://buy.stripe.com/aFa3cvf0q6x6dg2apMgQE00
-               pro $79/mo    https://buy.stripe.com/7sYdR93hIbRq2BoeG2gQE01
-               agency $249/mo https://buy.stripe.com/4gM4gz6tU3kUek61TggQE02
+human plans: RETIRED 2026-09-06 (per call is the only price; the three Stripe payment links are unpublished)
 repos: github.com/Its-fortunatefolly/HubVibe (product) + hubvibe-audit-action (Marketplace action, tags v1/v1.0.0)
 full history and decisions: docs/HANDOFF.md in the HubVibe repo
 FACTS

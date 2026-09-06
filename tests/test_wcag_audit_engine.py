@@ -1071,53 +1071,6 @@ def test_manifest_only_lists_payment_methods_that_can_settle(monkeypatch):
     assert "mpp-tempo" in refreshed["payment"]["methods"]
 
 
-def test_manifest_only_lists_human_plans_that_can_be_bought(monkeypatch):
-    """Fail-closed, same as the payment rails: a tier whose Stripe Price ID
-    isn't configured must not be advertised, because its checkout would
-    raise rather than take money."""
-    from fastapi.testclient import TestClient
-
-    module = _load_main(monkeypatch)
-    client = TestClient(module.app)
-
-    # Nothing configured in CI, so an honest manifest offers no plans.
-    manifest = client.get("/.well-known/agent.json").json()
-    assert manifest["pricing"]["human_plans"]["tiers"] == []
-
-    monkeypatch.setattr(module.billing, "plan_available", lambda plan: plan == "pro")
-    monkeypatch.setattr(module.billing, "oneoff_report_available", lambda: False)
-    refreshed = client.get("/.well-known/agent.json").json()
-    offered = {t["id"] for t in refreshed["pricing"]["human_plans"]["tiers"]}
-    assert offered == {"pro"}
-
-
-def test_manifest_plan_prices_match_the_landing_page(monkeypatch):
-    """The manifest advertised a $49/month plan with an included-scans quota
-    for weeks after Stripe had stopped selling it, because the number lived
-    in two places. An agent -- or a human's agent -- reading a price that no
-    checkout will honour is a broken sale, so pin the two together."""
-    from fastapi.testclient import TestClient
-
-    module = _load_main(monkeypatch)
-    monkeypatch.setattr(module.billing, "plan_available", lambda plan: True)
-    monkeypatch.setattr(module.billing, "oneoff_report_available", lambda: True)
-    client = TestClient(module.app)
-
-    tiers = client.get("/.well-known/agent.json").json()["pricing"]["human_plans"]["tiers"]
-    assert {t["id"] for t in tiers} == {"report", "pro", "agency"}
-
-    page = (REPO_ROOT / "wcag-audit-engine" / "app" / "static" / "index.html").read_text()
-    for tier in tiers:
-        # $79.0 on the page reads as "$79"; compare the way a buyer sees it.
-        shown = f"{tier['usd']:.2f}".rstrip("0").rstrip(".")
-        assert f"${shown}" in page, f"{tier['id']} priced {tier['usd']} in the manifest but not on the page"
-
-    # And the retired framing must not come back anywhere an agent reads.
-    manifest_text = client.get("/.well-known/agent.json").text
-    assert "included_calls_per_month" not in manifest_text
-    assert 49 not in [t["usd"] for t in tiers], "the retired $49 plan is back"
-
-
 _SIBLING_MODULES = ("billing", "x402_payments", "mpp_payments", "audits")
 
 
@@ -1156,52 +1109,6 @@ def load_main_fresh():
 
     yield _load
     _drop_sibling_cache()
-
-
-def test_advertised_tier_is_actually_buyable_on_a_current_deployment(monkeypatch, load_main_fresh):
-    """A node configured with only today's plans must be able to sell them.
-
-    is_configured() gated on the RETIRED flat/metered price IDs, so a
-    deployment that had correctly moved to the per-site plans advertised all
-    three tiers in the manifest while /billing/checkout answered 501 --
-    every human buyer bounced off a "billing is not configured" wall on a
-    service that was, in fact, configured.
-    """
-    for var in ("STRIPE_METERED_PRICE_ID", "STRIPE_FLAT_SUBSCRIPTION_PRICE_ID"):
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
-    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
-    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
-    monkeypatch.setenv("STRIPE_PRICE_AGENCY", "price_agency")
-    monkeypatch.setenv("STRIPE_PRICE_ONEOFF_REPORT", "price_report")
-    monkeypatch.setenv("AUDIT_API_KEY", "test-key")
-
-    module = load_main_fresh("wcag_audit_main_plans")
-
-    assert module.billing.is_configured(), (
-        "a node selling the current plans reports billing unconfigured"
-    )
-
-    from fastapi.testclient import TestClient
-
-    client = TestClient(module.app)
-    tiers = client.get("/.well-known/agent.json").json()["pricing"]["human_plans"]["tiers"]
-    assert {t["id"] for t in tiers} == {"report", "pro", "agency"}
-
-    # Every advertised subscription tier must get past the config gate and
-    # reach Stripe -- 501 here is the bug. Stripe itself is not reachable in
-    # CI, so a network/auth error from the SDK is the expected far end.
-    for tier in tiers:
-        if tier["id"] == "report":
-            continue
-        try:
-            module.billing.create_checkout_session(
-                "buyer@example.com", "https://x/s", "https://x/c", plan=tier["id"]
-            )
-        except ValueError as exc:  # our own "not configured" rejection
-            pytest.fail(f"advertised tier {tier['id']} is not sellable: {exc}")
-        except Exception:
-            pass  # reached Stripe; that is as far as CI can go
 
 
 def test_planless_checkout_fails_cleanly_rather_than_500ing(monkeypatch, load_main_fresh):
@@ -1440,7 +1347,10 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
     """
     import re
 
-    retired = re.compile(r"\$49\b|1,?500 scans|1,?500 included|included_calls_per_month")
+    retired = re.compile(
+        r"\$49\b|1,?500 scans|1,?500 included|included_calls_per_month"
+        r"|\$29\.99|\$79\b|\$249\b|\"human_plans\"|plan-btn|per site watched"
+    )
 
     surfaces = []
     for pattern in ("*.md", "*.html", "*.txt", "*.json", "*.yml", "*.py"):
@@ -1450,6 +1360,8 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
                 continue
             # Other services in this monorepo have their own pricing.
             if any(p in parts for p in ("privacy-compliance-scanner", "dead-end-resolver")):
+                continue
+            if path.name == "HANDOFF.md":  # history is allowed to remember prices
                 continue
             if path.name == Path(__file__).name:  # this test names them on purpose
                 continue
@@ -1505,7 +1417,7 @@ def test_a_key_that_is_not_a_stripe_key_sells_nothing(bad_key, monkeypatch, load
 
     client = TestClient(module.app)
     manifest = client.get("/.well-known/agent.json").json()
-    assert manifest["pricing"]["human_plans"]["tiers"] == [], (
+    assert "human_plans" not in manifest["pricing"], (
         "advertised plans nobody can buy with a broken Stripe key"
     )
     assert "stripe_api_key" not in manifest["payment"]["methods"], (
@@ -1539,7 +1451,9 @@ def test_a_real_stripe_key_sells_normally(good_key, monkeypatch, load_main_fresh
     module = load_main_fresh("wcag_audit_main_goodkey")
     assert module.billing.stripe_key_looks_valid() is True, f"rejected {good_key!r}"
     assert module.billing.is_configured() is True
-    assert module.billing.plan_available("pro") is True
+    # The key is fine; the plan is retired (2026-09-06), so it still sells nothing.
+    assert module.billing.plan_available("pro") is False
+    assert module.billing.human_plans_live() == []
     # The padding must be gone from what we hand to Stripe, not merely
     # tolerated by the check.
     assert module.billing.stripe.api_key == good_key.strip()
@@ -2130,23 +2044,6 @@ def test_landing_page_never_prints_a_per_call_cent_price(monkeypatch):
     assert "/.well-known/agent.json" in html
 
 
-def test_landing_page_leads_with_the_machine_api_not_the_plans(monkeypatch):
-    """A2A is the product; the plans are the secondary path for humans who
-    don't want to build an integration. Positioning is unchanged -- only the
-    cent figure is gone."""
-    from fastapi.testclient import TestClient
-
-    module = _load_main(monkeypatch)
-    html = TestClient(module.app).get("/").text
-
-    first_human_price = min(html.index(p) for p in ("$29.99", "$79", "$249"))
-    assert html.index("Metered") < first_human_price, "plans appear before the machine API"
-
-    heading = html[html.index("<h1"):html.index("</h1>")]
-    assert "subscription" not in heading.lower()
-    assert not any(p in heading for p in ("$29.99", "$79", "$249"))
-
-
 def test_machine_surfaces_still_publish_the_exact_rate(monkeypatch):
     """Removing the price from the page must not remove it from the places a
     paying agent actually reads. If it did, nothing could price a call."""
@@ -2161,19 +2058,6 @@ def test_machine_surfaces_still_publish_the_exact_rate(monkeypatch):
     assert manifest["pricing"]["bundle_usd"] == 0.10
     challenge = client.post("/audit/wcag", json={"url": "https://example.com"}).json()
     assert challenge["price_usd"] == 0.03
-
-
-def test_human_plans_are_priced_per_site_not_per_scan(monkeypatch):
-    """Denominating human plans in scans invited the obvious arithmetic
-    against the $0.03 machine rate and made the plan look strictly worse.
-    Sites are the unit a human buys, and it isn't comparable."""
-    from fastapi.testclient import TestClient
-
-    module = _load_main(monkeypatch)
-    html = TestClient(module.app).get("/").text.lower()
-
-    assert "per site" in html or "sites" in html
-    assert "1,500 scans" not in html and "1500 scans" not in html
 
 
 # --- One-off paid report ---------------------------------------------------
@@ -2712,19 +2596,19 @@ def test_the_api_key_rail_appears_in_accepts_when_it_can_settle(
     # Not in `accepts` -- that array belongs to the x402 spec and a non-x402
     # entry in it makes the whole challenge fail client-side validation. The
     # rail is still machine-readable, one key over.
+    # 2026-09-06: the subscription tiers are retired, so a configured Stripe
+    # key no longer advertises a subscription-backed key rail anywhere -- a
+    # rail whose checkout refuses is a rail that cannot settle.
     rail = next((a for a in body["other_rails"] if a["protocol"] == "api_key"), None)
-    assert rail is not None, "a configured key rail is missing from other_rails"
+    assert rail is None, "a retired subscription rail is still advertised in other_rails"
     assert not any(a.get("protocol") == "api_key" for a in body["accepts"]), (
         "a non-x402 rail in accepts[] makes the 402 unpayable by every "
         "conforming client"
     )
-    assert rail["send_via_header"] == "X-API-Key"
-    assert rail["price_usd"] == body["price_usd"], "the rail must quote this route's price"
 
     manifest = TestClient(module.app).get("/.well-known/agent.json").json()
-    assert "stripe_api_key" in manifest["payment"]["methods"]
-    assert rail["method"] == "stripe_api_key", (
-        "the rail's name must match the one agent.json publishes"
+    assert "stripe_api_key" not in manifest["payment"]["methods"], (
+        "agent.json and the 402 must agree: no subscription rail is for sale"
     )
 
 
@@ -4256,13 +4140,14 @@ def test_a_key_doorway_is_named_only_where_a_key_can_be_bought(monkeypatch):
     body = client.post("/audit", json={"url": "https://example.com"}).json()
     assert body["alternative"]["header"] == "X-API-Key"
     assert "get_one" not in body["alternative"]
-    assert "checkout" not in client.get("/.well-known/agent.json").json()["pricing"]["human_plans"]
+    assert "human_plans" not in client.get("/.well-known/agent.json").json()["pricing"]
 
+    # Even with billing configured: the tiers are retired (2026-09-06), so
+    # no surface may point at a checkout that refuses.
     monkeypatch.setattr(module.billing, "is_configured", lambda: True)
     body = client.post("/audit", json={"url": "https://example.com"}).json()
-    assert body["alternative"]["get_one"].endswith("/billing/checkout")
-    plans = client.get("/.well-known/agent.json").json()["pricing"]["human_plans"]
-    assert plans["checkout"].endswith("/billing/checkout")
+    assert "get_one" not in body["alternative"]
+    assert "/billing/checkout" not in client.get("/.well-known/agent.json").text
 
 
 def test_openapi_prices_the_x402_rail(monkeypatch, load_main_fresh):
@@ -4338,3 +4223,54 @@ def test_the_revenue_line_survives_the_default_log_level(monkeypatch):
         assert root.isEnabledFor(logging.INFO), "INFO lines are still dropped"
     finally:
         root.setLevel(previous)
+
+
+# --- 2026-09-06: the human tiers are retired ---------------------------------
+
+
+def test_no_human_tier_is_advertised_on_any_served_surface(monkeypatch):
+    """Owner's call: nobody pays $79 a month when a scan is cents. Every
+    surface a buyer or an agent reads must say per-call only."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.billing, "is_configured", lambda: True)
+    client = TestClient(module.app)
+
+    manifest = client.get("/.well-known/agent.json").json()
+    assert "human_plans" not in manifest["pricing"]
+    assert "stripe_api_key" not in manifest["payment"]["methods"]
+    assert module.billing.human_plans_live() == []
+
+    for path in ("/", "/llms.txt"):
+        text = client.get(path).text
+        for price in ("$29.99", "$79", "$249", "per site watched", "plan-btn", "human plan"):
+            assert price not in text, f"{path} still shows {price!r}"
+
+    challenge = client.post("/audit/wcag", json={"url": "https://example.com"}).json()
+    assert "human plan" not in challenge["alternative"]["detail"]
+    assert not any(r["protocol"] == "api_key" for r in challenge["other_rails"])
+
+    docs_page = (REPO_ROOT / "docs" / "index.html").read_text()
+    assert "$249" not in docs_page and "Plans" not in docs_page
+
+
+def test_checkout_refuses_a_plan_now_that_the_tiers_are_retired(monkeypatch, load_main_fresh):
+    """A configured Price ID for a retired plan is not an offer."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro")
+    monkeypatch.setenv("STRIPE_PRICE_AGENCY", "price_agency")
+    monkeypatch.setenv("STRIPE_PRICE_ONEOFF_REPORT", "price_report")
+    module = load_main_fresh("wcag_audit_main_retired_plans")
+    client = TestClient(module.app)
+
+    assert module.billing.plan_available("pro") is False
+    assert module.billing.oneoff_report_available() is False
+    response = client.post("/billing/checkout", json={"email": "b@example.com", "plan": "pro"})
+    assert response.status_code == 400
+    assert "retired" in response.json()["detail"]
+    response = client.post("/billing/report", json={"email": "b@example.com", "url": "https://example.com"})
+    assert response.status_code == 501

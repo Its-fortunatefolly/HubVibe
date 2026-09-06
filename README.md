@@ -205,8 +205,9 @@ At the repo root:
 
 ## For people, not pipelines
 
-The machine API is the product. There is also a website for humans who want a
-report rather than an integration — priced per site watched, not per scan.
+The machine API is the product, and per call is the only price: there are no
+subscriptions or human plans (retired 2026-09-06). A person can pay the same
+per-call rates through a $0.50 prepaid block where the MPP top-up rail is live.
 There is deliberately **no free scan**: an audit costs a real browser page
 load, so giving them away funds strangers' compute and invites abuse.
 

@@ -51,9 +51,9 @@ inputs:
       402 per call via x402 -- no account, no checkout, no subscription. Costs
       $0.03 a run ($0.10 for the bundle) and settles in seconds.
 
-      This exists because requiring a subscription before the first useful run
-      is an adoption wall: a CI step whose first execution fails and asks for
-      $29.99 gets deleted on the next push. With a wallet the pipeline funds
+      This exists because requiring an account before the first useful run is
+      an adoption wall: a CI step whose first execution fails and asks for a
+      signup gets deleted on the next push. With a wallet the pipeline funds
       itself once and simply works, which is the whole point of a machine-payable
       API.
 

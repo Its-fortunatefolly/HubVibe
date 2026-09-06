@@ -256,3 +256,64 @@ def test_the_affirmed_wallets_match_the_handoff_record():
     assert STRANGER.lower() not in text.lower().replace("owner_wallets", ""), (
         "a refused address must never appear in the owner list"
     )
+
+
+def _serve_rpc(balance_units=2_000_000, refuse_python_ua=True):
+    """A fake Base RPC that behaves like mainnet.base.org's edge: HTTP 403
+    to Python's default User-Agent, a balance to anyone who names itself."""
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        seen = []
+
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            self.rfile.read(length)
+            ua = self.headers.get("User-Agent") or ""
+            Handler.seen.append(ua)
+            if refuse_python_ua and ua.startswith("Python-urllib"):
+                raw = b"forbidden"
+                self.send_response(403)
+            else:
+                raw = json.dumps({"jsonrpc": "2.0", "id": 1, "result": hex(balance_units)}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}", Handler
+
+
+def test_the_chain_is_read_through_an_edge_that_refuses_pythons_default_user_agent(tmp_path):
+    """2026-09-06: from the owner's Cloud Shell the script said 'RPC
+    unreachable' while curl read the same endpoint fine. mainnet.base.org
+    answers 403 to 'Python-urllib/3.x'. The script must name itself."""
+    node, base = _serve(pay_to=OWNER_PRIMARY)
+    rpc, rpc_url, handler = _serve_rpc(balance_units=2_000_000)
+    try:
+        result = _run(base, tmp_path, extra_env={"BASE_RPC": rpc_url})
+    finally:
+        node.shutdown()
+        rpc.shutdown()
+    out = result.stdout
+    assert "could not read the chain" not in out, out
+    assert "2.00" in out, "the $2.00 balance the RPC served must be printed"
+    assert handler.seen and not any(ua.startswith("Python-urllib") for ua in handler.seen), handler.seen
+
+
+def test_a_dead_first_rpc_falls_through_to_the_next(tmp_path):
+    node, base = _serve(pay_to=OWNER_PRIMARY)
+    rpc, rpc_url, _ = _serve_rpc(balance_units=500_000)
+    try:
+        result = _run(base, tmp_path, extra_env={"BASE_RPC": f"http://127.0.0.1:9,{rpc_url}"})
+    finally:
+        node.shutdown()
+        rpc.shutdown()
+    assert "could not read the chain" not in result.stdout, result.stdout
+    assert "0.50" in result.stdout
