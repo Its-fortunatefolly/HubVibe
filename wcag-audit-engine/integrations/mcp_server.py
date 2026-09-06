@@ -32,13 +32,27 @@ import os
 import httpx
 from mcp.server.mcpserver import MCPServer
 
+try:
+    # mcp 2.x: only a ToolError's message reaches the client. Any other
+    # exception is masked to "Error executing tool <name>", which hid the
+    # payment hint below from every Claude Desktop user without a key.
+    from mcp.server.mcpserver.exceptions import ToolError
+except ImportError:  # pragma: no cover - older mcp
+    try:
+        from mcp.server.fastmcp.exceptions import ToolError
+    except ImportError:
+        ToolError = RuntimeError
+
 HUBVIBE_BASE_URL = os.environ.get(
-    "HUBVIBE_BASE_URL", "https://hubvibe-831480473793.us-south1.run.app"
+    "HUBVIBE_BASE_URL", "https://hubvibe-io.com"
 )
+
+# Kept equal to SERVICE_VERSION / server.json / mcp.json by a test.
+VERSION = "1.2.0"
 
 server = MCPServer(
     name="hubvibe-site-audit",
-    version="1.0.0",
+    version=VERSION,
     description=(
         "Real, rule-based site compliance audits -- accessibility (axe-core), "
         "SEO, security headers, and performance. Deterministic checks only, "
@@ -50,7 +64,7 @@ server = MCPServer(
 def _call(path: str, url: str) -> dict:
     api_key = os.environ.get("HUBVIBE_API_KEY")
     if not api_key:
-        raise RuntimeError("Set HUBVIBE_API_KEY before calling this tool")
+        raise ToolError("Set HUBVIBE_API_KEY before calling this tool")
     response = httpx.post(
         f"{HUBVIBE_BASE_URL}{path}",
         json={"url": url},
@@ -58,7 +72,7 @@ def _call(path: str, url: str) -> dict:
         timeout=60.0,
     )
     if response.status_code == 402:
-        raise RuntimeError(
+        raise ToolError(
             f"Payment required: {response.json()}. Set a valid HUBVIBE_API_KEY, "
             "or use the x402/mppx client libraries to pay per-call instead."
         )

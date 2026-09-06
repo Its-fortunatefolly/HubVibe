@@ -454,3 +454,15 @@ def test_x402_alone_satisfies_the_machine_rail_check(tmp_path):
     )
     assert "a machine payment rail is live: x402" in result.stdout
     assert "FAIL|" not in result.stdout
+
+
+def test_the_checker_proves_the_deployed_node_refuses_internal_targets():
+    """A node that fetches 169.254.169.254 or its own loopback on request is a
+    free proxy into the deployment. The live checker must ask, for each of
+    the three canonical internal targets, and demand a 400."""
+    text = SCRIPT.read_text()
+    block = text[text.index("Target URL gate"):]
+    for internal in ("169.254.169.254", "127.0.0.1", "metadata.google.internal"):
+        assert internal in block, f"the checker never probes {internal}"
+    assert '"400"' in block
+    assert "ALLOW_PRIVATE_TARGETS" in block, "the fix for a failing gate is not named"

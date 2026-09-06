@@ -9,6 +9,1145 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-06: the audit before real money -- a v1 payer was being turned away, and 12 smaller truths
+
+Owner: "make sure everything is done correctly." Two adversarial auditors
+(a live node, a stub facilitator with injected failures, the official x402
+2.22 client, captured verify bodies) read the x402 HTTP and MCP paths;
+every finding was then reproduced or refuted by hand. The shipped container
+image was built from the real Dockerfile steps and PAID, three ways, with
+real signatures against a stub facilitator (`scratchpad rehearse_paid.py`,
+23/24 before the last fix, 24/24 after).
+
+**The high one.** The 402 body advertises an x402 **v1** `accepts[]` entry
+(legacy network name "base", `maxAmountRequired`) for pre-v2 clients, but
+every payment -- v1 included -- was verified and settled against the **v2**
+requirements object (`eip155:8453`, `amount`). A facilitator routes by the
+payload's version and hands a v1 payload to its v1 verifier, which reads
+v1 fields off the requirements; it got v2 ones and refused. So any agent on
+a pre-v2 x402 SDK signed a valid authorization to the right wallet and got
+a bare 402 every time -- a rail advertised that could not settle, invisible
+to the simulation because it only ever paid via v2. Fix
+(`x402_payments._get_requirements_v1`): a v1 payload is verified against a
+`PaymentRequirementsV1` built from the same `accepts_entry()` the 402 sent
+(the route's `resource_url` now reaches `verify_only_sync`). The simulation
+has a v1 leg (48 checks, was 44) and the shipped image served a v1 payer
+with an `X-PAYMENT-RESPONSE` receipt.
+
+**Beside it, all fixed and each proved red-then-green (23 mutations):**
+- Every payload is compared to the challenge BEFORE the facilitator is
+  asked (`_payload_mismatch`; v2 via the library's
+  `find_matching_requirements`, v1 by recipient and value). A $0.03
+  signature sent to the $0.10 bundle is refused as `payment_mismatch`
+  without a round trip.
+- A refused payment's 402 now says why: `error` is the facilitator's
+  `invalid_reason` (or `payment_replayed` / `payment_mismatch` /
+  `invalid_payment_payload` / `facilitator_unavailable`), with
+  `error_detail`, `billed: false`, the same `error` in the v2 header, and
+  `Retry-After: 30` only when the facilitator, not the payer, failed. The
+  MCP paywall carries the same reason. (`x402_payments.last_rejection()`,
+  thread-local.)
+- Settlement is reported honestly. `settlement_pending` with a transaction
+  is "pending" (receipt WITH the hash, `billing_warning` names it, log
+  `x402 settle PENDING`); a settle timeout is "unknown" ("do not re-pay");
+  only a real refusal is "not charged". `PendingPayment.settle_state`.
+- Request bodies are capped: `MAX_REQUEST_BYTES` (4 MiB) enforced by a
+  pure-ASGI middleware (Content-Length, and counted for chunked) -> 413,
+  JSON-RPC-shaped on /mcp; mirrored in the Caddyfile (`request_body
+  max_size 4MB`). A 300 MB unpaid POST used to take the worker to ~1 GB
+  RSS; three would OOM the 3 GB container.
+- /mcp: a 429 is a "wait" (`error: rate_limited`, Retry-After 60), not a
+  PaymentRequired an x402 client would pay and be refused again; malformed
+  shapes (arrays, non-object params/arguments, non-string url) answer
+  -32600/-32602 instead of HTTP 500; invalid JSON answers -32700 in
+  JSON-RPC shape; MPP rails (header-borne, unusable over MCP) are filtered
+  out of the MCP paywall.
+- The body's `html`-or-`url` check runs BEFORE payment (`_reject_missing_input`);
+  it used to burn a facilitator verify and the nonce. 400s and 502s carry
+  `billed: false` and say "Nothing was charged".
+- `alternative.get_one` and agent.json `human_plans.checkout` name
+  /billing/checkout only when Stripe billing is configured (it answers 501
+  otherwise). openapi.json carries an x402 offer per paid route
+  (`x402_payments.discovery_offer`) -- the x402-only deploy read as free.
+- `integrations/mcp_server.py` (stdio): version 1.2.0 (was 1.0.0) and
+  `ToolError`, so mcp 2.x delivers the payment hint instead of masking it.
+- **Revenue lines were invisible.** `x402 SETTLED` is INFO; the root logger
+  defaulted to WARNING and the rehearsal's `docker logs` showed zero after
+  three paid calls. main.py now sets the root to `LOG_LEVEL` (INFO).
+- Deploy: the Caddyfile serves `www.{$DOMAIN}` as a redirect to the apex
+  (the runbook says to point both records; Caddy refused www before) and
+  its comment is corrected -- measured on Caddy 2.10, a spoofed
+  X-Forwarded-For from a stranger is REPLACED with the real address, which
+  is what `_client_ip` reads at depth 1. `scripts/vps-install.sh` refuses
+  to run inside Google Cloud Shell (`CLOUD_SHELL=true` /
+  `DEVSHELL_PROJECT_ID`): the owner pasted it there once.
+
+**Rehearsed on the shipped image** (Playwright base, real requirements,
+`docker run` with the compose env): boots in ~16 s, healthcheck command
+works, no warnings, every discovery surface says hubvibe-io.com, 92 MiB
+idle / 278 MiB after three paid audits, SQLite volume writable. Against a
+stub facilitator: v2 paid + PAYMENT-RESPONSE, v1 paid + X-PAYMENT-RESPONSE,
+MCP paid + `_meta` receipt, Bazaar catalogued `/audit/wcag` and `/mcp`
+under the domain, replay refused as `payment_replayed`, cross-route
+signature refused as `payment_mismatch` without a facilitator call,
+`payment-status.sh` read it as "x402 is LIVE / the node pays YOU".
+`verify-live.sh` could not connect from this sandbox's shell (curl, every
+check 000) -- not evaluated here; it is for the deployed HTTPS node.
+
+**Not covered** (the audit's other eight lenses hit the account's usage
+limit; done by hand where cheap): SQLite keystore vs every Firestore call
+site (the existing 13 tests + 16-thread race stand), a full security sweep
+beyond the body cap, the identity grep (done: every living surface serves
+the domain), docs (this entry + deploy README). Suite: 698 passed /
+1 skipped, lint 0.
+
+**World state, 2026-09-06:** PR #96 merged. The owner has PAID the Google
+billing hold -- so the idle Cloud Workstations meter can bill again the
+moment the cluster exists: `DELETE_IDLE=1 bash scripts/cost-sweep.sh` is
+now the FIRST command, before any hosting decision. No VPS bought yet.
+hubvibe-io.com and www resolve to 2.57.91.91 (Hostinger parking). The old
+Cloud Run service may serve again now that billing is live; check its
+recipient with `BASE=https://hubvibe-831480473793.us-south1.run.app bash
+scripts/payment-status.sh` before anything advertises it.
+
+## 2026-09-05, night: one command answers "what is the money doing"
+
+Owner asked for a shell command that reports the payment state.
+`scripts/payment-status.sh` — read-only, runs from any machine with curl +
+python3 (Cloud Shell, the VPS, a laptop), no checkout needed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Its-fortunatefolly/HubVibe/main/scripts/payment-status.sh | bash
+```
+
+Four sections, in the order that decides whether a dollar can move:
+
+1. **WALLETS** — USDC balances of BOTH affirmed wallets, read off Base by
+   `eth_call` to the USDC contract. x402 revenue lands on-chain and never
+   appears in Stripe, so this is the revenue counter. An unreadable RPC
+   degrades to a Basescan link and **must never read as zero** (mutation-proved).
+2. **NODE** — health, then a real unpaid POST to `/audit/wcag`: the price,
+   the recipient, the network, whether the v2 PAYMENT-REQUIRED header is
+   present, which other rails are offered, and whether a Bazaar record rides
+   the 402.
+3. **THE MATCH** — is the recipient the node advertises actually one of the
+   owner's affirmed wallets? This is the section that matters. The 2026-08
+   failure (an unidentified address deployed for weeks) passed every format
+   gate; shape is not ownership. A non-affirmed address is a loud STOP that
+   also blocks the "nothing structural" verdict.
+4. **PAYER** — can the first paid call be made from here: is there a key
+   file, does its wallet hold ≥ $0.03 USDC on Base, and is it (wrongly) one
+   of the receiving wallets — a self-transfer proves nothing.
+
+Ends with a one-line verdict naming the exact next command for whichever
+state it found.
+
+Ten tests drive the REAL script against a fake node serving a real-shaped
+402 (owner wallet / alternate wallet / stranger wallet / no-x402 / dead
+node). Six mutations, each proved red — including one that first survived:
+a spelling-based key-leak check let `print(open(WALLET_FILE).read())`
+through, so it now asserts the FLOW invariant (every read of the wallet file
+must feed straight into `Account.from_key`, nowhere else). Suite 664 passed
+/ 1 skipped, lint 0.
+
+## 2026-09-05, evening: THE IDENTITY IS NOW A DOMAIN THE OWNER OWNS — hubvibe-io.com
+
+The owner bought **hubvibe-io.com** and confirmed the receiving wallet
+stays their Base wallet (`0x837C…77dd`). Every living surface now names
+the domain instead of the Cloud Run URL — 54 replacements across main.py's
+PUBLIC_BASE_URL default, server.json (all three URLs), every static
+discovery file (llms.txt, robots.txt, sitemap.xml, index.html, mcp.json),
+all three integrations' defaults, six scripts' BASE defaults, action.yml
+(both spots), README, and docs/index.html. docs/HANDOFF.md history is
+deliberately untouched — old entries describe the old world.
+
+`SERVICE_VERSION`, `server.json` and the static mcp.json move together to
+**1.2.0** (a host move is an identity change, and the registry republish
+needs a version it has never served; the three-way test pins them equal).
+
+**DNS observed from the sandbox:** hubvibe-io.com already resolves, to
+`2.57.91.91` — either registrar parking or hosting the owner bought; the
+sandbox egress policy blocks probing it, so which one is unverified. If
+that IP is NOT the owner's box, the A record must be repointed to the VPS
+before `vps-install.sh` (Caddy can only get a certificate once the name
+reaches the box).
+
+**Two consequences, both queued, neither yet done:**
+1. The ACTION repo (`hubvibe-audit-action`) still defaults `base-url` to
+   the run.app URL. Regenerate with `scripts/publish-action-repo.sh` and
+   push its main + retag v1/v1.0.0 (owner-side in Cloud Shell if the git
+   proxy still drops tag refs).
+2. The MCP registry still serves the run.app entry; republish server.json
+   1.2.0 (`./mcp-publisher publish`, human browser login).
+
+Old URL note: the run.app URL keeps working whenever the Cloud Run service
+serves again (PUBLIC_BASE_URL is set per-deploy), but nothing advertises
+it anymore. The domain is the identity; hosts change with a DNS record.
+
+## 2026-09-05, later: OWNER AFFIRMED BOTH WALLETS — do not re-open recipient identity
+
+Stated directly by the owner, in one exchange, so this is settled fact and
+not to be re-litigated (recipient-identity confusion has already cost this
+project a full fire drill — see 2026-08-29 "the x402 recipient is
+UNIDENTIFIED"):
+
+- `0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd` (`hubvibe.base.eth`) —
+  **the owner's**, affirmed again 2026-09-05. Stays the default pay-to
+  everywhere. All x402 revenue lands here.
+- `0x37555E884c5EbA10f6E816DbecEA30965B9b38C0` — **also the owner's**
+  (their Coinbase/Base app; EIP-55 checksum verified programmatically).
+  A valid alternate recipient: switching to it is one override,
+  `X402_PAY_TO_ADDRESS=0x37555E884c5EbA10f6E816DbecEA30965B9b38C0`, on
+  go-live.sh or vps-install.sh. Not on any blocklist.
+
+The owner also holds a Solana address (`22FwA5g…nNTSv`) and a Bitcoin
+address (`bc1q8s6…7n3gw`). **Neither can receive USDC on Base** — x402 on
+this node pays an EVM address on Base mainnet only; funds sent to the SOL
+or BTC address on the wrong network are unrecoverable. The UUID the owner
+pasted alongside is a Coinbase internal account id, not a chain address.
+
+## 2026-09-05: the node can now run OFF Google entirely — one command on any flat-rate box
+
+Context, owner-stated: billing on `resolver-time` cannot be re-enabled (the
+~$194/month Cloud Workstations charge — see the 2026-09-04 correction — is
+disputed/unpaid). Owner asked whether to move off Cloud Run and said ok to
+building it. The strategic read, recorded so it is not re-litigated: **the
+host was never the constraint** — moving does not create demand; it makes
+the node live without Google's permission and caps the only cost class that
+ever hurt this project (metered billing). The identity fix is the domain,
+not the host: once every manifest advertises a domain the owner controls,
+changing hosts is a DNS record. Returning to Cloud Run later (right shape
+once traffic is real and spiky) is: deploy there, flip the A record.
+
+**What was blocking a non-Google deploy, and what closed it:** the per-call
+rails (x402, MPP) never touched Google, but the API-key store — subscriber
+keys, the prepaid balances the MPP top-up SELLS, monthly quotas, one-off
+reports — was Firestore-only, so the top-up rail would take $0.50 and be
+unable to write the key it just sold. Closed with
+`app/keystore_sqlite.py`: a shim implementing exactly the Firestore
+surface billing.py uses (documents, add, snapshot semantics including
+`.get(field)` raising KeyError like the real client, transactions with
+update/set-merge), selected by `KEY_STORE=sqlite`
+(`KEY_STORE_SQLITE_PATH`, default `/data/hubvibe-keys.db`). Transactions
+run under `BEGIN IMMEDIATE`, so two concurrent debits of one key serialize
+— proved with a 16-thread race on a balance covering 8: exactly 8 win.
+billing.py keeps ONE code path; the two transactional spots route through
+`_run_transactional`, which uses the store's own runner for SQLite and
+Firestore's `transactional` otherwise. Firestore remains the default; an
+unknown backend raises instead of guessing.
+
+**The deploy stack — `deploy/vps/`:** compose file (service + Caddy 2 for
+automatic Let's Encrypt TLS), `Caddyfile`, `.env.example`, and
+`scripts/vps-install.sh`. The installer validates the x402 recipient
+BEFORE touching Docker — same gates as go-live.sh: 0x+40-hex shape, the
+zero address refused, both UNAFFIRMED addresses refused by name; "Nothing
+was installed" on refusal. Then: Docker via get.docker.com if absent,
+`.env` written mode 600 (never overwritten on re-run — it may hold live
+Stripe keys; only DOMAIN is updated), compose up, health-wait, and it
+prints the DNS step and the first-paid-call command. Stripe rails ride
+along only when their vars are exported in the installing shell; absent
+they stay off, fail-closed as everywhere. `RATE_LIMIT_PROXY_DEPTH=1`
+matches Caddy (it appends the client to X-Forwarded-For). The SQLite path
+sits on a named volume — a test pins that, because balances on a container
+filesystem are destroyed by every restart. `mem_limit: 3g` so Chromium
+under pressure restarts the container, not the box.
+
+**The owner's whole runbook** (also in `deploy/vps/README.md`): buy a
+domain, point an A record at the box, then on the box:
+`git clone … && cd HubVibe && bash scripts/vps-install.sh yourdomain.com`,
+then from anywhere `BASE=https://yourdomain.com bash scripts/first-paid-call.sh`.
+A 4 GB box runs `MAX_CONCURRENT_AUDITS=2` ≈ 30–50k audits/day of capacity.
+
+Tests: 13 keystore (real billing functions against the real file, no fakes
+— including the wire-level proof: a prepaid key issued into SQLite buys
+exactly two $0.03 calls through the real `/audit/wcag` route and is 402'd
+on the third) + 15 deploy-stack (the installer driven for real through
+every branch that runs without Docker, compose/Caddyfile parsed not
+grepped). Nine mutations, each red: DEFERRED transactions (race),
+snapshot.get returning None (quota silently unenforced), the balance check
+dropped (overdraft), update-as-replace (second spend of a funded key
+refused), the zero-address and unaffirmed gates disabled, the SQLite path
+off the volume, the env file left world-readable, a re-run rewriting .env.
+Existing fake-Firestore billing tests untouched and green.
+
+**Also recorded, owner-side, about the $200:** the debt lives on the
+billing ACCOUNT, not the project — a new billing account can be linked
+(`gcloud billing projects link resolver-time --billing-account=NEW`), and
+Google billing support (free, no support plan) routinely credits idle-
+resource charges; the Workstations control-plane fee for a cluster never
+used is the strongest such case. Worth filing in parallel; no longer the
+blocker either way.
+
+## 2026-09-04, evening: the MCP paywall could not be paid by any x402 MCP client, and five more ways a payer was turned away
+
+Owner's instruction: make sure the 402, the facilitator and the wallet are
+ready, money lands right, nobody gets turned away. Everything below was
+found by driving the CURRENT x402 client library (2.22.0, the one an agent
+installs today) against the node, not by reading; every fix was proved by
+putting the bug back and watching its test go red, and the end-to-end
+simulation now drives the MCP paid path too.
+
+**1. The MCP paywall was unpayable by every conforming x402 MCP client.**
+The x402 MCP protocol (`x402.mcp` in the library — server wrapper and client,
+identical in 2.18 and 2.22) is precise and it is NOT the HTTP 402 shape: a
+paywalled tool result is `isError: true` with a **v2** `PaymentRequired` in
+`structuredContent`; the client signs for `accepts[0]` and retries with the
+`PaymentPayload` in `params._meta["x402/payment"]`; the settlement comes back
+in the result's `_meta["x402/payment-response"]`. This node served the REST
+402 body (v1, v1 `accepts[]`) as text, and read payments ONLY from HTTP
+headers — which an MCP client cannot send. So a v2 MCP client either parsed
+the text as v1 and signed a v1 payment, or found no v2 challenge; whatever it
+signed went into `_meta`, which nothing here read; it got the same paywall
+back and gave up. From this side: no MCP agent ever called. Same fault as
+#61, one transport over. Proved by simulation on the pre-fix node: the
+x402-shaped MCP payment is re-challenged (`isError=True`), no verify, no
+settle, no receipt, and the tool indexed in the Bazaar as the HTTP route
+rather than as an MCP tool.
+
+Fixed: `_mcp_payment_required()` builds the v2 challenge from the SAME
+builder the HTTP header uses (`x402_payments.payment_required_v2`, so the
+two transports cannot quote different prices or recipients) into
+`structuredContent` and the text; `resource.url` is `/mcp` (what an agent
+that finds the tool in the Bazaar connects to) and the discovery record
+names the tool and its transport. `payment_header_from_meta()` re-encodes
+the `_meta` payload into the header form so the ONE verify path (nonce
+ledger, facilitator loop, logging) serves both transports; an explicit header
+still wins. `receipt_meta()` puts the SettleResponse under
+`_meta["x402/payment-response"]`, beside the header copy. The LLM-facing
+keys (`message`, `price_usd`, `other_rails`, `docs`) survive — the x402
+models ignore unknown fields. With x402 off, `accepts` is empty and the
+client correctly reads "nothing here I can pay".
+
+**2. Browser-resident agents could not read the x402 challenge or their
+receipt.** CORS exposed only `WWW-Authenticate` and `Cache-Control`. A
+browser strips every other response header from a cross-origin response
+before script sees it, so a browser x402 client never saw `PAYMENT-REQUIRED`
+(silently downgraded to the v1 body at best) and never got
+`PAYMENT-RESPONSE` (its transaction hash), nor `Retry-After` on a 429. All
+four are exposed now.
+
+**3. Every unkeyed caller shared ONE rate-limit bucket.** The limiter keyed
+x402/MPP payers and unpaid 402 reads on `request.client.host` — the TCP
+peer, which on Cloud Run is the platform's front-end proxy, one address for
+every caller on earth. Past ten unpaid reads a second per instance, paying
+agents got 429s for traffic that was not theirs. `_client_ip()` now keys on
+the address the platform appended to `X-Forwarded-For` (the last entry;
+`RATE_LIMIT_PROXY_DEPTH=2` behind an external load balancer). Anything a
+client prepends is ignored — a client cannot append after the platform.
+
+**4. Discovery queued behind Chromium.** `MAX_CONCURRENT_AUDITS` caps
+anyio's thread pool and every SYNC route ran in it, so with four audits in
+flight `/health`, `/.well-known/agent.json`, `/mcp.json` and the MCP
+`initialize` waited on a stranger's page load — and a health probe that
+times out marks an instance unhealthy at exactly the moment it is earning.
+The discovery routes and the MCP handshake are coroutines now; only
+`tools/call` (`_mcp_tools_call`) goes to the pool.
+
+**5. A paid MCP result was thrown away by the official MCP SDK — after the
+payment settled.** Every tool advertises an `outputSchema`, and the current
+MCP SDK client (`mcp` 2.1.1, `ClientSession.call_tool`, read off the wheel)
+enforces the spec's consequence on every non-error result: no
+`structuredContent` on a tool with an output schema → `RuntimeError` in the
+agent's process. Successful tool results here carried only text. So the
+order of events for an SDK-driven agent was: pay, audit runs, settle,
+client raises on delivery. Fixed: the result dict is the
+`structuredContent` (the text is the same JSON), and `impact`/`help` in the
+wcag schema are nullable because `v.get(...)` can be None — a strict client
+validating against the advertised schema must never reject a delivered
+audit over a value it was never told about. Error results (the paywall) are
+not validated by the SDK, which is why the v2 challenge may live in
+`structuredContent` there. Tested for all five tools against the real audit
+functions on offline inputs, validated with `jsonschema` the way the SDK
+does; the simulation validates the real paid wcag result the same way.
+
+**6. x402 pinned at 2.18.0 while agents run 2.22.0.** Bumped both
+`requirements.txt` to 2.22.0. Proved in all four combinations with the
+simulation's new `SIM_NODE_PYTHON`: 2.18 client → 2.22 node and 2.22 client
+→ 2.18 node both 43/43, so an agent on either library pays either node.
+2.22 also retries a `settlement_pending` settle once and reconciles a
+broadcast-but-unconfirmed transaction instead of re-broadcasting it.
+
+Suite: **read it off the run** (this entry's PR reports it). Lint gate 0.
+Simulation: **43 passed, 0 failed**, both with and without a Bazaar index —
+the 38 before plus the MCP leg: v2 challenge read from `structuredContent`
+by the library's own extractor, payment sent in `_meta`, verified and
+settled once, receipt in `_meta`, tool catalogued as an `mcp` Bazaar
+resource. Ten unit-level mutations and one simulation-level mutation, all
+red.
+
+**Still not code, still the owner's, and unchanged:** billing on
+`resolver-time`, then `bash scripts/launch.sh` (or `repair-and-deploy.sh`
+then `first-paid-call.sh`) from a checkout at or after this entry. The
+sandbox still cannot reach any facilitator host (every CONNECT is refused by
+the egress policy — checked, not assumed), so nothing here is a live fact.
+
+## 2026-09-04, CORRECTION from the billing report: the money was CLOUD WORKSTATIONS, not Cloud Run
+
+The owner opened the billing report. Read off the screen:
+
+> You spent $193.84 between Aug 1 – 31, 2026. This is the same amount from
+> Jul 1 – 31, 2026. Project HubVibe at $193.84 driven by $189.73 from Region
+> us-central1 and $93.71 from Cloud Workstations and $93.71 from SKU Cloud
+> Workstations control plane fee (us-central1)
+
+So the entry below this one is wrong in its first paragraph and this file
+must not repeat it: the charge was not the trial credit and not the warm
+Cloud Run instance. **A Cloud Workstations cluster in us-central1 billed
+about $6.25 a day, every day, for at least July and August — its control
+plane fee runs every hour the cluster exists whether or not a workstation
+is ever opened.** Nothing in this repo has ever used Cloud Workstations;
+the node runs in us-south1. The steady ~$9.80/day line on the chart is that
+cluster plus whatever else sits in us-central1. Cloud Run was a rounding
+error next to it.
+
+This also reframes `BILLING_DISABLED`: with real charges of ~$194/month and
+no revenue, the account was most likely suspended or the owner turned it
+off, not a trial ending. Either way, **re-enabling billing restarts that
+meter within the hour unless the cluster is deleted first.**
+
+Done, in code, so it happens in the right order:
+
+- `scripts/cost-sweep.sh` lists Cloud Workstations clusters (all regions),
+  Compute Engine VMs, Cloud SQL, GKE, and a warm Cloud Run instance; with
+  `DELETE_IDLE=1` it deletes workstations → configs → cluster and nothing
+  else; exits 1 while anything idle still bills.
+- `scripts/launch.sh` runs the sweep with `DELETE_IDLE=1` between the
+  checkout and the deploy. Billing on → junk gone → deploy → paid call, in
+  that order, from one line.
+
+Six tests; the delete-without-consent case proved red. The two guards in
+the entry below (instance cap 3, $5 budget alert) stand and now matter
+more, not less.
+
+## 2026-09-04, last: what the money actually was, and two guards so it cannot recur
+
+**SUPERSEDED — see the correction above. The billing report shows real
+charges from Cloud Workstations, not a spent trial credit.**
+
+**The "$300 bill" was almost certainly the free-trial credit, not cash.**
+Google's free trial is exactly $300. The #85 commit records the Cloud Run
+bill "reached $300 with zero revenue" from a warm instance; the trial ends
+when the credit is spent, and Google then disables billing on the project
+automatically — which is `reason: BILLING_DISABLED`, read off the screen
+today. So the likeliest state is: nothing owed, trial over, project dark.
+Only the billing page can confirm it
+(https://console.cloud.google.com/billing); this file cannot see it.
+
+**What re-enabling costs, at today's traffic: about $0.25/month.** Cloud
+Run's Always Free tier is 2M requests, 360k GiB-s and 180k vCPU-s a month;
+at min-instances 0 an idle node bills nothing. The only standing charge is
+Artifact Registry storing the ~2 GiB Playwright image past its 0.5 GiB free
+allowance. Cloud Build, Secret Manager, Firestore and Logging are inside
+their free tiers. Per paid audit, ~10 vCPU-s and ~10 GiB-s ≈ $0.0004
+against $0.03 charged, and the first ~18k audits a month are inside the
+free tier entirely.
+
+**Two guards, in code, so this is not a matter of remembering:**
+
+- `--max-instances` default lowered from 10 to **3**. It is the ceiling on
+  a bad day: three instances flat out are ~$12/day worst case under a flood
+  of free 402s, while 3 × 4 audits ≈ 2/s ≈ 170k audits/day ≈ $5k/day of
+  paid capacity — far more than needed until revenue exists.
+  `MAX_INSTANCES=n` raises it.
+- `repair-and-deploy.sh` now installs Google's own **budget alert**
+  (`hubvibe-spend-alert`, $5/month, email at 50% and 100%, scoped to the
+  project) on every run: idempotent, never blocks the deploy, names the
+  manual command when it cannot, and says plainly when no billing account
+  is linked. `SPEND_ALERT_USD=n` changes the amount. Proved by mutation:
+  making it fatal, removing the idempotence check, and restoring the cap
+  each turn a test red.
+
+## 2026-09-04, night: the paid path under LOAD — one bug that would have rejected half of all payers, and four gates a public tollbooth cannot ship without
+
+Owner's instruction: simulate, assess, fix, simulate again, no corners. So
+the paid path was attacked the way traffic attacks it, not the way one
+sequential call does. Every finding below was measured first, then fixed,
+then measured again; every test was proved red by putting its bug back.
+
+**1. Half of all concurrent payments were being rejected by this node, facilitator never asked.**
+The x402 facilitator client keeps one `httpx.AsyncClient` and reuses its
+pooled keep-alive connections. A pooled connection is bound to the event
+loop that opened it, and `_run_coro_sync` ran `asyncio.run()` — a fresh
+loop — per verify/settle. Against a keep-alive stub facilitator with 16
+concurrent payers: **56 of 96 payments failed** with `Event loop is closed`
+/ `bound to a different event loop`. The earlier simulation passed only
+because its stub spoke HTTP/1.0 and closed every connection — a stub easier
+on the code than any real facilitator. Fixed: every facilitator coroutine
+now runs on ONE long-lived loop on its own thread
+(`asyncio.run_coroutine_threadsafe`), bounded by
+`X402_FACILITATOR_CALL_TIMEOUT` (45s). 96/96 after. The stub now speaks
+HTTP/1.1 keep-alive and the simulation hammers the module from 16 threads
+on every run. This also closes #83 for good: the caller's thread never
+runs asyncio at all.
+
+**2. One signed payment bought N audits.** verify does not consume the
+EIP-3009 nonce; only settle does, and settle runs after the audit. Send the
+same signature N times at once: N verifies pass, N audits run, one settle
+succeeds, N−1 are "delivered, not paid". A payer whose settle failed once
+could re-send the same signature forever. Fixed: a per-node nonce ledger,
+admitted at first verify for the authorization's own validity window,
+released only when verify itself fails (a retry after an outage is
+legitimate), kept after a failed settle (no free second audit). Replay is
+refused with a WARNING and never reaches the facilitator. Per instance; the
+facilitator's own nonce check still bounds the cross-instance case to one
+unpaid audit per extra instance.
+
+**3. A facilitator outage was a node outage.** `_get_server()` fetched
+`/supported` under the module lock with the library's 30s timeout, and a
+failed init was retried on the very next request — so with the facilitator
+down every 402 waited up to 30s, serially. Fixed: `/supported` on an 8s
+timeout (`X402_SUPPORTED_TIMEOUT`), a 15s back-off after a failed init
+(`X402_FACILITATOR_RETRY_SECONDS`) during which x402 is simply not
+advertised — fail-closed, fast, MPP still on the 402. Measured: first 402
+during an outage 0.1s, second 0.00s.
+
+**4. The node was a proxy into its own network.** Every audit fetches the
+caller's URL from inside Cloud Run; nothing refused
+`http://169.254.169.254/`, loopback, the VPC, `file://`. Fixed: every
+`/audit*` route and the MCP `tools/call` resolve the hostname and refuse
+any non-globally-routable address, internal names, and non-http schemes
+with a 400 **before rate limiting and before any payment is read** — it
+costs the caller nothing and this node no facilitator call. Twenty-six unit
+cases including the DNS-rebinding shape (public name, private A record).
+`ALLOW_PRIVATE_TARGETS=1` exists for the local simulation only and
+`verify-live.sh` now fails if the deployed node fetches any of three
+internal targets. `verify-live.sh` was also the reason this was hard to see:
+it only ever asked whether routes answer, never what they would fetch.
+
+**5. `html` was unbounded.** A 2 MiB ceiling (`MAX_HTML_BYTES`) on the REST
+model (422) and the MCP argument (error result), both before payment.
+
+**6. Capacity was inherited, not chosen.** `gcloud run deploy --source`
+carried whatever the last revision had — Cloud Run's default is 512 MiB,
+which OOMs under concurrent Chromium contexts. The deploy now pins
+`--memory=2Gi --cpu=2 --concurrency=8 --max-instances=10 --timeout=120
+--cpu-boost` (each env-overridable). Idle cost is unchanged: min-instances
+stays 0 and these bill only while a request is in flight. `--max-instances`
+is the blast radius of a flood of free 402s; raise it when revenue says so.
+
+**7. Revenue is now countable in the log.** One INFO line per settlement:
+`x402 SETTLED (settle) price=… tx=… network=… payer=… amount=…`. "The
+wallet is the counter" stays true; this is what a log query sums per route
+and per hour.
+
+Simulation: **38 passed, 0 failed** — the original 22 plus replay refused,
+64/64 concurrent payments through the keep-alive stub, outage handled in
+0.1s, a second node with the gate on refusing six hostile URLs and an
+oversized body. Suite: read it off the run. Lint gate 0.
+
+**Still not code, still the owner's:** billing on `resolver-time`, then
+deploy, then `first-paid-call.sh`. Nothing above changes that order.
+
+## 2026-09-04, later: ROOT CAUSE — BILLING IS DISABLED ON `resolver-time`. Nothing on it serves.
+
+The owner ran the direct command and read it off the screen:
+
+```
+gcloud secrets list --project=resolver-time
+ERROR: (gcloud.secrets.list) [ladywikert@gmail.com] does not have permission to
+access projects instance [resolver-time] (or it may not exist): This API method
+requires billing to be enabled. Please enable billing on project #resolver-time
+by visiting https://console.developers.google.com/billing/enable?project=resolver-time
+  service: secretmanager.googleapis.com
+  reason: BILLING_DISABLED
+```
+
+**One cause, every symptom.** Billing off on the project shuts Secret Manager
+(the deploy stop), Cloud Run (the node stops serving, which is the non-JSON
+page the paid call read), and anything else billable. It is not IAM, not the
+project setting, not the code, and not a cold start. Nothing deploys and no
+agent can pay until a billing account is linked again:
+
+```
+https://console.developers.google.com/billing/enable?project=resolver-time
+```
+
+Google words this as a permission error, so the hint added earlier today
+would have matched its PERMISSION_DENIED branch and sent the owner to IAM.
+`repair-and-deploy.sh` now matches `BILLING_DISABLED` first and prints the
+billing console link. One test, proved red by removing the case.
+
+**Why it matters beyond today:** a billing lapse is silent from the outside.
+The URL stays, `verify-live.sh` from a stale checkout would read the error
+page as "node down", and every agent that arrived would bounce — the #61
+shape again, caused by the account rather than the code. Whatever caused the
+lapse (card expired, account closed, free-trial credit exhausted) is in the
+Cloud Billing console, and is worth a calendar reminder.
+
+**Then, in order, one line at a time:** link billing → wait ~5 minutes →
+`bash scripts/repair-and-deploy.sh` (from a checkout at or after this
+entry) → `bash scripts/first-paid-call.sh`.
+
+**Also done the same night, on GitHub, at the owner's instruction:**
+
+- #86 and #87 are merged; `main` carries the simulation, the receipt, and
+  the diagnostics above.
+- **The Action repo was two features behind.** `diff -r` of a fresh
+  `scripts/publish-action-repo.sh` output against
+  `Its-fortunatefolly/hubvibe-audit-action` showed it had never received the
+  x402 path: no `wallet-key` / `max-price-usd` inputs, no
+  `scripts/x402_pay.py`, no "pay per run without an account" section. So
+  `@v1` could only run with a subscription key. Its `main` is now `075358a`,
+  generated verbatim from HubVibe `d247945`, diff clean.
+- **The `v1` and `v1.0.0` tags still point at `5e77da7`, the old main.**
+  The sandbox's git proxy silently drops every tag ref push (force, delete,
+  and even a brand-new tag all answer "Everything up-to-date" and change
+  nothing), so the tags could not be moved from here. Two lines for the
+  owner, in Cloud Shell, in the ACTION repo:
+
+  ```bash
+  cd ~ && (test -d hubvibe-audit-action || git clone https://github.com/Its-fortunatefolly/hubvibe-audit-action) && cd hubvibe-audit-action && git fetch origin main
+  git tag -f -a v1 -m v1 origin/main && git tag -f -a v1.0.0 -m v1.0.0 origin/main && git push -f origin v1 v1.0.0
+  ```
+
+  The push output must say `To https://github.com/Its-fortunatefolly/hubvibe-audit-action`.
+  A Release (Marketplace publish) is still UI-only.
+
+## 2026-09-04: the deploy and the paid call BOTH stopped, and BOTH hid the reason
+
+Owner ran the three commands after #86 merged. Read off the screenshot:
+
+```
+==> Checking the Stripe secret exists before pointing anything at it
+  STOP  gcloud lists NO secrets in project resolver-time -- it is not seeing the project.
+        Check:  gcloud config list
+        Then:   gcloud config set project resolver-time
+```
+
+then, with the node still on the old revision:
+
+```
+==> Reading the live 402 challenge from https://hubvibe-…/audit/wcag
+  STOP  the response was not JSON -- is the node up?
+```
+
+**Nothing was deployed, nothing was paid, and neither message names its
+cause.** The prompt read `(resolver-time)`, so the project WAS set; #80 made
+every gcloud call pass `--project`; and the script still printed the #80
+guess, because the secret-list branch sent gcloud's stderr to `/dev/null`
+and then reasoned about an empty string. Whatever gcloud actually said —
+a permission this account lacks on the project, the Secret Manager API
+disabled, an expired login — was discarded. The paid-call read did the
+same: `curl … 2>/dev/null` into a Python `json.load`, status and body
+dropped, one 30-second attempt. With min-instances 0 (#85) the first request
+after idle cold-starts a browser-sized container, which can outrun 30s, and
+Cloud Run answers with its own HTML page while it does. That page is the
+"not JSON".
+
+Fixed, both places, by showing what came back instead of guessing:
+
+- `repair-and-deploy.sh` keeps gcloud's stderr and prints it as
+  `gcloud said: …`, then picks the hint that matches it (PERMISSION_DENIED
+  → the IAM roles this account needs; API disabled → the `services enable`
+  line; reauth → `gcloud auth login`; project not found → `projects list`).
+  The `config set project` line is now only the fallback.
+- `first-paid-call.sh` reads the 402 with a 120s timeout and up to three
+  attempts on a 5xx or a timeout (this read is free; the payment is still
+  never retried — the no-loop test on the paying block still holds), and on
+  a non-JSON body prints the HTTP status and the first 200 characters of
+  what the node said, with the `gcloud run services describe` line when it
+  was a 5xx.
+
+Three tests, each proved red by putting the bug back. Simulation still
+22/22 through the new read path.
+
+**What the owner runs next, one line at a time.** First, see the real
+reason the deploy stopped — the script now prints it, but the direct
+command is:
+
+```bash
+gcloud secrets list --project=resolver-time
+```
+
+If that says `PERMISSION_DENIED`, the Cloud Shell account is not the one
+that owns `resolver-time` (or lost the role): grant `roles/secretmanager.viewer`
+and `roles/run.admin` to it in IAM, or switch accounts with
+`gcloud auth login`. If it says the API is disabled:
+`gcloud services enable secretmanager.googleapis.com --project=resolver-time`.
+Then re-run `bash scripts/repair-and-deploy.sh`, and only after it says
+deployed, `bash scripts/first-paid-call.sh`. The new read will wait through
+the cold start on its own.
+
+## 2026-09-03: THE WHOLE PAID PATH RAN, END TO END, WITH THE REAL LIBRARY. And the payer now gets a receipt.
+
+Every x402 test in `tests/` mocks the library's server object. So nothing
+had ever pushed a real signed EIP-3009 authorization through the real x402
+HTTP facilitator client into a facilitator and back out as a settled audit --
+which is exactly where #82 and #83 lived, and why two live attempts found
+them instead of a test. `scripts/simulate-paid-call.py` is that missing
+layer, and it is committed so it stays run:
+
+- boots the real service on localhost with the live x402 configuration
+  (`MAX_CONCURRENT_AUDITS=1`, one API-key audit first, so the paid call
+  lands on a Playwright-poisoned thread -- the #83 precondition);
+- points it at a stub facilitator that is **not a rubber stamp**: `/verify`
+  and `/settle` recover the EIP-712 signer from the signature (the x402
+  facilitator's own check, minus chain state), refuse a wrong recipient,
+  amount, or window, refuse a re-used nonce, and catalog the Bazaar record
+  only after the x402 library's own facilitator-side validator accepts it.
+  `/supported` mirrors what the owner read off xpay.sh, byte for byte;
+- drives it with `scripts/first-paid-call.sh` -- the owner's script, the
+  real client, a throwaway funded wallet (the stub also serves the balance
+  RPC so the check runs instead of skipping).
+
+**Result on current main: 22 passed, 0 failed.** `/supported -> /verify ->
+audit -> /settle`, once each, same signed payload both times, $0.03 to the
+configured recipient from a different payer, v2 header path, Bazaar record
+valid and indexed, no `asyncio.run()` error, no traceback. `--no-index`
+mirrors xpay's `{"message":"Not Found"}` and passes too. Run it before every
+deploy that touches payments:
+
+```bash
+python3 scripts/simulate-paid-call.py
+```
+
+(Needs the service deps and a Chromium Playwright can launch.)
+
+**The one thing it found: the node never returned the settlement receipt.**
+x402 spec step 10 puts the facilitator's settle response -- transaction
+hash, network, payer -- in the `PAYMENT-RESPONSE` header of the 200
+(`X-PAYMENT-RESPONSE` for v1). Every paid route returned a bare dict, so a
+paying agent got an audit and proof of nothing; the owner, after the first
+real payment, would have had to hunt a wallet app for the transfer. Now:
+
+- `settle_sync` keeps the `SettleResponse` on the pending payment;
+  `receipt_headers()` encodes it under both names via the library's own
+  encoder; `_deliver()` is the last line of all six paid routes and the
+  MCP tool call attaches it. No settlement, no header -- a receipt on a
+  refused settle would be a forged proof of payment. Never raises.
+- `hubvibe_tollbooth.py` keeps it as `booth.last_settlement`.
+- `first-paid-call.sh` prints `https://basescan.org/tx/<hash>` after a
+  settlement, and says plainly when the node sent no receipt (a deployed
+  revision that predates this).
+- `agent.json` `payment.receipt` tells payers where to look.
+
+Fifteen tests, each proved by reintroducing its bug: forgetting the settle
+result, never attaching the header, one route bypassing `_deliver`, the
+client dropping the receipt, the stub rubber-stamping signatures, the script
+not printing the link -- all red, then green. Suite: read it off the run.
+Lint gate 0.
+
+Also gone: `reg.sh` (a one-line Glama registration curl; Glama is done per
+the 2026-08-18 entry). `.sim-paid-call/` is the simulation's scratch dir and
+is gitignored.
+
+**What is left is unchanged and is not code:** deploy current `main`
+(`bash scripts/repair-and-deploy.sh`, from a checkout that has this entry),
+confirm the payer wallet holds USDC on Base at the Basescan link the script
+prints, then `bash scripts/first-paid-call.sh`. The receipt line it now
+prints is the proof. A rejection after that deploy carries the facilitator's
+reason in `bash scripts/x402-log.sh`. mcp.json / agent.json were re-read for
+crawler quality: every tool has title, description, strict input schema
+with examples, output schema, and annotations, and a test pins the static
+file to the live catalog -- nothing to change there.
+
+## 2026-09-02: THE REJECTION IS ROOT-CAUSED. The node killed its own verify on a poisoned thread.
+
+The #79 logging paid for itself on its first live outing. `x402-log.sh`,
+owner-run:
+
+```
+x402 verify FAILED before the facilitator could answer
+  (facilitator=https://facilitator.xpay.sh price=$0.03):
+  RuntimeError: asyncio.run() cannot be called from a running event loop
+```
+
+**Mechanism, reproduced deterministically, then fixed, then re-proven.**
+Playwright's sync API (`app/browser_pool.py`) keeps a running asyncio event
+loop in each worker thread for the lifetime of the pooled browser — that is
+how the sync API works — and anyio REUSES those threads. So any request that
+lands on a thread that has ever served an audit (even one whose browser
+launch failed, because `sync_playwright().start()` runs first) finds
+`asyncio.get_running_loop()` succeeding, and the bare `asyncio.run()` inside
+`verify_only_sync` raised before the facilitator was ever contacted. Bare
+402 to the caller, every time, whatever the wallet held.
+
+Why no simulation had caught it: none of them ran a real audit before the
+paid call, so no worker thread was poisoned. With `MAX_CONCURRENT_AUDITS=1`
+(one worker thread) it reproduces on the second request, byte-for-byte the
+live error, line 856 and all.
+
+Fixed with `_run_coro_sync()`: when the current thread hosts a running loop,
+the coroutine is handed to a fresh thread and `asyncio.run` there; otherwise
+plain `asyncio.run`. Applied to all three payment call sites — verify,
+settle (where this bug costs money directly: audit delivered, then settle
+dies), and the legacy verify+settle. An AST-counted test refuses any new
+bare `asyncio.run()` in the module.
+
+Proof: three in-loop tests plus the AST guard, red under the bare call and
+green under the fix; then the same poisoned-thread repro re-run — the stub
+facilitator RECEIVED `/verify` and the node logged the facilitator's own
+reason. **501 passed, 1 skipped**, lint 0.
+
+**With xpay.sh confirmed compatible (next entry) this was the last known
+in-code blocker on the paid path.** After deploying this, what remains is
+the wallet: fund the payer and run `first-paid-call.sh`.
+
+## 2026-09-02: OWNER READ xpay.sh /supported — it is COMPATIBLE. Do not re-litigate.
+
+The owner ran `curl -s https://facilitator.xpay.sh/supported` from Cloud
+Shell (the sandbox cannot; every facilitator host is egress-blocked). The
+response, read off the owner's screen:
+
+```json
+{"kinds":[
+  {"x402Version":2,"scheme":"exact","network":"eip155:8453"},
+  {"x402Version":2,"scheme":"exact","network":"eip155:84532"},
+  {"x402Version":1,"scheme":"exact","network":"base"},
+  {"x402Version":1,"scheme":"exact","network":"base-sepolia"}],
+ "extensions":[],
+ "signers":{"eip155:*":["0x2772F7F74ac0aCA38C6238aA5EcE72B27bEB8C17"]}}
+```
+
+So the fork the #82 entry below left open is resolved: **xpay.sh lists Base
+mainnet under BOTH names** — `eip155:8453` for v2 and `base` for v1. The #82
+gate passes both versions against it and withholds nothing. The facilitator
+does not need to change.
+
+Which means the vocabulary mismatch #82 guards against was NOT the cause of
+the two rejected live payments — the deployed revision at the time predated
+#79 and threw the reason away, so their cause is still unknown. The leading
+unexcluded candidate remains the unfunded paying wallet
+(`0x5bcea6496599D65E432E50340056194D92F95d06` — balance never verified; the
+Base RPC failed from Cloud Shell on every run). After deploying current
+main, the next rejection prints its reason via `bash scripts/x402-log.sh`.
+#82 stays: it turns a silent config-mismatch failure class into a loud one,
+whichever facilitator is set.
+
+## 2026-09-02: SIMULATED THE REJECTION. The node advertised x402 versions it could not verify.
+
+Owner's instruction: stop looping, simulate, solve. Done with a stub
+facilitator on localhost that records every request the node sends it, the
+node booted with the live configuration, and `first-paid-call.sh` driving
+the real client. Nothing here is inferred; every line below was observed.
+
+**What the node was doing.** It sent the v2 `PAYMENT-REQUIRED` header
+(naming `eip155:8453`) on every 402, and the v1 body (naming the legacy
+`base`), regardless of what the facilitator's `/supported` listed. Against a
+facilitator that lists only the legacy name, a v2-capable client took the v2
+offer and signed for `eip155:8453`, and the node raised
+`SchemeNotFoundError: No scheme 'exact' registered for network 'eip155:8453'`
+**before the facilitator was called.** Fail-closed into a bare 402. Every
+time. Whatever the wallet held. That is the exact shape of both live
+rejections.
+
+**Why v1 could not save it either.** `_get_requirements()` always builds
+under the CAIP-2 name, and the library only does that when the facilitator's
+`/supported` lists that exact name: `ExactEvmServerScheme.parse_price("$0.03",
+"base")` raises `Unsupported network format`. So against a legacy-only
+facilitator this server library can verify **nothing** — offered v1, paid v1,
+same `SchemeNotFoundError`, facilitator never called. Not our bug to route
+around; a library constraint to respect.
+
+**The fix: never advertise a version the node cannot verify.**
+`_facilitator_supports(version, network)` asks the initialized server's own
+`get_supported_kind()` — read off the cached `/supported`, wildcards included
+— and additionally requires the CAIP-2 name to be listed at all. The v2
+header and the v1 body each go through it. Fail-closed on any exception. One
+WARNING per (version, network) naming the facilitator and the reason.
+
+Proved end to end against the stub, both ways:
+
+| facilitator lists | v2 header | v1 body | client | facilitator got |
+|---|---|---|---|---|
+| only `base` | withheld | withheld | **stops at preflight: "no payable x402 entry"** — nothing signed | nothing, correctly |
+| `base` + `eip155:8453` | sent | sent | pays v2 | `/verify`, and its reason lands in the node log |
+
+Six unit tests, each proved by removing its gate and watching it go red.
+Suite: **497 passed, 1 skipped.** Lint 0. Two app-test loaders now fake the
+gate, because `facilitator.example` does not exist and those tests are about
+the 402's shape.
+
+**What decides the live case, and only the owner can read it:**
+
+```bash
+curl -s https://facilitator.xpay.sh/supported
+```
+
+If that lists `eip155:8453` → the node will verify against it, and after this
+deploys a rejection carries the facilitator's own reason in
+`bash scripts/x402-log.sh`. If it lists only `base` → **xpay.sh cannot be
+used by this server library at all**, the node will (correctly) advertise
+no x402, and the facilitator has to change — `scripts/probe-facilitators.sh`
+checks exactly this for each candidate.
+
+## 2026-09-02: when the balance check cannot run, hand over the Basescan link
+
+The Base RPC (`mainnet.base.org`) has answered `HTTPError` from Cloud Shell on
+every `first-paid-call.sh` run so far, so the script proceeded blind each
+time and "is the paying wallet funded?" stayed the one open question after
+two rejected attempts. It now prints
+`https://basescan.org/address/<paying address>` on that branch. One tap on a
+phone, no gcloud. A rejection is not to be read as anything else until that
+page has been looked at. Proved by removing the line → the test goes red.
+
+**Also from the 1:33 screenshot:** the owner's phone keyboard substitutes
+`ø` for `o` in some pastes (`prøject`, `løg`, `ftrst-pald`), and `&&` chains
+split across lines. Commands to the owner: one per line, short, and checked
+for `ø` before enter. The `(resolver-time)` in the prompt means the project
+IS set; the `gcloud config set` error was the `ø`, not the config.
+
+## 2026-09-02: consolidation — one go-live path, and a Stripe mirror that stops lying
+
+Owner's instruction: get rid of trash, solidify what works, be consistent.
+Only what had evidence went:
+
+- **`go-live-x402.sh`, `go-live-mpp-tempo.sh` → stubs.** Zero live
+  references outside themselves and this file's history; `go-live.sh`
+  replaced both with one deploy. Stubs, not deletions: a deleted script
+  produces "No such file" and a hunt — that cost a re-derivation once. Each
+  prints the replacement command and exits 1. Their 25 tests went with them;
+  the three guards only they held (API-version pin, no Stripe mint for x402,
+  the stubs themselves pointing here) now live in `tests/test_go_live.py`.
+- **`x402-setup.py` → stub.** Named for x402, argued for a Stripe-custodied
+  x402 pay-to, and Stripe does not do x402. What it minted, `go-live.sh`
+  mints inline for tempo.
+- **`record_settlement_in_stripe` is now opt-in (`X402_STRIPE_MIRROR=1`).**
+  On a self-custody pay-to it cannot succeed, and default-on it would have
+  logged a traceback on **every real payment** saying Stripe "will not show
+  it until this transaction hash is recorded" — false, on the day it is read.
+  Off: one INFO line saying the money is in the wallet. Proved by removing
+  the gate → the new test goes red.
+- The module docstring that still said the pay-to "is a Stripe-custodied
+  deposit address" now says where the money actually goes.
+- `SESSION_BRIEF.md` no longer names the stubbed script.
+
+Suite: **491 passed, 1 skipped** (514 − 25 deleted + 4 new − 2 parametrized
+cases). Lint gate 0. Sandbox: stray local servers killed, caches cleared.
+
+## 2026-09-02: the deploy REFUSED to run in a fresh Cloud Shell — and blamed a secret
+
+The second attempt of the night, read off the owner's screenshot:
+
+```
+==> Checking the Stripe secret exists before pointing anything at it
+  Available secrets:
+  STOP  no secret named SECRET_STRIPE_KEY. Re-run as:
+        STRIPE_SECRET_NAME=<one of the above> bash scripts/repair-and-deploy.sh
+```
+
+**Nothing was deployed.** The node stayed on the old image, so the
+`first-paid-call.sh` that followed could only repeat the earlier rejection,
+and the `gcloud logging read` that followed *that* was a 200-character line
+that arrived from a phone with a newline inside the filter and failed to
+parse. Three commands, zero information.
+
+The secret was never missing. **`repair-and-deploy.sh` made eight `gcloud`
+calls and none passed `--project`.** It inherited gcloud's default project,
+which the first Cloud Shell session of the night had and the second — a fresh
+one, after the first disconnected — did not. gcloud does not treat an unset
+project as an error: `secrets describe` fails, `secrets list` prints nothing,
+and the script read that empty list as "the secret you named is not among
+these" and stopped. The one deploy command could not run in a fresh shell,
+and its error pointed at the wrong thing.
+
+Fixed everywhere the pattern existed: `repair-and-deploy.sh` (8 calls),
+`go-live-x402.sh` (2), and `lib-api-key.sh` — which already threaded
+`project_args` through both of its calls but only filled it when `PROJECT`
+was exported, so `verify-live.sh`'s paid-path check inherited the same trap.
+All now default `PROJECT` to `resolver-time` and pass it explicitly.
+`repair-secrets.sh`, `measure-call-cost.sh`, `go-live.sh` and
+`go-live-mpp-tempo.sh` already did; a per-line grep undercounted the first
+two because their `--project` sits on a `\` continuation line, so the test
+joins continuations before counting. **The immediate unblock, on the current
+checkout, is one line:** `gcloud config set project resolver-time`.
+
+The secret check now tells the two faults apart: an *empty* secret list is
+reported as gcloud not seeing the project, with the `config set` line, rather
+than as a missing secret.
+
+Pinned by a static test over all seven scripts — "invocation" meaning
+`gcloud` in command position, not inside a message string — proved by
+removing one `--project` from the deploy line and watching it go red. Plus a
+driven test that the empty-list case names the project, not the secret.
+
+**Also:** `scripts/x402-log.sh` replaces the long `gcloud logging read` line.
+One short command, both payload shapes (`textPayload` and
+`jsonPayload.message`), and a "(none)" branch that says what none means.
+Untested against gcloud from the sandbox; `bash -n` clean.
+
+## 2026-09-02: FIRST REAL PAYMENT ATTEMPTED — rejected, and the node threw the reason away
+
+The owner ran `first-paid-call.sh` against the deployed node from Cloud
+Shell, paying from `0x5bcea6496599D65E432E50340056194D92F95d06` (an existing
+key at `~/.hubvibe-wallet-key`) to `0x837C…77dd`. Read off the screenshot:
+
+```
+OK    x402 advertised: $0.03 to 0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd on base
+OK    the Bazaar record on this 402 is well-formed and will survive validation
+NOTE  could not reach the Base RPC (HTTPError); proceeding without the check
+NOTE  https://facilitator.xpay.sh serves no /discovery/resources ...
+STOP  the payment did not go through:
+      HubVibeError: Payment was rejected by HubVibe: {'error': 'payment_required', ...
+```
+
+Three facts, and one that is NOT known:
+
+1. **The client-side blocker is gone.** A signature was constructed and sent.
+   Before the arity fix (previous entry) this run would have died with a
+   TypeError before reaching the node.
+2. **The node re-challenged with a bare 402.** That body carries no reason.
+3. **The balance check was skipped.** `mainnet.base.org` returned an
+   HTTPError from Cloud Shell, so the script proceeded without knowing
+   whether the paying wallet holds any USDC on Base. The most ordinary cause
+   of a rejection — an unfunded payer — is therefore **unverified either
+   way.** Check it before anything else, in a browser, no deploy needed:
+   `https://basescan.org/address/0x5bcea6496599D65E432E50340056194D92F95d06`
+
+**Why the reason is unknown: the node discarded it.** `verify_only_sync`,
+`verify_and_settle` and `settle_sync` each ended in `except Exception:
+return None/False` with no log line, and an `is_valid=False` from the
+facilitator returned the same way. The facilitator's `invalid_reason` — or
+the exception that stopped verify from ever reaching the facilitator — existed
+inside the process for a few milliseconds and was dropped. The Cloud Run log
+had nothing. That is the #61 silent-bounce, one layer in: from the outside a
+refused payment looked like nobody buying, and this made it look like nothing
+from the inside too.
+
+Fixed: every fail-closed return now logs first, at WARNING, with the stage,
+facilitator URL, price, and either the facilitator's `invalid_reason` /
+`invalid_message` / `payer` (fields read off `x402.schemas.responses`, not
+recalled) or the exception type and text. A refusal and an outage now read
+differently, because they need different fixes. The return values are
+unchanged — fail-closed is the contract; the log is what was missing.
+
+Four tests, proved by silencing the logging and watching all four go red.
+The suite also caught a bug in the first draft of the fix itself: a format
+string with one `%s` given two values raised inside the logger, and the
+wrapper reported it as "FAILED before the facilitator could answer" — the
+exact misreport its own docstring warns about. Worth noting because it is the
+kind of bug a green run cannot see and a mutation run can.
+
+**After deploying this, the next `first-paid-call.sh` leaves its reason
+here** (untested from the sandbox — no gcloud; the shape is the standard one):
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="hubvibe" AND textPayload:"x402"' --project=resolver-time --freshness=1h --limit=10 --format='value(textPayload)'
+```
+
+## 2026-09-02: the owner's Base wallet IS the recipient — do not pay from it
+
+The owner's wallet is `hubvibe.base.eth` →
+`0x837c40e2b4e976f43ffb4451ee281a00fa9477dd`. Compared programmatically
+against `DEFAULT_X402_PAY_TO` in `go-live.sh`: **the same address**, differing
+only in EIP-55 checksum case.
+
+That is correct as the *recipient*. It is a trap as the *payer*, and the trap
+is one paste wide: it is the only Base wallet the owner has, so it is the
+obvious thing to put in `HUBVIBE_WALLET_KEY` — which is the paying wallet.
+
+**Nothing caught it.** Verified by booting a node whose `payTo` was the
+payer's own address and running `first-paid-call.sh`: the x402 client
+produced a signature without complaint. The failure would have landed at the
+facilitator, on the one call whose entire purpose is to prove the facilitator
+settles. `exact` has the payer sign an EIP-3009 `transferWithAuthorization`
+from → to; with from == to that is a degenerate self-transfer nothing here has
+ever tested, so whatever came back would say nothing about whether a real
+buyer can pay — while consuming the bootstrap attempt.
+
+Guarded now, before any spend, case-insensitively (a wallet app's copy button
+yields lowercase; the config is checksummed). Overridable with
+`HUBVIBE_ALLOW_SELF_PAYMENT=1`, because a self-transfer may well be valid and
+forbidding a deliberate attempt is not the script's call — forbidding an
+accidental one is.
+
+**The correct shape: pay from a second wallet, receive into `0x837C…77dd`.**
+
+```bash
+bash scripts/first-paid-call.sh --new-wallet   # prints an address to fund
+```
+
+Fund that with ~$1 of USDC on Base (no ETH — the facilitator pays gas) and
+re-run without arguments. The $0.03 lands in the owner's wallet.
+
+## 2026-09-02: the first paid call could NOT have been constructed — x402 client arity
+
+Found by booting the service locally and running `first-paid-call.sh` against
+it with an unfunded throwaway key. It died before any signature existed:
+
+```
+HubVibeError: Could not construct an x402 payment:
+  x402HTTPClientSync.handle_402_response() missing 1 required
+  positional argument: 'request_url'
+```
+
+Both signatures read off the installed packages, not from memory:
+
+| x402 | `handle_402_response` |
+|---|---|
+| **2.18.0** — pinned in both `requirements.txt` | `(headers, body)` |
+| **2.21.0** | `(headers, body, request_url)` — **required** |
+
+`integrations/hubvibe_tollbooth.py` passed two arguments unconditionally.
+
+**Why the pin did not protect the thing that spends money.**
+`scripts/first-paid-call.sh` shells out to bare `python3`, which resolves to
+whatever x402 the machine has rather than the pinned one — in the build
+sandbox, 2.21.0. And this module *ships to agent authors* who install x402
+themselves. So the one script whose whole job is the first real payment, and
+every third-party agent, ran on an unpinned client.
+
+**And the failure shape is the one this file already has three entries about.**
+The TypeError is raised inside the caller's process, before a signature
+exists. Nothing reaches the facilitator, nothing lands on-chain, and from the
+server side it is pixel-identical to nobody buying — #61 rebuilt, one layer
+out.
+
+Fixed in `_sign_402()`: the arity is read off the installed callable with
+`inspect.signature` and `request_url` passed only when the parameter exists.
+Introspection rather than `except TypeError`, because a TypeError raised from
+*inside* the library would otherwise be retried with different arguments and
+misreported as an arity problem.
+
+Proved twice by mutation — pinning it to two arguments turns the 2.21 test
+red; to three arguments turns three tests red, including the pre-existing
+payment test.
+
+**What the live re-run does and does not show.** The same
+`first-paid-call.sh` invocation now gets past construction: a signature is
+produced, sent, and the node answers 402 again. The failure moved from
+*"could not construct an x402 payment"* to *"payment was rejected"*, which is
+the only claim this run supports. **Why it was rejected is NOT established**
+— the sandbox cannot reach `facilitator.xpay.sh` (the Base RPC check in the
+same run failed with URLError), so the node's verify call cannot have
+succeeded and the rail correctly failed closed. Do not read the rejection as
+evidence about the wallet, the facilitator, or settlement. An earlier draft
+of this entry attributed it to the unfunded wallet; that was a guess and the
+log does not support it.
+
+**Not proven, and still only money can prove it:** that a funded payment
+settles. Construction was the blocker; settlement is still untested.
+
+## 2026-09-02: `go-live.sh` ran against the live node — 37 passed, 0 failed
+
+The owner ran, from Cloud Shell, on `main` @ `2d0af7c`:
+
+```bash
+cd ~/HubVibe-deploy4 && git fetch origin main && git reset --hard origin/main && bash scripts/go-live.sh
+```
+
+then `bash scripts/verify-live.sh` → **37 passed, 0 failed**. That is the
+first run of the one-command go-live against the deployed service, and the
+first clean checker run since the rails were reconfigured.
+
+**Do not turn 37 into a threshold.** A previous session told the owner that
+"under 38 checks is a stale checkout" — a number that was never counted and
+does not exist. The checker's total is `PASSES + FAILURES`: it is however many
+checks *executed*, and that moves with which rails are configured (36 was the
+x402-off total; x402 being on runs more). A count compared against a
+remembered constant is exactly the reasoning this file already warns about
+twice, applied to the checker instead of the service.
+
+**The staleness signal is the checker's own, and it is not a number.**
+`verify-live.sh` fetches `origin/main` and prints a red `STALE CHECKOUT  this
+copy is N commit(s) behind` banner, plus `This was the OLD checker` after the
+totals. Read for that banner. Its absence is the proof the run is current;
+the integer is not.
+
+**Still unproven, and only money proves it:** whether a payment settles. A
+green checker means the 402 is well-formed and the rails are advertised —
+never that anything paid. Revenue is still zero.
+
 ## 2026-09-01: the $100 of Anthropic credits cannot be refunded, so spend them on the bottleneck
 
 The owner topped up Anthropic API credits intending to buy a Claude
@@ -37,7 +1176,126 @@ because a silently missing prospect is a lead nobody works. Same
 fail-closed discipline as the payment rails, applied to claims instead of
 settlement.
 
+## 2026-09-01: OWNER FACT — Stripe does NOT do x402. Stripe does MPP.
+
+Stated by the owner. It is a fact about what Stripe sells, not a preference,
+so do not re-derive it, and do not open a Stripe support thread about x402:
+
+> No, stripe does not do the four zero two. You have to do that somewhere
+> else. Stripe will... you have to go get that facilitated somewhere else.
+> Stripe will only do the MPP.
+
+The split is now clean and there is nothing left in the repo arguing
+otherwise:
+
+| | who runs it | recipient | money ends up |
+|---|---|---|---|
+| **MPP** (`tempo`, `stripe`) | Stripe | Stripe-custodied deposit address | Stripe balance |
+| **x402** | a facilitator (xpay.sh) | a Base wallet you hold the key to | on-chain, yours |
+
+**Two live traps were removed, and the first one was sitting directly in the
+go-live path.**
+
+1. `go-live-x402.sh` minted a Stripe-custodied Base deposit address whenever
+   no pay-to was set, and when that failed its error said *"ask Stripe support
+   to turn on machine payments / x402"*. That is advice for a product Stripe
+   does not sell, so following it costs a support thread that cannot resolve —
+   the same shape of wrong diagnosis that already cost this project weeks on
+   the CDP business review. The mint is gone; with no address it now names the
+   fact and stops. An address supplied by hand is also read *first* now,
+   because a step that can only fail must not run ahead of one that succeeds.
+2. `scripts/x402-setup.py` opened by arguing *"why route x402 through Stripe
+   rather than your own wallet"* and defaulted to `--network base`. Both were
+   wrong, and the name made it hard to notice. It now defaults to `tempo`,
+   prints `MPP_TEMPO_RECIPIENT_ADDRESS`, and says plainly what it is not for.
+   The filename is kept so `git log` stays followable.
+
+**What this does NOT change:** the tempo mint in `go-live.sh` is untouched and
+still correct — `/v1/crypto/deposit_addresses` is Stripe's, and MPP tempo is
+Stripe's rail. What died is using that endpoint to produce an *x402* pay-to.
+
+**And the consequence already recorded below still holds, now for a second
+reason:** x402 revenue will not appear in Stripe. The wallet is the counter.
+
+## 2026-09-01: both rails go live in ONE command, and no gate will re-bless `0x2b3b…`
+
+Two things, and the second is the one that had teeth.
+
+**`scripts/go-live.sh` turns on every rail that can settle, in one deploy.**
+
+```bash
+bash scripts/go-live.sh
+```
+
+There were already two go-live scripts, one per rail, and each ends by
+exec'ing `repair-and-deploy.sh`. Running both meant two source deploys, two
+waits, and a window in between where one rail was live and the other was in
+whatever state the first script left it. The new script resolves both
+recipients first, writes them in a single `services update`, and deploys once.
+
+- **x402** defaults to the owner's affirmed Base wallet
+  (`0x837C…77dd`) — no address to paste on a phone. `X402_PAY_TO_ADDRESS=0x…`
+  overrides it.
+- **mpp-tempo** reuses a usable recipient already on the service, else mints a
+  Stripe crypto deposit address. `MPP_TEMPO_RECIPIENT_ADDRESS=0x…` skips
+  minting.
+- **The rails are independent.** A failed Stripe mint leaves tempo off and
+  still takes x402 live — an all-or-nothing script would trade the revenue on
+  one rail for tidiness. `RAILS=x402` / `RAILS=tempo` narrows it.
+- mpp-stripe is absent by design: Stripe's SPT floor is 50c and no route here
+  is close. That is gated on the amount in code, not on a deploy.
+
+**Shape is not ownership, and three gates were still saying otherwise.**
+
+`0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256` is `0x` + 40 hex. It is not the
+zero address. It passes the #46 guard, the preflight, and every check in this
+repo — and the owner does not recognise it. It was sitting deployed as
+`X402_PAY_TO_ADDRESS`, which is why the entry below turns the rail off.
+
+The part nobody had noticed: **a bare `bash scripts/go-live-x402.sh` would
+have put it straight back.** That script reuses whatever is deployed if it is
+well-formed — `ok "already set and well-formed"` — and only an explicit
+override replaces it. So the documented recovery command was safe, and the
+undocumented one silently re-blessed a stranger's wallet. Same failure as the
+zero address exactly: a format check answering a question nobody asked.
+
+Both that address and the test-suite constant `0x32b08c…22bc` (which exists to
+make the rail inspectable on a local boot, and whose key nobody holds) are now
+named and refused in all three places that can put an address on a revision:
+
+| | on finding one |
+|---|---|
+| `go-live.sh` | refuses it, uses the affirmed wallet instead |
+| `go-live-x402.sh` | refuses it, mints or takes an override instead |
+| `repair-and-deploy.sh` | **strips** `X402_PAY_TO_ADDRESS` + the facilitator |
+
+`repair-and-deploy.sh` removes rather than refuses, and the reasoning is the
+opposite way round from the malformed case: refusing leaves the *running*
+revision advertising the address, so stopping is the option that keeps money
+pointed at a stranger for longer. Stripping it turns the rail off on the next
+revision — which is exactly the manual `--remove-env-vars` command below,
+now automatic.
+
+One fixture had to move: `tests/test_preflight.py` used `0x32b08c…` as its
+*good* address. Keeping it would have asserted the opposite of what the script
+now does.
+
+23 tests, each proved by reintroducing the bug and watching it go red —
+including the pre-fix "reuse it if it's well-formed" branch, which turns the
+replacement test red on its own. Suite: **491 passed, 1 skipped** (468 on
+`main` before this; the 487 in circulation is PR #75's branch, not `main`).
+
+**Still true, and this changes none of it:** nothing has been deployed, no
+rail is live, and no payment has ever been made. This shortens the command
+that changes that from three to one.
+
 ## 2026-08-29: the x402 recipient is UNIDENTIFIED. Turn the rail off.
+
+**Superseded twice — read the 2026-09-01 entry above and the "recipient is
+RESOLVED" entry below first.** The address is still unidentified and still
+must never be advertised; what changed is that the rail no longer has to stay
+off to achieve that (there is an affirmed wallet), and that turning it off is
+no longer a command anyone has to remember.
 
 Read this before touching anything about x402.
 
@@ -931,6 +2189,10 @@ exist, and it strips placeholder x402 values before they can reach a live
 revision.
 
 ## What is left
+
+**Superseded by the dated entries at the top of this file — read the newest
+one first; its last paragraph is the current list.** What follows is the
+2026-08-27 state, kept for history.
 
 **THE ONE THING — half done.** The deploy landed and the checker proved it:
 **36/36 against the deployed node, 2026-08-27**, including both payability

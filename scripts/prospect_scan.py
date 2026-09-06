@@ -35,7 +35,7 @@ import urllib.request
 from collections import Counter
 
 DEFAULT_BASE = os.environ.get(
-    "HUBVIBE_BASE_URL", "https://hubvibe-831480473793.us-south1.run.app"
+    "HUBVIBE_BASE_URL", "https://hubvibe-io.com"
 )
 
 # Bundle rate. Used only to show the operator what a run will cost before it

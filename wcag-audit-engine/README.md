@@ -295,6 +295,23 @@ Building the discovery data can never break a payment challenge: if it
 throws, the 402 still goes out with its price and rails intact. Losing the
 index is survivable; losing the sale is not.
 
+#### Paying over MCP
+
+`/mcp` speaks the x402 MCP protocol (`x402.mcp` in the library), which is
+not the HTTP 402 shape. An unpaid `tools/call` answers with an `isError`
+result whose `structuredContent` (and text) is the **v2** `PaymentRequired`
+-- the same challenge the HTTP path encodes into `PAYMENT-REQUIRED`, built
+by the same function, with `resource.url` naming `/mcp` and a Bazaar record
+that names the tool and its transport. The client signs for `accepts[0]`
+and retries with the `PaymentPayload` in `params._meta["x402/payment"]`
+(the official `x402.mcp` client does this automatically); the facilitator's
+settle response comes back in the result's `_meta["x402/payment-response"]`,
+beside the `PAYMENT-RESPONSE` header. The `_meta` payload is re-encoded into
+the header form and verified by the same path as an HTTP payment, so the
+replay guard, the facilitator loop and the logging are shared rather than
+duplicated. An explicit `X-PAYMENT` / `PAYMENT-SIGNATURE` header on the POST
+still works and wins when both are present.
+
 ### Getting paid without Stripe subscriptions: MPP
 
 `/audit` also accepts [MPP](https://docs.stripe.com/payments/machine/mpp)

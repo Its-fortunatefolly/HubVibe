@@ -84,12 +84,19 @@ def test_settles_and_indexes_is_the_only_winning_combination(tmp_path):
     assert "X402_FACILITATOR_URL=https://probe.example" in result.stdout
 
 
-def test_the_legacy_network_name_also_counts(tmp_path):
-    """v1 clients register schemes under "base", not the CAIP-2 id. A
-    facilitator answering in that vocabulary settles Base just the same, and
-    rejecting it would discard a working option on a spelling."""
+def test_a_legacy_only_facilitator_is_reported_unusable_not_a_winner(tmp_path):
+    """This test used to assert the opposite -- that the legacy name "base"
+    counts as Base -- on the reasoning that rejecting it would discard a
+    working option on a spelling. Simulation showed it is not a working
+    option: the x402 server library builds every payment's requirements
+    under the CAIP-2 name and only does so when /supported lists that exact
+    name, so against a legacy-only facilitator the node can verify nothing.
+    A probe that calls such a facilitator a winner sends the deploy straight
+    at the thing that produced two rejected live payments."""
     result = _run(tmp_path, _SUPPORTED_LEGACY, "200", _INDEX, "200")
-    assert "KEYLESS WINNER" in result.stdout
+    assert "legacy name only" in result.stdout
+    assert "cannot use this facilitator" in result.stdout
+    assert "KEYLESS WINNER" not in result.stdout
 
 
 def test_an_index_on_the_wrong_network_does_not_win(tmp_path):
