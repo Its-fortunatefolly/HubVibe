@@ -495,7 +495,7 @@ def main() -> int:
     env = {
         k: v
         for k, v in os.environ.items()
-        if not k.startswith(("STRIPE_", "MPP_", "CDP_", "X402_", "GOOGLE_", "FIRESTORE"))
+        if not k.startswith(("STRIPE_", "MPP_", "X402_", "GOOGLE_", "FIRESTORE"))
     }
     env.update(
         {

@@ -209,40 +209,14 @@ either way:
 
 #### Choosing a facilitator
 
-| | |
-|---|---|
-| `https://x402.org/facilitator` | the library's default. Base Sepolia **testnet** only — fine for proving the path end to end, useless for revenue |
-| Coinbase **CDP** | mainnet, and the one that gets you into the Bazaar. First 1,000 on-chain settlements/month free, then ~$0.001 each; verification is always free |
-| others (x402.rs, xpay, …) | mainnet on Base/Solana/Polygon and more, generally bearer-token auth, which `X402_FACILITATOR_AUTH_HEADERS` covers directly |
-
-At $0.03 a call, a $0.001 settlement fee is ~3% — the margin survives it
-comfortably. See "Unit economics" above.
-
-#### Turning on CDP
-
-CDP is supported directly — set two variables and nothing else:
-
-```bash
-gcloud run services update hubvibe --region=us-south1 --update-env-vars=\
-X402_FACILITATOR_URL=https://api.cdp.coinbase.com/platform/v2/x402,\
-X402_PAY_TO_ADDRESS=0xYourWallet
-gcloud run services update hubvibe --region=us-south1 \
-  --update-secrets=CDP_API_KEY_SECRET=cdp-api-key-secret:latest \
-  --update-env-vars=CDP_API_KEY_ID=your-key-id
-```
-
-`CDP_API_KEY_SECRET` is a private signing key — put it in Secret Manager, not
-in an env var.
-
-CDP does not use a fixed header. It signs a short-lived JWT per call, bound to
-that call's method, host and **full** path, so every endpoint gets its own
-token. `_CdpAuthProvider` builds all four (`/verify`, `/settle`, `/supported`,
-`/discovery/resources`), reading the paths and methods out of the x402 client
-rather than assuming them. The path prefix matters: CDP's facilitator lives
-under `/platform/v2/x402`, and a JWT signed for the bare path is a valid
-signature for the wrong request — which presents as x402 fully configured and
-every payment rejected. Tests decode the `uris` claim of each token and assert
-the exact method and full path.
+The live node uses `https://facilitator.xpay.sh`: keyless, Base mainnet,
+zero fee, x402 v1 and v2 (its `/supported` lists both `eip155:8453` and
+the legacy name `base`). `scripts/probe-facilitators.sh` checks any other
+candidate for the two things this server library needs: the CAIP-2 network
+name in `/supported`, and whether it serves a Bazaar index. A facilitator
+that authenticates the resource server with a fixed bearer token is covered
+by `X402_FACILITATOR_AUTH_HEADERS`; one that signs a fresh credential per
+request is not supported.
 
 Turning it on, without disturbing anything else on the service:
 

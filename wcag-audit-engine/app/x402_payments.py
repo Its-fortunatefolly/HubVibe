@@ -70,12 +70,6 @@ _PRICE = os.environ.get("X402_PRICE", "$0.03")
 # wanted no credentials at all.
 _FACILITATOR_AUTH_HEADERS = os.environ.get("X402_FACILITATOR_AUTH_HEADERS")
 
-# Coinbase CDP credentials. CDP takes precedence over the static headers
-# above when both are set, because it is the more specific configuration --
-# nobody sets a CDP key pair by accident.
-_CDP_API_KEY_ID = os.environ.get("CDP_API_KEY_ID")
-_CDP_API_KEY_SECRET = os.environ.get("CDP_API_KEY_SECRET")
-
 _server: Optional[x402ResourceServer] = None
 _requirements_cache: dict = {}
 
@@ -167,12 +161,11 @@ class _StaticAuthProvider:
     key is the same on all four, so the same dict is returned for each.
 
     This deliberately does NOT cover facilitators that sign a fresh
-    credential per request (Coinbase CDP mints a short-lived JWT from an
-    Ed25519 key). Those need their own SDK's header generator, which the
-    library accepts via CreateHeadersAuthProvider -- see the README. Faking
-    it with a static header would produce a facilitator that rejects every
-    payment, which fails closed but silently, and that is the single worst
-    outcome for a payment rail.
+    credential per request. Those need their own header generator, which
+    the library accepts via CreateHeadersAuthProvider. Faking it with a
+    static header would produce a facilitator that rejects every payment,
+    which fails closed but silently, and that is the single worst outcome
+    for a payment rail. The live facilitator (xpay.sh) is keyless.
     """
 
     __slots__ = ("_headers",)
@@ -191,112 +184,6 @@ class _StaticAuthProvider:
         )
 
 
-# The paths the x402 client actually calls on a facilitator, and the methods
-# it uses, read from the library rather than assumed -- CDP signs each request
-# against its own method and path, so a wrong guess here authenticates nothing.
-_FACILITATOR_ENDPOINTS = {
-    "verify": ("POST", "/verify"),
-    "settle": ("POST", "/settle"),
-    "supported": ("GET", "/supported"),
-    "bazaar": ("GET", "/discovery/resources"),
-}
-
-
-class _CdpAuthProvider:
-    """Coinbase CDP auth: a fresh JWT per endpoint, signed from the API key.
-
-    CDP binds each token to the exact method, host and path being called, so
-    unlike a bearer token these headers cannot be computed once and reused
-    across endpoints. That is precisely why the x402 AuthProvider protocol
-    asks for verify / settle / supported / bazaar separately.
-
-    CDP is the facilitator worth having: it settles on mainnet, and it is
-    what gets a resource listed in the x402 Bazaar, which is how agents find
-    a service by capability instead of by URL.
-    """
-
-    __slots__ = ("_key_id", "_key_secret", "_host", "_base_path")
-
-    def __init__(self, key_id: str, key_secret: str, base_url: str):
-        from urllib.parse import urlparse
-
-        parsed = urlparse(base_url)
-        if not parsed.netloc:
-            raise ValueError(f"X402_FACILITATOR_URL is not a valid URL: {base_url!r}")
-        self._key_id = key_id
-        self._key_secret = key_secret
-        self._host = parsed.netloc
-        # CDP's facilitator lives under a path prefix
-        # (/platform/v2/x402), and the JWT covers the FULL path, so the
-        # prefix has to be included or every call is rejected.
-        self._base_path = parsed.path.rstrip("/")
-
-    def _headers_for(self, method: str, path: str) -> dict:
-        from cdp.auth.utils.http import GetAuthHeadersOptions, get_auth_headers
-
-        return get_auth_headers(
-            GetAuthHeadersOptions(
-                api_key_id=self._key_id,
-                api_key_secret=self._key_secret,
-                request_method=method,
-                request_host=self._host,
-                request_path=self._base_path + path,
-            )
-        )
-
-    def get_auth_headers(self):
-        from x402.http.facilitator_client_base import AuthHeaders
-
-        signed = {
-            name: self._headers_for(method, path)
-            for name, (method, path) in _FACILITATOR_ENDPOINTS.items()
-        }
-        return AuthHeaders(**signed)
-
-
-# Hosts a Coinbase CDP key pair can actually sign for. A CDP token is a JWT
-# minted against Coinbase's own key and bound to the request host; it is not a
-# shared secret any other facilitator could validate. Sending one anywhere
-# else is meaningless at best and a 401 at worst.
-_CDP_HOST_SUFFIX = ".coinbase.com"
-
-
-def _host_is_coinbase(url: str) -> bool:
-    """True when `url` names a Coinbase host.
-
-    Raises on a URL with no host at all. That is a different fault from
-    "pointed somewhere else on purpose": there is nothing to bind a JWT to
-    and nothing for the facilitator client to call either, so it stays a
-    loud construction-time failure rather than being downgraded into the
-    quiet fall-through that a deliberate facilitator swap deserves.
-    """
-    from urllib.parse import urlparse
-
-    netloc = urlparse(url).netloc
-    if not netloc:
-        raise ValueError(f"X402_FACILITATOR_URL is not a valid URL: {url!r}")
-    host = netloc.split("@")[-1].split(":")[0].lower()
-    return host == "coinbase.com" or host.endswith(_CDP_HOST_SUFFIX)
-
-
-_cdp_mismatch_warned = False
-
-
-def _warn_cdp_ignored(url: str) -> None:
-    global _cdp_mismatch_warned
-    if _cdp_mismatch_warned:
-        return
-    _cdp_mismatch_warned = True
-    logging.getLogger(__name__).warning(
-        "CDP credentials are set but X402_FACILITATOR_URL points at %s, which "
-        "is not a Coinbase host. A CDP token is bound to Coinbase's own host "
-        "and cannot be validated by anyone else, so it is being ignored. This "
-        "deployment is talking to that facilitator with "
-        "X402_FACILITATOR_AUTH_HEADERS, or keyless if that is unset.",
-        url,
-    )
-
-
 def _auth_provider():
     """The facilitator auth provider for this deployment, or None.
 
@@ -304,26 +191,7 @@ def _auth_provider():
     silently dropping credentials would leave x402 advertised and every
     payment rejected by the facilitator, which looks identical to "nobody is
     buying" and could go unnoticed indefinitely.
-
-    CDP credentials are used ONLY against a Coinbase host. The handoff bills
-    switching away from CDP as "one env var" -- point X402_FACILITATOR_URL at
-    a keyless facilitator and redeploy -- and that was not true while this
-    branch was unconditional: the CDP key pair stays mounted on the service,
-    so every call to the new facilitator went out signed with a JWT bound to
-    a host Coinbase never issued for. Whether that 401s or is ignored is the
-    third party's choice, not ours, and the failure mode if it 401s is the
-    worst one this file knows: x402 still advertised on every 402, every
-    payment rejected, indistinguishable from nobody buying. Ignoring the
-    credentials instead makes the documented one-variable swap actually work,
-    and says so in the log rather than deciding it silently.
     """
-    if _CDP_API_KEY_ID and _CDP_API_KEY_SECRET:
-        if _host_is_coinbase(_FACILITATOR_URL or ""):
-            return _CdpAuthProvider(
-                _CDP_API_KEY_ID, _CDP_API_KEY_SECRET, _FACILITATOR_URL or ""
-            )
-        _warn_cdp_ignored(_FACILITATOR_URL or "")
-
     if not _FACILITATOR_AUTH_HEADERS:
         return None
     headers = json.loads(_FACILITATOR_AUTH_HEADERS)
@@ -1643,68 +1511,4 @@ def settle_sync(pending) -> bool:
     except Exception as exc:
         pending.settle_state = "refused"
         _log_rejection("settle", getattr(pending, "price", None), exc=exc)
-        return False
-
-
-async def verify_and_settle(payment_header: str, price: Optional[str] = None) -> bool:
-    """Verify a signed X-PAYMENT header and settle it via the facilitator.
-
-    `price` must match whatever price the caller was actually challenged
-    with for this specific route -- defaults to the deploy-wide X402_PRICE
-    for callers (like the original /audit route) that don't vary price.
-
-    Returns True only if the facilitator confirms both verification and
-    settlement succeeded. Never raises past this boundary; any failure
-    mode -- malformed header, facilitator rejection, network error --
-    returns False.
-    """
-    if not is_configured():
-        return False
-    resolved_price = price or _PRICE
-    nonce = None
-    try:
-        payload = decode_payment_signature_header(payment_header)
-        nonce = _payment_nonce(payload)
-        if not _admit_nonce(nonce):
-            logging.getLogger(__name__).warning(
-                "x402 verify REFUSED: replayed authorization (nonce %s already "
-                "admitted on this node; price=%s). Not sent to the facilitator.",
-                (nonce or "")[:18], resolved_price,
-            )
-            return False
-        requirements = _get_requirements(resolved_price)
-        server = _get_server()
-
-        verify_result = await server.verify_payment(payload, requirements[0])
-        if not verify_result.is_valid:
-            _log_rejection("verify", resolved_price, result=verify_result)
-            _release_nonce(nonce)
-            return False
-
-        settle_result = await server.settle_payment(payload, requirements[0])
-        if settle_result.success:
-            _log_settled("verify+settle", resolved_price, settle_result)
-            record_settlement_in_stripe(settle_result, requirements[0])
-        else:
-            logging.getLogger(__name__).warning(
-                "x402 settle REFUSED (facilitator=%s price=%s): error=%s message=%s",
-                _FACILITATOR_URL, resolved_price,
-                getattr(settle_result, "error_reason", None)
-                or getattr(settle_result, "error", None),
-            )
-        return bool(settle_result.success)
-    except Exception as exc:
-        _log_rejection("verify+settle", resolved_price, exc=exc)
-        _release_nonce(nonce)
-        return False
-
-
-def verify_and_settle_sync(payment_header: str, price: Optional[str] = None) -> bool:
-    """Sync wrapper for the FastAPI route handler, which is itself sync
-    (it calls Playwright's sync API). Any failure -- including there being
-    no running event loop to reuse -- fails closed, same as the async path.
-    """
-    try:
-        return _run_coro_sync(verify_and_settle(payment_header, price))
-    except Exception:
         return False

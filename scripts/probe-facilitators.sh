@@ -32,7 +32,6 @@ CANDIDATES=(
   "https://facilitator.xpay.sh"
   "https://x402.org/facilitator"
   "https://facilitator.x402.org"
-  "https://api.cdp.coinbase.com/platform/v2/x402"
 )
 [ "$#" -gt 0 ] && CANDIDATES+=("$@")
 
