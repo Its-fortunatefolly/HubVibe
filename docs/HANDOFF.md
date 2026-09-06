@@ -9,6 +9,107 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-06: the audit before real money -- a v1 payer was being turned away, and 12 smaller truths
+
+Owner: "make sure everything is done correctly." Two adversarial auditors
+(a live node, a stub facilitator with injected failures, the official x402
+2.22 client, captured verify bodies) read the x402 HTTP and MCP paths;
+every finding was then reproduced or refuted by hand. The shipped container
+image was built from the real Dockerfile steps and PAID, three ways, with
+real signatures against a stub facilitator (`scratchpad rehearse_paid.py`,
+23/24 before the last fix, 24/24 after).
+
+**The high one.** The 402 body advertises an x402 **v1** `accepts[]` entry
+(legacy network name "base", `maxAmountRequired`) for pre-v2 clients, but
+every payment -- v1 included -- was verified and settled against the **v2**
+requirements object (`eip155:8453`, `amount`). A facilitator routes by the
+payload's version and hands a v1 payload to its v1 verifier, which reads
+v1 fields off the requirements; it got v2 ones and refused. So any agent on
+a pre-v2 x402 SDK signed a valid authorization to the right wallet and got
+a bare 402 every time -- a rail advertised that could not settle, invisible
+to the simulation because it only ever paid via v2. Fix
+(`x402_payments._get_requirements_v1`): a v1 payload is verified against a
+`PaymentRequirementsV1` built from the same `accepts_entry()` the 402 sent
+(the route's `resource_url` now reaches `verify_only_sync`). The simulation
+has a v1 leg (48 checks, was 44) and the shipped image served a v1 payer
+with an `X-PAYMENT-RESPONSE` receipt.
+
+**Beside it, all fixed and each proved red-then-green (23 mutations):**
+- Every payload is compared to the challenge BEFORE the facilitator is
+  asked (`_payload_mismatch`; v2 via the library's
+  `find_matching_requirements`, v1 by recipient and value). A $0.03
+  signature sent to the $0.10 bundle is refused as `payment_mismatch`
+  without a round trip.
+- A refused payment's 402 now says why: `error` is the facilitator's
+  `invalid_reason` (or `payment_replayed` / `payment_mismatch` /
+  `invalid_payment_payload` / `facilitator_unavailable`), with
+  `error_detail`, `billed: false`, the same `error` in the v2 header, and
+  `Retry-After: 30` only when the facilitator, not the payer, failed. The
+  MCP paywall carries the same reason. (`x402_payments.last_rejection()`,
+  thread-local.)
+- Settlement is reported honestly. `settlement_pending` with a transaction
+  is "pending" (receipt WITH the hash, `billing_warning` names it, log
+  `x402 settle PENDING`); a settle timeout is "unknown" ("do not re-pay");
+  only a real refusal is "not charged". `PendingPayment.settle_state`.
+- Request bodies are capped: `MAX_REQUEST_BYTES` (4 MiB) enforced by a
+  pure-ASGI middleware (Content-Length, and counted for chunked) -> 413,
+  JSON-RPC-shaped on /mcp; mirrored in the Caddyfile (`request_body
+  max_size 4MB`). A 300 MB unpaid POST used to take the worker to ~1 GB
+  RSS; three would OOM the 3 GB container.
+- /mcp: a 429 is a "wait" (`error: rate_limited`, Retry-After 60), not a
+  PaymentRequired an x402 client would pay and be refused again; malformed
+  shapes (arrays, non-object params/arguments, non-string url) answer
+  -32600/-32602 instead of HTTP 500; invalid JSON answers -32700 in
+  JSON-RPC shape; MPP rails (header-borne, unusable over MCP) are filtered
+  out of the MCP paywall.
+- The body's `html`-or-`url` check runs BEFORE payment (`_reject_missing_input`);
+  it used to burn a facilitator verify and the nonce. 400s and 502s carry
+  `billed: false` and say "Nothing was charged".
+- `alternative.get_one` and agent.json `human_plans.checkout` name
+  /billing/checkout only when Stripe billing is configured (it answers 501
+  otherwise). openapi.json carries an x402 offer per paid route
+  (`x402_payments.discovery_offer`) -- the x402-only deploy read as free.
+- `integrations/mcp_server.py` (stdio): version 1.2.0 (was 1.0.0) and
+  `ToolError`, so mcp 2.x delivers the payment hint instead of masking it.
+- **Revenue lines were invisible.** `x402 SETTLED` is INFO; the root logger
+  defaulted to WARNING and the rehearsal's `docker logs` showed zero after
+  three paid calls. main.py now sets the root to `LOG_LEVEL` (INFO).
+- Deploy: the Caddyfile serves `www.{$DOMAIN}` as a redirect to the apex
+  (the runbook says to point both records; Caddy refused www before) and
+  its comment is corrected -- measured on Caddy 2.10, a spoofed
+  X-Forwarded-For from a stranger is REPLACED with the real address, which
+  is what `_client_ip` reads at depth 1. `scripts/vps-install.sh` refuses
+  to run inside Google Cloud Shell (`CLOUD_SHELL=true` /
+  `DEVSHELL_PROJECT_ID`): the owner pasted it there once.
+
+**Rehearsed on the shipped image** (Playwright base, real requirements,
+`docker run` with the compose env): boots in ~16 s, healthcheck command
+works, no warnings, every discovery surface says hubvibe-io.com, 92 MiB
+idle / 278 MiB after three paid audits, SQLite volume writable. Against a
+stub facilitator: v2 paid + PAYMENT-RESPONSE, v1 paid + X-PAYMENT-RESPONSE,
+MCP paid + `_meta` receipt, Bazaar catalogued `/audit/wcag` and `/mcp`
+under the domain, replay refused as `payment_replayed`, cross-route
+signature refused as `payment_mismatch` without a facilitator call,
+`payment-status.sh` read it as "x402 is LIVE / the node pays YOU".
+`verify-live.sh` could not connect from this sandbox's shell (curl, every
+check 000) -- not evaluated here; it is for the deployed HTTPS node.
+
+**Not covered** (the audit's other eight lenses hit the account's usage
+limit; done by hand where cheap): SQLite keystore vs every Firestore call
+site (the existing 13 tests + 16-thread race stand), a full security sweep
+beyond the body cap, the identity grep (done: every living surface serves
+the domain), docs (this entry + deploy README). Suite: 698 passed /
+1 skipped, lint 0.
+
+**World state, 2026-09-06:** PR #96 merged. The owner has PAID the Google
+billing hold -- so the idle Cloud Workstations meter can bill again the
+moment the cluster exists: `DELETE_IDLE=1 bash scripts/cost-sweep.sh` is
+now the FIRST command, before any hosting decision. No VPS bought yet.
+hubvibe-io.com and www resolve to 2.57.91.91 (Hostinger parking). The old
+Cloud Run service may serve again now that billing is live; check its
+recipient with `BASE=https://hubvibe-831480473793.us-south1.run.app bash
+scripts/payment-status.sh` before anything advertises it.
+
 ## 2026-09-05, night: one command answers "what is the money doing"
 
 Owner asked for a shell command that reports the payment state.

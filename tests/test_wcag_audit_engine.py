@@ -345,7 +345,7 @@ def test_authenticate_x402_success_grants_access(monkeypatch):
     # has actually produced a result (see _bill).
     module = _load_main(monkeypatch, api_key=None)
     pending = object()
-    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None: pending)
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None, **kw: pending)
     auth = module._authenticate(None, "some-signed-payment", None)
     assert isinstance(auth, module.AuthContext)
     assert auth.stripe_billable is False
@@ -355,7 +355,7 @@ def test_authenticate_x402_success_grants_access(monkeypatch):
 
 def test_authenticate_x402_failure_returns_402(monkeypatch):
     module = _load_main(monkeypatch, api_key=None)
-    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None: None)
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None, **kw: None)
     result = module._authenticate(None, "some-signed-payment", None)
     assert isinstance(result, module.JSONResponse)
     assert result.status_code == 402
@@ -1859,7 +1859,7 @@ def _x402_caller(monkeypatch, module, *, settle_ok=True):
     calls = {"verified": 0, "settled": 0}
     sentinel = module.x402_payments.PendingPayment(None, None, "$0.03")
 
-    def _verify(header, price=None):
+    def _verify(header, price=None, **kw):
         calls["verified"] += 1
         return sentinel
 
@@ -2933,6 +2933,15 @@ def test_one_version_number_across_every_surface_that_publishes_one(monkeypatch)
     ).json()
     assert handshake["result"]["serverInfo"]["version"] == registry
 
+    # The standalone stdio MCP server (integrations/mcp_server.py) names a
+    # version in its own handshake too. It said 1.0.0 while everything else
+    # said 1.2.0. Read as text: the `mcp` package is not a root dependency.
+    import re
+
+    stdio = (REPO_ROOT / "wcag-audit-engine" / "integrations" / "mcp_server.py").read_text()
+    literal = re.search(r'^VERSION = "([^"]+)"', stdio, re.M)
+    assert literal and literal.group(1) == registry, "integrations/mcp_server.py names another version"
+
 
 # --- The challenge must be payable by a real client, not merely well-meant ---
 #
@@ -3058,7 +3067,7 @@ def test_a_v2_payment_signature_header_is_actually_read(monkeypatch, load_main_f
 
     seen = {}
 
-    def _capture(header, price=None):
+    def _capture(header, price=None, **kw):
         seen["header"] = header
         return None  # still unpaid; we only care that it was looked at
 
@@ -3699,7 +3708,7 @@ def test_an_x402_mcp_client_pays_in_meta_and_gets_its_receipt_in_meta(monkeypatc
         success=True, transaction="0x" + "ab" * 32, network="eip155:8453", payer=account.address
     )
 
-    def _verify(header, price=None):
+    def _verify(header, price=None, **kw):
         seen.append((header, price))
         return module.x402_payments.PendingPayment(None, None, price)
 
@@ -3992,3 +4001,340 @@ def test_a_null_axe_impact_still_validates(monkeypatch):
         "/mcp", json=_tools_call("audit_wcag", {"html": "<p>x</p>"}), headers={"X-API-Key": "test-key"}
     ).json()["result"]
     jsonschema.validate(result["structuredContent"], tool["outputSchema"])
+
+
+# --- 2026-09-06 audit: what a payer is TOLD, and what it costs to be wrong ---
+
+
+def test_a_refused_payment_402_says_why_and_a_facilitator_outage_says_when(monkeypatch):
+    """The x402 reference server re-issues its 402 with the facilitator's
+    invalid_reason; the official client does not retry a second 402. A bare
+    re-challenge left an agent nothing to act on, whether its wallet was
+    empty or the facilitator was down."""
+    from fastapi.testclient import TestClient
+
+    from x402.http.utils import decode_payment_required_header
+
+    _x402_env(monkeypatch)
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None, **kw: None)
+    monkeypatch.setattr(module.x402_payments, "_facilitator_supports", lambda version, network: True)
+    client = TestClient(module.app)
+
+    monkeypatch.setattr(
+        module.x402_payments, "last_rejection", lambda: ("insufficient_funds", "wallet holds 0 USDC")
+    )
+    response = client.post("/audit/wcag", json={"url": "https://example.com"}, headers={"X-PAYMENT": "signed"})
+    assert response.status_code == 402
+    body = response.json()
+    assert body["error"] == "insufficient_funds"
+    assert body["error_detail"] == "wallet holds 0 USDC"
+    assert body["billed"] is False
+    assert "Retry-After" not in response.headers, "an empty wallet is not a reason to retry"
+    header = response.headers.get("payment-required")
+    if header:
+        assert decode_payment_required_header(header).error == "insufficient_funds"
+
+    monkeypatch.setattr(
+        module.x402_payments, "last_rejection",
+        lambda: ("facilitator_unavailable", "the facilitator could not be reached; retry"),
+    )
+    response = client.post("/audit/wcag", json={"url": "https://example.com"}, headers={"X-PAYMENT": "signed"})
+    assert response.status_code == 402
+    assert response.json()["error"] == "facilitator_unavailable"
+    assert response.headers["Retry-After"] == "30"
+
+    # A fresh, unpaid challenge is unchanged.
+    monkeypatch.setattr(module.x402_payments, "last_rejection", lambda: None)
+    response = client.post("/audit/wcag", json={"url": "https://example.com"})
+    assert response.json()["error"] == "payment_required"
+    assert "error_detail" not in response.json()
+
+
+def test_the_mcp_paywall_carries_the_refusal_reason_too(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None, **kw: None)
+    monkeypatch.setattr(module.x402_payments, "last_rejection", lambda: ("insufficient_funds", "empty"))
+    result = TestClient(module.app).post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {"name": "audit_seo", "arguments": {"url": "https://example.com"}}},
+        headers={"X-PAYMENT": "signed"},
+    ).json()["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["error"] == "insufficient_funds"
+
+
+def test_a_pending_settlement_is_reported_as_pending_with_its_hash_not_as_free(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from x402.http.utils import decode_payment_response_header
+    from x402.schemas import SettleResponse
+
+    module = _load_main(monkeypatch)
+    tx = "0x" + "ab" * 32
+    sentinel = module.x402_payments.PendingPayment(None, None, "$0.03")
+
+    def _settle(pending):
+        pending.settle_state = "pending"
+        pending.settle_result = SettleResponse(
+            success=False, errorReason="settlement_pending", transaction=tx,
+            network="eip155:8453", payer="0x" + "11" * 20,
+        )
+        return False
+
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", lambda header, price=None, **kw: sentinel)
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _settle)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    response = TestClient(module.app).post(
+        "/audit/wcag", json={"url": "https://example.com"}, headers={"X-PAYMENT": "signed-payment"}
+    )
+    assert response.status_code == 200
+    warning = response.json()["billing_warning"]
+    assert "pending" in warning and tx in warning
+    assert "not charged" not in warning
+    assert decode_payment_response_header(response.headers["PAYMENT-RESPONSE"]).transaction == tx
+
+    def _unknown(pending):
+        pending.settle_state = "unknown"
+        return False
+
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _unknown)
+    warning = TestClient(module.app).post(
+        "/audit/wcag", json={"url": "https://example.com"}, headers={"X-PAYMENT": "signed-payment"}
+    ).json()["billing_warning"]
+    assert "unknown" in warning and "do not re-pay" in warning
+
+    def _refused(pending):
+        pending.settle_state = "refused"
+        return False
+
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _refused)
+    warning = TestClient(module.app).post(
+        "/audit/wcag", json={"url": "https://example.com"}, headers={"X-PAYMENT": "signed-payment"}
+    ).json()["billing_warning"]
+    assert "not charged" in warning
+
+
+def test_oversized_bodies_are_refused_before_they_are_read(monkeypatch):
+    """A 300 MB unpaid POST took the worker to ~1 GB RSS before any gate ran;
+    three in flight exceed the container's memory limit and the box kills
+    the node mid-audit. The cap applies before the body is buffered."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    huge = b'{"html": "' + b"x" * (module.MAX_REQUEST_BYTES + 1024) + b'"}'
+
+    response = client.post("/audit/wcag", content=huge, headers={"Content-Type": "application/json"})
+    assert response.status_code == 413
+    assert response.json()["billed"] is False
+    assert response.json()["max_request_bytes"] == module.MAX_REQUEST_BYTES
+
+    response = client.post("/mcp", content=huge, headers={"Content-Type": "application/json"})
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == -32600
+
+    # Chunked, no Content-Length: counted as it streams, still refused.
+    def _stream():
+        for _ in range(6):
+            yield b"x" * (1024 * 1024)
+
+    response = client.post("/audit/wcag", content=_stream(), headers={"Content-Type": "application/json"})
+    assert response.status_code == 413
+
+    # A legitimate 2 MiB html audit is under the cap and reaches the route.
+    fine = b'{"html": "' + b"<p>x</p>" * (module.MAX_HTML_BYTES // 16) + b'"}'
+    assert len(fine) < module.MAX_REQUEST_BYTES
+    response = client.post("/audit/wcag", content=fine, headers={"Content-Type": "application/json"})
+    assert response.status_code != 413
+
+
+def test_mcp_rate_limit_is_a_wait_not_a_payment_challenge(monkeypatch):
+    """An x402 MCP client answered with a challenge signs, retries once, gets
+    the same challenge and reports its wallet refused. Over-limit is 'wait'."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module._audit_limiter, "check", lambda key: False)
+    response = TestClient(module.app).post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+              "params": {"name": "audit_seo", "arguments": {"url": "https://example.com"}}},
+    )
+    import json as _json
+
+    assert response.status_code == 200
+    assert response.headers["Retry-After"] == "60"
+    result = response.json()["result"]
+    assert result["isError"] is True
+    detail = _json.loads(result["content"][0]["text"])
+    assert detail["error"] == "rate_limited"
+    assert detail["retry_after_seconds"] == 60
+    assert "accepts" not in detail
+    assert "x402Version" not in detail
+
+
+@pytest.mark.parametrize(
+    "body,code",
+    [
+        ([], -32600),                                                   # a batch
+        ("just a string", -32600),
+        ({"jsonrpc": "2.0", "id": 1, "method": 5}, -32600),
+        ({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": "x"}, -32602),
+        ({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+          "params": {"name": "audit_seo", "arguments": "https://example.com"}}, -32602),
+        ({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+          "params": {"name": "audit_seo", "arguments": {"url": 5}}}, -32602),
+    ],
+)
+def test_malformed_mcp_requests_get_jsonrpc_errors_not_500s(monkeypatch, body, code):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    response = TestClient(module.app).post("/mcp", json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["error"]["code"] == code
+
+
+def test_invalid_json_to_mcp_is_a_parse_error_in_jsonrpc_shape(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    response = TestClient(module.app).post(
+        "/mcp", content=b"{not json", headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "jsonrpc": "2.0", "id": None,
+        "error": {"code": -32700, "message": "Parse error: the body is not valid JSON"},
+    }
+    # Every other route keeps FastAPI's default validation shape.
+    response = TestClient(module.app).post(
+        "/audit/wcag", content=b"{not json", headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert "detail" in response.json()
+
+
+def test_the_mcp_paywall_lists_only_rails_an_mcp_caller_can_use(monkeypatch):
+    """MPP rails are paid through HTTP headers a tool result cannot carry."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    mpp_rail = {
+        "protocol": "mpp", "method": "tempo", "intent": "charge", "asset": "usdc",
+        "amount_minor_units": "30000", "send_via_header": "Authorization: Payment ...",
+        "challenge_in": "WWW-Authenticate",
+    }
+    monkeypatch.setattr(module.mpp_payments, "accepts_entries", lambda price_usd: [dict(mpp_rail)])
+    client = TestClient(module.app)
+
+    rest = client.post("/audit/seo", json={"url": "https://example.com"}).json()
+    assert any(r["protocol"] == "mpp" for r in rest["other_rails"]), "fixture: REST must offer MPP"
+
+    mcp = client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {"name": "audit_seo", "arguments": {"url": "https://example.com"}}},
+    ).json()["result"]["structuredContent"]
+    assert not any(r.get("protocol") == "mpp" for r in mcp.get("other_rails", []))
+
+
+def test_a_key_doorway_is_named_only_where_a_key_can_be_bought(monkeypatch):
+    """/billing/checkout answers 501 without Stripe billing. Naming it on the
+    402 and in agent.json sent an agent's operator to a dead end."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    assert module.billing.is_configured() is False
+
+    body = client.post("/audit", json={"url": "https://example.com"}).json()
+    assert body["alternative"]["header"] == "X-API-Key"
+    assert "get_one" not in body["alternative"]
+    assert "checkout" not in client.get("/.well-known/agent.json").json()["pricing"]["human_plans"]
+
+    monkeypatch.setattr(module.billing, "is_configured", lambda: True)
+    body = client.post("/audit", json={"url": "https://example.com"}).json()
+    assert body["alternative"]["get_one"].endswith("/billing/checkout")
+    plans = client.get("/.well-known/agent.json").json()["pricing"]["human_plans"]
+    assert plans["checkout"].endswith("/billing/checkout")
+
+
+def test_openapi_prices_the_x402_rail(monkeypatch, load_main_fresh):
+    """On an x402-only deploy every paid route read as free in openapi.json
+    while the 402, agent.json, llms.txt and mcp.json all priced it."""
+    from fastapi.testclient import TestClient
+
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_main_openapi_x402")
+    doc = TestClient(module.app).get("/openapi.json").json()
+
+    for path, amount in (("/audit/wcag", "30000"), ("/audit/bundle", "100000"), ("/audit", "30000")):
+        operation = doc["paths"][path]["post"]
+        offers = operation["x-payment-info"]["offers"]
+        x402 = [o for o in offers if o["method"] == "x402"]
+        assert x402, f"{path} carries no x402 offer"
+        assert x402[0]["amount"] == amount
+        assert x402[0]["payTo"] == _X402_TEST_PAY_TO
+        assert "402" in operation["responses"]
+
+
+def test_a_body_with_nothing_to_audit_is_refused_before_payment(monkeypatch):
+    """Checked after the facilitator, this 400 burned a verify and the
+    signature's nonce, so the payer's corrected retry read as a replay."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = {"verify": 0}
+
+    def _verify(header, price=None, **kw):
+        calls["verify"] += 1
+        return None
+
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", _verify)
+    client = TestClient(module.app)
+    for path in ("/audit", "/audit/wcag", "/audit/seo"):
+        response = client.post(path, json={}, headers={"X-PAYMENT": "signed"})
+        assert response.status_code == 400, path
+        assert response.json()["billed"] is False
+        assert "Nothing was charged" in response.json()["detail"]
+    assert calls["verify"] == 0, "a body with nothing to audit reached the facilitator"
+
+
+def test_a_failed_audit_says_it_was_not_charged(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _x402_caller(monkeypatch, module)
+
+    def _boom(*a, **k):
+        raise RuntimeError("target site unreachable")
+
+    monkeypatch.setattr(module, "_run_axe", _boom)
+    response = TestClient(module.app).post(
+        "/audit/wcag", json={"url": "https://example.com"}, headers={"X-PAYMENT": "signed-payment"}
+    )
+    assert response.status_code == 502
+    assert response.json()["billed"] is False
+    assert "Nothing was charged" in response.json()["detail"]
+
+
+def test_the_revenue_line_survives_the_default_log_level(monkeypatch):
+    """"x402 SETTLED" is INFO. With the root logger at Python's default
+    (WARNING) the shipped container logged none of them -- the rehearsal
+    paid the image three times and `docker logs` showed zero."""
+    import logging
+
+    root = logging.getLogger()
+    previous = root.level
+    root.setLevel(logging.WARNING)
+    try:
+        _load_main(monkeypatch)
+        assert root.isEnabledFor(logging.INFO), "INFO lines are still dropped"
+    finally:
+        root.setLevel(previous)

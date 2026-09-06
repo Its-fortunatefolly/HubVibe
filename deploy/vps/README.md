@@ -11,14 +11,22 @@ A 4 GB / 2 vCPU box (≈ $4–5/month) runs 2 concurrent audits — roughly
 box costs. Raise `MAX_CONCURRENT_AUDITS` and `mem_limit` together when
 revenue outgrows it, or add a second box behind the same domain.
 
-## The two manual steps
+## The manual steps
 
 1. Buy a domain (any registrar, ≈ $10/yr). **The domain is the point**: every
    manifest, registry entry and agent cache holds the URL, so owning the
    domain means the host underneath can change with a DNS record.
-2. Create a DNS **A record** for it pointing at the box's IP.
+2. Buy the box and note its public IP (Hostinger: the VPS overview page).
+   Make sure its firewall allows **80 and 443** inbound (Hostinger's VPS
+   firewall is off by default; if you enabled one, add both ports).
+3. Create two DNS **A records** pointing at that IP: `@` (the bare domain)
+   and `www`. Caddy serves the bare domain and redirects `www` to it.
 
-## Then, on the box
+## Then, on the box -- and only on the box
+
+Open the box's terminal (Hostinger: VPS → **Browser terminal**; or
+`ssh root@YOUR_VPS_IP`). **Not Google Cloud Shell** -- that is a temporary
+terminal, not a server, and the installer refuses to run there.
 
 ```bash
 git clone https://github.com/Its-fortunatefolly/HubVibe
@@ -29,7 +37,7 @@ bash scripts/vps-install.sh yourdomain.com
 That validates the payment recipient before touching anything, installs
 Docker if missing, writes `deploy/vps/.env`, builds, starts, and waits for
 health. Caddy fetches and renews the HTTPS certificate itself once DNS
-resolves.
+resolves. Re-running the same command later is safe: `.env` is kept.
 
 To also enable the Stripe rails, export their variables in the same shell
 before running the installer (see `.env.example`); absent, those rails stay
@@ -51,9 +59,13 @@ payment carries its discovery record.
 ```bash
 cd HubVibe/deploy/vps
 docker compose logs -f hubvibe          # the node's log (x402 SETTLED lines = revenue)
+docker compose logs hubvibe | grep -c "x402 SETTLED"   # paid calls so far
 docker compose up -d --build            # deploy a new version after git pull
 docker compose restart hubvibe          # bounce the service
 ```
+
+From any machine, `BASE=https://yourdomain.com bash scripts/payment-status.sh`
+reads the wallet balances, the live 402 and whether the recipient is yours.
 
 Both containers restart on failure and on reboot (`restart: unless-stopped`).
 The key store lives in the `hubvibe_data` volume; back it up with

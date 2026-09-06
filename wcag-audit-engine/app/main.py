@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import secrets
 import threading
@@ -6,10 +7,12 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from axe_playwright_python.sync_playwright import Axe
 from fastapi import Body, FastAPI, Header, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -64,6 +67,19 @@ PUBLIC_BASE_URL = os.environ.get(
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
 SERVICE_VERSION = "1.2.0"
+
+# The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
+# Python's root logger defaults to WARNING and uvicorn configures only its
+# own loggers, so in the shipped container every INFO line this app wrote
+# was dropped: the 2026-09-06 rehearsal paid the image three times and
+# `docker logs` showed zero SETTLED lines, while the runbook told the owner
+# to grep for them. Configure the root once; a host that already did wins.
+_root_logger = logging.getLogger()
+if not _root_logger.handlers:
+    logging.basicConfig(format="%(levelname)s:%(name)s:%(message)s")
+_configured_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+if _root_logger.level == logging.NOTSET or _root_logger.level > _configured_level:
+    _root_logger.setLevel(_configured_level)
 
 # Each in-flight audit holds a Chromium browser (see browser_pool), so the
 # ceiling on concurrent audits is really a memory ceiling, not a CPU one.
@@ -141,6 +157,120 @@ CORS_EXPOSED_HEADERS = [
     "X-PAYMENT-RESPONSE",
     "Retry-After",
 ]
+
+# The largest request body this node will read, in bytes. The biggest
+# legitimate body is an `html` audit at MAX_HTML_BYTES (2 MiB) plus JSON
+# escaping; anything past this is refused before it is buffered. Without a
+# cap, `Body(...)` read and parsed whatever arrived: a 300 MB unpaid POST to
+# /mcp took the worker to ~1 GB RSS before the html-size gate ever ran, and
+# three of them in flight exceed the container's 3 GB limit -- the box
+# OOM-kills the node, every paid audit in flight dies unbilled, and the
+# attacker paid nothing but bandwidth. Caddy enforces the same cap in front
+# (deploy/vps/Caddyfile); this one holds on any host, Cloud Run included.
+MAX_REQUEST_BYTES = int(os.environ.get("MAX_REQUEST_BYTES", str(4 * 1024 * 1024)))
+
+
+def _body_too_large_content(path: str, size: int, max_bytes: int) -> dict:
+    detail = (
+        f"request body is {size} bytes; this node reads at most {max_bytes}. "
+        "Nothing was charged for this request."
+    )
+    if path == "/mcp":
+        # JSON-RPC callers get a JSON-RPC error, not a REST shape.
+        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": detail}}
+    return {"status": "error", "detail": detail, "billed": False, "max_request_bytes": max_bytes}
+
+
+class _BodyTooLarge(HTTPException):
+    """Raised from the counting `receive` when a chunked body passes the cap.
+
+    An HTTPException on purpose: FastAPI's route handler turns any OTHER
+    exception raised while it reads the body into a generic 400 before an
+    exception handler can see it, and re-raises HTTPExceptions untouched --
+    so this one reaches the handler below and answers as a 413.
+    """
+
+    def __init__(self, size: int, max_bytes: int):
+        super().__init__(status_code=413, detail="request body too large")
+        self.size = size
+        self.max_bytes = max_bytes
+
+
+@app.exception_handler(_BodyTooLarge)
+async def _body_too_large(request: Request, exc: _BodyTooLarge):
+    return JSONResponse(
+        status_code=413, content=_body_too_large_content(request.url.path, exc.size, exc.max_bytes)
+    )
+
+
+class _RequestBodyLimit:
+    """Pure-ASGI middleware: refuse a request body over `max_bytes` with 413.
+
+    Two checks. A declared Content-Length over the cap is refused before a
+    byte of body is read. A body that arrives without one (chunked) is
+    counted as it streams, and cut off the moment it passes the cap -- a
+    missing header must not be the way around the limit.
+    """
+
+    def __init__(self, app, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = None
+        for name, value in scope.get("headers") or []:
+            if name == b"content-length":
+                try:
+                    declared = int(value)
+                except ValueError:
+                    declared = None
+                break
+        if declared is not None and declared > self.max_bytes:
+            await self._refuse(scope, send, declared)
+            return
+
+        received = 0
+        started = False
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body") or b"")
+                if received > self.max_bytes:
+                    raise _BodyTooLarge(received, self.max_bytes)
+            return message
+
+        async def tracking_send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except _BodyTooLarge as exc:
+            if started:
+                raise
+            await self._refuse(scope, send, exc.size)
+
+    async def _refuse(self, scope, send, size: int):
+        response = JSONResponse(
+            status_code=413,
+            content=_body_too_large_content(scope.get("path") or "", size, self.max_bytes),
+        )
+        await response(scope, _empty_receive, send)
+
+
+async def _empty_receive():
+    return {"type": "http.request", "body": b"", "more_body": False}
+
+
+# Added BEFORE CORS so CORS wraps it: a browser caller can read the 413.
+app.add_middleware(_RequestBodyLimit, max_bytes=MAX_REQUEST_BYTES)
 
 app.add_middleware(
     CORSMiddleware,
@@ -389,7 +519,12 @@ def _route_description(path: Optional[str]) -> str:
 
 
 def _payment_required_response(
-    host: Optional[str] = None, price_usd: float = 0.03, path: Optional[str] = None
+    host: Optional[str] = None,
+    price_usd: float = 0.03,
+    path: Optional[str] = None,
+    error: Optional[str] = None,
+    error_detail: Optional[str] = None,
+    retry_after: Optional[int] = None,
 ) -> JSONResponse:
     """The 402 shape a caller needs to pay via x402, MPP, or get a Stripe
     API key -- returned whenever none of those is attached and valid (or
@@ -403,6 +538,15 @@ def _payment_required_response(
     route's rate, plus the x402-style JSON body for callers that read
     price/payTo from the body instead. Cache-Control: no-store is required
     by the MPP core spec on every 402.
+
+    `error` / `error_detail` / `retry_after` are set when this 402 answers a
+    payment that was TRIED and refused. The x402 reference server re-issues
+    its 402 with the facilitator's `invalid_reason` as `error`, and the
+    official client does not retry a second 402 -- so a bare re-challenge
+    leaves the agent nothing to act on. An empty wallet, a signature for the
+    wrong route and a facilitator outage used to produce byte-identical
+    responses; the outage now also carries Retry-After, because the payer
+    did nothing wrong.
     """
     price = f"${price_usd:.2f}"
     resource_url = f"{PUBLIC_BASE_URL}{path}" if path else PUBLIC_BASE_URL
@@ -476,8 +620,23 @@ def _payment_required_response(
             }
         )
 
+    # The key rail's human doorway. X-API-Key is read on every deployment
+    # (the internal key, prepaid keys), but a key can only be BOUGHT where
+    # Stripe billing is configured -- /billing/checkout answers 501
+    # everywhere else. Naming that URL on an x402-only node sent an agent's
+    # operator to a dead end and read as "the service is broken".
+    alternative = {
+        "header": "X-API-Key",
+        "detail": (
+            "Key issued with a human plan, priced per site watched. "
+            "For machine volume, pay per call with a rail in `accepts`."
+        ),
+    }
+    if billing.is_configured():
+        alternative["get_one"] = f"{PUBLIC_BASE_URL}/billing/checkout"
+
     body = {
-        "error": "payment_required",
+        "error": error or "payment_required",
         "price_usd": price_usd,
         "price": price,
         # x402Version marks this body as a v1 challenge. It is what makes a
@@ -487,16 +646,12 @@ def _payment_required_response(
         "x402Version": 1,
         "accepts": accepts,
         "other_rails": other_rails,
-        "alternative": {
-            "header": "X-API-Key",
-            "detail": (
-                "Key issued with a human plan, priced per site watched. "
-                "For machine volume, pay per call with a rail in `accepts`."
-            ),
-            "get_one": f"{PUBLIC_BASE_URL}/billing/checkout",
-        },
+        "alternative": alternative,
         "docs": f"{PUBLIC_BASE_URL}/.well-known/agent.json",
     }
+    if error:
+        body["error_detail"] = error_detail or error
+        body["billed"] = False
     # Bazaar discovery. Facilitators catalog x402 resources by reading this
     # off their 402s, and agents shop that index by capability -- without it
     # this endpoint is findable only by someone who already has the URL.
@@ -517,12 +672,21 @@ def _payment_required_response(
         resource_url=resource_url,
         description=_route_description(path),
         extensions=bazaar or None,
+        error=error,
     ).items():
         response.headers[name] = value
     response.headers["Cache-Control"] = "no-store"
+    if retry_after:
+        response.headers["Retry-After"] = str(int(retry_after))
     for header_value in mpp_payments.www_authenticate_headers(realm=host, price_usd=price_usd):
         response.headers.append("WWW-Authenticate", header_value)
     return response
+
+
+# How long a payer should wait when the FACILITATOR, not the payer, was the
+# reason a payment could not be checked. Short: outages that matter are
+# minutes long, and an agent that waits an hour for a 30-second blip is lost.
+_FACILITATOR_RETRY_AFTER_SECONDS = 30
 
 
 def _authenticate(
@@ -573,15 +737,25 @@ def _authenticate(
                     payment_method="stripe",
                 )
 
+    refusal = None
     if x_payment:
         # Verify only -- do NOT settle here. Settlement happens in _bill, after
         # an audit has actually produced a result, so a caller whose audit
         # fails to run is never charged for nothing.
-        pending = x402_payments.verify_only_sync(x_payment, price=f"${price_usd:.2f}")
+        #
+        # resource_url: the URL this route advertised in its 402. A v1 payer's
+        # requirements are rebuilt from the same values it was challenged
+        # with, and the resource is one of them.
+        pending = x402_payments.verify_only_sync(
+            x_payment,
+            price=f"${price_usd:.2f}",
+            resource_url=f"{PUBLIC_BASE_URL}{path}" if path else PUBLIC_BASE_URL,
+        )
         if pending is not None:
             return AuthContext(
                 stripe_billable=False, payment_method="x402", pending_payment=pending
             )
+        refusal = x402_payments.last_rejection()
 
     if authorization and authorization.startswith("Payment "):
         credential = authorization[len("Payment "):].strip()
@@ -613,6 +787,20 @@ def _authenticate(
             # nothing further to pass here beyond the realm check.
             return AuthContext(stripe_billable=False, payment_method="mpp")
 
+    if refusal:
+        reason, detail = refusal
+        return _payment_required_response(
+            host=host,
+            price_usd=price_usd,
+            path=path,
+            error=reason,
+            error_detail=detail,
+            retry_after=(
+                _FACILITATOR_RETRY_AFTER_SECONDS
+                if x402_payments.rejection_is_transient(reason)
+                else None
+            ),
+        )
     return _payment_required_response(host=host, price_usd=price_usd, path=path)
 
 
@@ -738,6 +926,26 @@ def _bill(auth, price_usd: float) -> Optional[str]:
     """
     if auth.pending_payment is not None:
         if not x402_payments.settle_sync(auth.pending_payment):
+            # Not settled -- but "not charged" is only true for a refusal.
+            # A settle the facilitator broadcast and has not confirmed, or
+            # one this node stopped waiting for, may still move the money;
+            # the payer is told exactly that, with the hash where there is
+            # one, instead of a false "free".
+            state = getattr(auth.pending_payment, "settle_state", None)
+            if state == "pending":
+                result = getattr(auth.pending_payment, "settle_result", None)
+                transaction = getattr(result, "transaction", None) or "unknown"
+                return (
+                    "payment settlement is pending on-chain "
+                    f"(transaction {transaction}); this call is being charged "
+                    "and the receipt header carries the transaction"
+                )
+            if state == "unknown":
+                return (
+                    "payment settlement status is unknown: the facilitator did "
+                    "not answer in time. The transfer may still complete on-chain; "
+                    "do not re-pay for this call"
+                )
             # We delivered without collecting. Deliberately the lesser evil
             # versus charging for undelivered work, but it must be visible.
             return "payment settlement failed after the audit ran; this call was not charged"
@@ -826,6 +1034,25 @@ def _reject_unfetchable_target(url: Optional[str]) -> Optional[JSONResponse]:
         content={
             "status": "error",
             "detail": f"'url' {problem}. Nothing was charged for this request.",
+            "billed": False,
+        },
+    )
+
+
+def _reject_missing_input(payload) -> Optional[JSONResponse]:
+    """A 400 for a body with neither `html` nor `url`, or None.
+
+    Runs before the payment is read, like the target gate: a request this
+    service cannot act on costs the caller nothing and costs this node no
+    facilitator call, and says so.
+    """
+    if getattr(payload, "html", None) or getattr(payload, "url", None):
+        return None
+    return JSONResponse(
+        status_code=400,
+        content={
+            "status": "error",
+            "detail": "Provide 'html' or 'url'. Nothing was charged for this request.",
             "billed": False,
         },
     )
@@ -1174,9 +1401,15 @@ def _openapi_with_payment_info() -> dict:
     for alias, target in _CATALOG_ALIASES.items():
         reverse_aliases.setdefault(target, []).append(alias)
     for entry in _CATALOG:
-        offers = mpp_payments.discovery_offers(
-            entry["price_usd"], description=entry["description"]
+        offers = list(
+            mpp_payments.discovery_offers(entry["price_usd"], description=entry["description"])
         )
+        # The x402 rail, too. On an x402-only deploy the MPP offers are empty
+        # and every paid route used to read as free here while the 402,
+        # agent.json, llms.txt and mcp.json all priced it.
+        x402_offer = x402_payments.discovery_offer(f"${entry['price_usd']:.2f}")
+        if x402_offer:
+            offers.append(x402_offer)
         if not offers:
             continue
         for path in (entry["path"], *reverse_aliases.get(entry["path"], [])):
@@ -1283,7 +1516,9 @@ async def agent_manifest(request: Request):
                     "People who want a recurring report rather than an "
                     "integration. Not a cheaper way to buy calls."
                 ),
-                "checkout": f"{base}/billing/checkout",
+                # Only where a plan can actually be bought: /billing/checkout
+                # answers 501 on a deploy without Stripe billing.
+                **({"checkout": f"{base}/billing/checkout"} if billing.is_configured() else {}),
                 "tiers": [
                     {
                         "id": plan["id"],
@@ -1838,9 +2073,28 @@ def _mcp_tool_error(request_id, message: str, details: Optional[dict] = None) ->
     }
 
 
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    """/mcp answers in JSON-RPC, even when the request never parsed.
+
+    FastAPI's default is a 422 with a `detail` list -- a REST shape a
+    JSON-RPC client cannot read; the official MCP client surfaces it as an
+    opaque transport error. Invalid JSON is -32700 (parse error), anything
+    else -32600 (invalid request). Every other route keeps the default.
+    """
+    if request.url.path != "/mcp":
+        return await request_validation_exception_handler(request, exc)
+    errors = exc.errors() if hasattr(exc, "errors") else []
+    parse_error = any(e.get("type") == "json_invalid" for e in errors)
+    code, message = (-32700, "Parse error: the body is not valid JSON") if parse_error else (
+        -32600, "Invalid Request: expected a JSON-RPC request object"
+    )
+    return JSONResponse(status_code=400, content=_jsonrpc_error(None, code, message))
+
+
 @app.post("/mcp", tags=["discovery"])
 async def mcp_streamable_http(
-    payload: dict = Body(...),
+    payload: Any = Body(...),
     request: Request = None,
     x_api_key: Optional[str] = Header(None),
     x_payment: Optional[str] = Header(None),
@@ -1858,15 +2112,31 @@ async def mcp_streamable_http(
     why. The handshake and the tool list are answered on the event loop;
     only tools/call is handed to the audit thread pool.
     """
+    # Shape first. A JSON array (the batch form MCP dropped in 2025-06-18), a
+    # bare string, a params that is not an object: each of these used to
+    # reach `.get` on the wrong type and come back as an HTTP 500 with a
+    # text/plain body. A JSON-RPC client can act on -32600; it cannot act on
+    # "Internal Server Error".
+    if not isinstance(payload, dict):
+        return _jsonrpc_error(
+            None, -32600,
+            "Invalid Request: expected one JSON-RPC request object (batches are not supported)",
+        )
     method = payload.get("method")
     request_id = payload.get("id")
+    params = payload.get("params")
+    if params is not None and not isinstance(params, dict):
+        return _jsonrpc_error(request_id, -32602, "Invalid params: `params` must be an object")
 
     # Notifications carry no id and must not be answered with a body.
     if request_id is None and isinstance(method, str) and method.startswith("notifications/"):
         return Response(status_code=202)
 
+    if not isinstance(method, str):
+        return _jsonrpc_error(request_id, -32600, "Invalid Request: `method` must be a string")
+
     if method == "initialize":
-        client_version = (payload.get("params") or {}).get("protocolVersion")
+        client_version = (params or {}).get("protocolVersion")
         version = (
             client_version if client_version in MCP_PROTOCOL_VERSIONS else MCP_PROTOCOL_VERSIONS[0]
         )
@@ -1929,6 +2199,13 @@ def _mcp_tools_call(
     params = payload.get("params") or {}
     name = params.get("name")
     args = params.get("arguments") or {}
+    if not isinstance(args, dict):
+        return _jsonrpc_error(request_id, -32602, "Invalid params: `arguments` must be an object")
+    for field in ("url", "html"):
+        if args.get(field) is not None and not isinstance(args[field], str):
+            return _jsonrpc_error(
+                request_id, -32602, f"Invalid params: `{field}` must be a string"
+            )
 
     price = _MCP_TOOL_PRICES.get(name)
     if price is None:
@@ -1966,6 +2243,18 @@ def _mcp_tools_call(
         x_api_key, x_payment or meta_payment, authorization, request, price_usd=price
     )
     if err is not None:
+        if err.status_code == 429:
+            # Over the limit is not "pay me": an x402 MCP client answered
+            # with a challenge signs a payment and retries once, gets the
+            # same challenge, and reports its wallet as refused. Tell it to
+            # wait, with the same Retry-After the REST route sends.
+            envelope = _mcp_tool_error(
+                request_id,
+                f"Rate limit exceeded ({RATE_LIMIT_PER_MINUTE} requests/minute). "
+                "Nothing was charged. Retry after 60 seconds.",
+                {"error": "rate_limited", "retry_after_seconds": 60, "billed": False},
+            )
+            return JSONResponse(content=envelope, headers={"Retry-After": "60"})
         return _mcp_payment_required(request_id, name, price, err)
 
     try:
@@ -2058,11 +2347,16 @@ def _mcp_payment_required(request_id, name: str, price: float, err: JSONResponse
             example={"url": "https://example.com"},
         )
 
+    # The REST body's `error` is "payment_required" on a fresh challenge and
+    # the refusal reason when a payment was tried; carry it into the v2
+    # object so an MCP payer learns why exactly as an HTTP payer does.
+    rest_error = rest_body.get("error") if isinstance(rest_body, dict) else None
     challenge = x402_payments.payment_required_v2_dict(
         price=f"${price:.2f}",
         resource_url=f"{PUBLIC_BASE_URL}/mcp",
         description=tool["description"] if tool is not None else _route_description(None),
         extensions=mcp_bazaar or None,
+        error=rest_error if rest_error and rest_error != "payment_required" else None,
     )
     if challenge:
         # v2 wins the keys both objects carry (x402Version, accepts, error,
@@ -2074,6 +2368,17 @@ def _mcp_payment_required(request_id, name: str, price: float, err: JSONResponse
         challenge = rest_body
         if mcp_bazaar:
             challenge["extensions"] = mcp_bazaar
+
+    # Rails an MCP caller can actually use. The MPP rails are paid through
+    # HTTP headers (`Authorization: Payment`, challenge in WWW-Authenticate)
+    # that a tool result cannot carry, so listing them here names a rail
+    # this transport cannot settle. The API-key rail rides the JSON-RPC
+    # request's own X-API-Key header and stays.
+    if isinstance(challenge.get("other_rails"), list):
+        challenge["other_rails"] = [
+            rail for rail in challenge["other_rails"]
+            if not (isinstance(rail, dict) and rail.get("protocol") == "mpp")
+        ]
 
     message = (
         f"Payment required (${price:.2f} for {name}). Attach X-API-Key, "
@@ -2235,12 +2540,16 @@ def audit(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    # Before any payment is read: a body with nothing to audit is refused for
+    # free. Checked after the facilitator, this 400 burned a verify round
+    # trip and the signature's nonce, so the payer's corrected retry with the
+    # same authorization was refused as a replay.
+    missing = _reject_missing_input(payload)
+    if missing is not None:
+        return missing
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
     if err:
         return err
-
-    if not payload.html and not payload.url:
-        raise HTTPException(status_code=400, detail="Provide 'html' or 'url'")
 
     try:
         raw = _run_axe(payload.html, payload.url)
@@ -2298,19 +2607,28 @@ def audit_wcag(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    # Before any payment is read: a body with nothing to audit is refused for
+    # free. Checked after the facilitator, this 400 burned a verify round
+    # trip and the signature's nonce, so the payer's corrected retry with the
+    # same authorization was refused as a replay.
+    missing = _reject_missing_input(payload)
+    if missing is not None:
+        return missing
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
     if err:
         return err
-
-    if not payload.html and not payload.url:
-        raise HTTPException(status_code=400, detail="Provide 'html' or 'url'")
 
     try:
         raw = _run_axe(payload.html, payload.url)
     except Exception as exc:
         return JSONResponse(
             status_code=502,
-            content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
+            content={
+                "status": "error",
+                "pass": None,
+                "detail": f"Audit could not complete: {exc}. Nothing was charged for this request.",
+                "billed": False,
+            },
         )
 
     violations = raw.get("violations", [])
@@ -2347,19 +2665,28 @@ def audit_seo(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    # Before any payment is read: a body with nothing to audit is refused for
+    # free. Checked after the facilitator, this 400 burned a verify round
+    # trip and the signature's nonce, so the payer's corrected retry with the
+    # same authorization was refused as a replay.
+    missing = _reject_missing_input(payload)
+    if missing is not None:
+        return missing
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
     if err:
         return err
-
-    if not payload.html and not payload.url:
-        raise HTTPException(status_code=400, detail="Provide 'html' or 'url'")
 
     try:
         result = audits.run_seo_audit(payload.html, payload.url)
     except Exception as exc:
         return JSONResponse(
             status_code=502,
-            content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
+            content={
+                "status": "error",
+                "pass": None,
+                "detail": f"Audit could not complete: {exc}. Nothing was charged for this request.",
+                "billed": False,
+            },
         )
 
     warning = _bill(auth, price_usd=0.03)
@@ -2388,7 +2715,12 @@ def audit_security(
     except Exception as exc:
         return JSONResponse(
             status_code=502,
-            content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
+            content={
+                "status": "error",
+                "pass": None,
+                "detail": f"Audit could not complete: {exc}. Nothing was charged for this request.",
+                "billed": False,
+            },
         )
 
     warning = _bill(auth, price_usd=0.03)
@@ -2417,7 +2749,12 @@ def audit_performance(
     except Exception as exc:
         return JSONResponse(
             status_code=502,
-            content={"status": "error", "pass": None, "detail": f"Audit could not complete: {exc}"},
+            content={
+                "status": "error",
+                "pass": None,
+                "detail": f"Audit could not complete: {exc}. Nothing was charged for this request.",
+                "billed": False,
+            },
         )
 
     warning = _bill(auth, price_usd=0.03)
@@ -2472,7 +2809,12 @@ def audit_bundle(
     except Exception as exc:
         return JSONResponse(
             status_code=502,
-            content={"status": "error", "pass": None, "detail": f"Bundle audit could not complete: {exc}"},
+            content={
+                "status": "error",
+                "pass": None,
+                "detail": f"Bundle audit could not complete: {exc}. Nothing was charged for this request.",
+                "billed": False,
+            },
         )
 
     result = {
