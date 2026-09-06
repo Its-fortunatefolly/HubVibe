@@ -126,9 +126,32 @@ print("%s\t%s" % (key if key.startswith("0x") else "0x" + key, a.address))
 
 step "Checking the client dependencies are installed"
 if ! python3 -c 'import x402, eth_account, httpx' 2>/dev/null; then
-  warn "installing the x402 client extras"
-  pip install --quiet "x402[evm,extensions]" eth-account httpx \
+  # A fresh Ubuntu box (the VPS) ships python3 with no pip and no venv
+  # module, and refuses system-wide pip installs anyway (PEP 668). So the
+  # client lives in its own environment beside the wallet key, and every
+  # python3 below resolves to it through PATH. Found on the owner's VPS
+  # 2026-09-06: `pip: command not found` at the first paid call.
+  VENV="${HUBVIBE_VENV:-${HOME:-/tmp}/.hubvibe-venv}"
+  if [ ! -x "$VENV/bin/python3" ]; then
+    warn "creating a private Python environment at $VENV"
+    if ! python3 -m venv "$VENV" 2>/dev/null; then
+      rm -rf "$VENV"
+      command -v apt-get >/dev/null 2>&1 \
+        || die "python3 cannot create a venv here and there is no apt-get. Install python3-venv and re-run."
+      warn "installing python3-venv (apt)"
+      { apt-get install -y -q python3-venv >/dev/null 2>&1 \
+        || { apt-get update -q >/dev/null 2>&1 && apt-get install -y -q python3-venv >/dev/null 2>&1; }; } \
+        || die "apt-get could not install python3-venv (run as root, or install it by hand and re-run)"
+      python3 -m venv "$VENV" || die "could not create a Python environment at $VENV"
+    fi
+  fi
+  export PATH="$VENV/bin:$PATH"
+  warn "installing the x402 client extras into $VENV"
+  python3 -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+  python3 -m pip install --quiet "x402[evm,extensions]==2.22.0" eth-account httpx \
     || die "could not install the x402 client extras"
+  python3 -c 'import x402, eth_account, httpx' 2>/dev/null \
+    || die "the x402 client installed but does not import; read the errors above"
 fi
 ok "x402 client is importable"
 
@@ -175,7 +198,38 @@ except Exception as exc:
   exit 0
 fi
 
-if [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
+# Pay from the owner's OWN wallet. The Base app (and Coinbase Wallet) export
+# a 12/24-word recovery phrase, not a raw key, so the phrase is accepted and
+# the first account (m/44'/60'/0'/0/0, the one the app shows) is derived in
+# memory: the key never touches disk. Takes precedence over a key file, so a
+# throwaway wallet made earlier is simply ignored. Owner's call 2026-09-06:
+# no third address in the loop -- the buyer is their wallet, the seller is
+# their wallet. Delete the phrase file once the call has settled.
+PHRASE_FILE="${HUBVIBE_WALLET_PHRASE_FILE:-${HOME:-/tmp}/.hubvibe-wallet-phrase}"
+if [ -n "${HUBVIBE_WALLET_MNEMONIC:-}" ] || [ -r "$PHRASE_FILE" ]; then
+  export PHRASE_FILE
+  DERIVED=$(python3 -c '
+import os, sys
+from eth_account import Account
+Account.enable_unaudited_hdwallet_features()
+phrase = os.environ.get("HUBVIBE_WALLET_MNEMONIC") or open(os.environ["PHRASE_FILE"]).read()
+phrase = " ".join(phrase.split())
+if len(phrase.split()) not in (12, 15, 18, 21, 24):
+    sys.exit("expected a 12- or 24-word recovery phrase, got %d words" % len(phrase.split()))
+acct = Account.from_mnemonic(phrase, account_path="m/44%s/60%s/0%s/0/0" % ("\x27", "\x27", "\x27"))
+key = acct.key.hex()
+print("%s\t%s" % (key if key.startswith("0x") else "0x" + key, acct.address))
+' 2>&1) || die "could not derive a wallet from the recovery phrase: ${DERIVED}"
+  HUBVIBE_WALLET_KEY="${DERIVED%%$'\t'*}"
+  export HUBVIBE_WALLET_KEY
+  PHRASE_ADDRESS="${DERIVED##*$'\t'}"
+  if [ -n "${HUBVIBE_EXPECT_ADDRESS:-}" ] \
+     && [ "$(printf '%s' "$PHRASE_ADDRESS" | tr 'A-Z' 'a-z')" != "$(printf '%s' "$HUBVIBE_EXPECT_ADDRESS" | tr 'A-Z' 'a-z')" ]; then
+    die "the recovery phrase derives $PHRASE_ADDRESS, not HUBVIBE_EXPECT_ADDRESS=$HUBVIBE_EXPECT_ADDRESS. Wrong phrase, or the app shows a different account."
+  fi
+  ok "paying from your own wallet (recovery phrase): $PHRASE_ADDRESS"
+  warn "delete the phrase once this settles:  rm -f $PHRASE_FILE"
+elif [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
   ok "wallet key from HUBVIBE_WALLET_KEY"
 elif [ -r "$WALLET_FILE" ]; then
   HUBVIBE_WALLET_KEY=$(cat "$WALLET_FILE")

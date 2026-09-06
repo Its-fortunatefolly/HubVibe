@@ -428,3 +428,49 @@ def test_the_paying_block_still_has_no_loop_after_the_read_retry():
     text = SCRIPT.read_text()
     read_block = text[text.index('step "Reading the live 402'):text.index('step "Paying for one real call')]
     assert "for attempt in 1 2 3" in read_block
+
+
+def test_the_client_is_installed_into_a_venv_never_with_bare_pip():
+    """A fresh Ubuntu VPS has python3 but no `pip` command and refuses
+    system-wide installs (PEP 668). The first real run died at
+    `pip: command not found`. The script must build its own environment
+    and reach pip through the interpreter."""
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parent.parent / "scripts" / "first-paid-call.sh").read_text()
+    assert "python3 -m venv" in text, "no private environment is created"
+    assert 'export PATH="$VENV/bin:$PATH"' in text, "the venv is not put on PATH for the rest of the script"
+    assert "python3 -m pip install" in text
+    bare = [line for line in text.splitlines() if re.match(r"^\s*pip\s+install", line)]
+    assert not bare, "bare `pip install` again: " + "; ".join(bare)
+    assert "python3-venv" in text, "no apt fallback for a box whose python3 lacks the venv module"
+
+
+def test_a_recovery_phrase_pays_from_the_owners_own_wallet(tmp_path):
+    """The Base app exports a recovery phrase, not a raw key. The script
+    derives the app's first account from it in memory, names the address,
+    and refuses a phrase that derives some other wallet."""
+    import os
+    import subprocess
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "first-paid-call.sh"
+    phrase = tmp_path / ".hubvibe-wallet-phrase"
+    phrase.write_text("test test test test test test test test test test test junk\n")
+    venv_bin = str(Path(__file__).resolve().parent.parent / ".venv" / "bin")
+    env = {"HOME": str(tmp_path), "PATH": f"{venv_bin}:/usr/bin:/bin", "BASE": "http://127.0.0.1:9"}
+
+    out = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=180, env=env).stdout
+    assert "paying from your own wallet" in out
+    assert "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" in out, "the first account of the standard test phrase"
+    assert "delete the phrase" in out
+    assert "New Base wallet created" not in out, "a phrase must never mint a throwaway wallet"
+    assert not (tmp_path / ".hubvibe-wallet-key").exists(), "the derived key must not be written to disk"
+
+    out = subprocess.run(
+        ["bash", str(script)], capture_output=True, text=True, timeout=180,
+        env={**env, "HUBVIBE_EXPECT_ADDRESS": "0x37555E884c5EbA10f6E816DbecEA30965B9b38C0"},
+    ).stdout
+    assert "STOP" in out and "not HUBVIBE_EXPECT_ADDRESS" in out
+    assert os.environ.get("HUBVIBE_WALLET_KEY") is None
