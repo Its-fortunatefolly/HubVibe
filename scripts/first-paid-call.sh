@@ -123,9 +123,32 @@ print("%s\t%s" % (key if key.startswith("0x") else "0x" + key, a.address))
 
 step "Checking the client dependencies are installed"
 if ! python3 -c 'import x402, eth_account, httpx' 2>/dev/null; then
-  warn "installing the x402 client extras"
-  pip install --quiet "x402[evm,extensions]" eth-account httpx \
+  # A fresh Ubuntu box (the VPS) ships python3 with no pip and no venv
+  # module, and refuses system-wide pip installs anyway (PEP 668). So the
+  # client lives in its own environment beside the wallet key, and every
+  # python3 below resolves to it through PATH. Found on the owner's VPS
+  # 2026-09-06: `pip: command not found` at the first paid call.
+  VENV="${HUBVIBE_VENV:-${HOME:-/tmp}/.hubvibe-venv}"
+  if [ ! -x "$VENV/bin/python3" ]; then
+    warn "creating a private Python environment at $VENV"
+    if ! python3 -m venv "$VENV" 2>/dev/null; then
+      rm -rf "$VENV"
+      command -v apt-get >/dev/null 2>&1 \
+        || die "python3 cannot create a venv here and there is no apt-get. Install python3-venv and re-run."
+      warn "installing python3-venv (apt)"
+      { apt-get install -y -q python3-venv >/dev/null 2>&1 \
+        || { apt-get update -q >/dev/null 2>&1 && apt-get install -y -q python3-venv >/dev/null 2>&1; }; } \
+        || die "apt-get could not install python3-venv (run as root, or install it by hand and re-run)"
+      python3 -m venv "$VENV" || die "could not create a Python environment at $VENV"
+    fi
+  fi
+  export PATH="$VENV/bin:$PATH"
+  warn "installing the x402 client extras into $VENV"
+  python3 -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+  python3 -m pip install --quiet "x402[evm,extensions]==2.22.0" eth-account httpx \
     || die "could not install the x402 client extras"
+  python3 -c 'import x402, eth_account, httpx' 2>/dev/null \
+    || die "the x402 client installed but does not import; read the errors above"
 fi
 ok "x402 client is importable"
 

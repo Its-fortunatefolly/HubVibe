@@ -428,3 +428,20 @@ def test_the_paying_block_still_has_no_loop_after_the_read_retry():
     text = SCRIPT.read_text()
     read_block = text[text.index('step "Reading the live 402'):text.index('step "Paying for one real call')]
     assert "for attempt in 1 2 3" in read_block
+
+
+def test_the_client_is_installed_into_a_venv_never_with_bare_pip():
+    """A fresh Ubuntu VPS has python3 but no `pip` command and refuses
+    system-wide installs (PEP 668). The first real run died at
+    `pip: command not found`. The script must build its own environment
+    and reach pip through the interpreter."""
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parent.parent / "scripts" / "first-paid-call.sh").read_text()
+    assert "python3 -m venv" in text, "no private environment is created"
+    assert 'export PATH="$VENV/bin:$PATH"' in text, "the venv is not put on PATH for the rest of the script"
+    assert "python3 -m pip install" in text
+    bare = [line for line in text.splitlines() if re.match(r"^\s*pip\s+install", line)]
+    assert not bare, "bare `pip install` again: " + "; ".join(bare)
+    assert "python3-venv" in text, "no apt fallback for a box whose python3 lacks the venv module"
