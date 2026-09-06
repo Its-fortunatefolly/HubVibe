@@ -55,6 +55,28 @@ substring match passed a testnet-only facilitator -- exactly the silent
 no-sale node the gate exists to prevent. Matching now requires a delimiter,
 and both testnet names (`eip155:84532`, `base-sepolia`) are in the test.
 
+**Two more tools were lying, both found by using them rather than reading
+them.** `verify-live.sh` read only its positional argument while every other
+script reads `$BASE`, so the documented form `BASE=... bash
+scripts/verify-live.sh` silently checked PRODUCTION: against a healthy local
+node it reported 34 failures, and against a broken production it would have
+reported someone else's node passing. It now takes positional, then `$BASE`,
+then the domain — proved against the shipped image, 5/39 before and 37/39
+after, the two remaining failures correct (that container runs a dead
+facilitator on purpose, so the node fails closed and the checker says so).
+`snapshot-state.sh` hardcoded the facilitator in its FACTS block and kept
+saying xpay.sh after the repo moved; it now reads the live box's
+`deploy/vps/.env`, falls back to what a fresh install would write, and says
+which it used.
+
+**The shipped container image was rebuilt from this tree and paid again**
+with the official x402 client: 24/24 — v2, v1 and MCP all settle with
+receipts, the Bazaar record catalogues `/audit/wcag` and `/mcp` under the
+domain, a replay is refused as `payment_replayed`, a $0.03 signature sent to
+the $0.10 bundle is refused as `payment_mismatch` without troubling the
+facilitator, three `x402 SETTLED` lines appear in the log, 292 MiB after
+three paid audits.
+
 **On the box, before the first paid call:**
 `cd ~/HubVibe && git pull -q origin main && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
 
