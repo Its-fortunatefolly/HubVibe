@@ -9,6 +9,36 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-06, from Cloud Shell: what is actually live, read off the project
+
+Checked from the owner's Cloud Shell (gcloud, real network), not remembered:
+
+- **Billing on `resolver-time` is ENABLED again** (the owner paid the hold).
+  `scripts/cost-sweep.sh`: **no Workstations cluster**, no VMs, no SQL, no
+  GKE, Cloud Run min-instances 0 -- "nothing idle is billing". The $200
+  cause is gone and cannot restart.
+- **The Cloud Run node came back with billing**: `https://hubvibe-oxlfnftcla-vp.a.run.app`
+  serves, x402 live, pays `0x837C...77dd` (payment-status.sh: "the node
+  pays YOU"). But it runs revision `hubvibe-00106-w89` from 2026-09-03 --
+  version 1.1.2, BEFORE #93-#97. MCP payers, v1 payers and every fix since
+  are not on it.
+- `hubvibe-io.com` and `www` still resolve to `2.57.91.91` (Hostinger
+  parking, serves the registrar page). No VPS has been bought.
+- Trap closed in `scripts/repair-and-deploy.sh`: main.py's PUBLIC_BASE_URL
+  default is now the domain, so a Cloud Run redeploy would have advertised
+  the PARKED domain in every 402 and Bazaar record. The deploy now pins
+  `PUBLIC_BASE_URL` to the service's own URL unless the operator sets it
+  (`PUBLIC_BASE_URL=https://hubvibe-io.com` once the domain points at Cloud
+  Run). Two tests drive it; the pin removed goes red.
+
+**Host decision, owner's to make (both are real now):** VPS as planned
+(flat price, always warm -- no cold start for an agent with a 30 s
+timeout, domain-native via Caddy; rehearsed end to end on the shipped
+image), or stay on Cloud Run (already live, ~$0.25/month idle, cold starts
+of 10-20 s with Chromium, domain needs a mapping in a supported region --
+not us-south1). Either way: merge #97, then redeploy that code wherever the
+node lives.
+
 ## 2026-09-06: the audit before real money -- a v1 payer was being turned away, and 12 smaller truths
 
 Owner: "make sure everything is done correctly." Two adversarial auditors
