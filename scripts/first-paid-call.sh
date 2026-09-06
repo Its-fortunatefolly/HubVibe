@@ -195,7 +195,38 @@ except Exception as exc:
   exit 0
 fi
 
-if [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
+# Pay from the owner's OWN wallet. The Base app (and Coinbase Wallet) export
+# a 12/24-word recovery phrase, not a raw key, so the phrase is accepted and
+# the first account (m/44'/60'/0'/0/0, the one the app shows) is derived in
+# memory: the key never touches disk. Takes precedence over a key file, so a
+# throwaway wallet made earlier is simply ignored. Owner's call 2026-09-06:
+# no third address in the loop -- the buyer is their wallet, the seller is
+# their wallet. Delete the phrase file once the call has settled.
+PHRASE_FILE="${HUBVIBE_WALLET_PHRASE_FILE:-${HOME:-/tmp}/.hubvibe-wallet-phrase}"
+if [ -n "${HUBVIBE_WALLET_MNEMONIC:-}" ] || [ -r "$PHRASE_FILE" ]; then
+  export PHRASE_FILE
+  DERIVED=$(python3 -c '
+import os, sys
+from eth_account import Account
+Account.enable_unaudited_hdwallet_features()
+phrase = os.environ.get("HUBVIBE_WALLET_MNEMONIC") or open(os.environ["PHRASE_FILE"]).read()
+phrase = " ".join(phrase.split())
+if len(phrase.split()) not in (12, 15, 18, 21, 24):
+    sys.exit("expected a 12- or 24-word recovery phrase, got %d words" % len(phrase.split()))
+acct = Account.from_mnemonic(phrase, account_path="m/44%s/60%s/0%s/0/0" % ("\x27", "\x27", "\x27"))
+key = acct.key.hex()
+print("%s\t%s" % (key if key.startswith("0x") else "0x" + key, acct.address))
+' 2>&1) || die "could not derive a wallet from the recovery phrase: ${DERIVED}"
+  HUBVIBE_WALLET_KEY="${DERIVED%%$'\t'*}"
+  export HUBVIBE_WALLET_KEY
+  PHRASE_ADDRESS="${DERIVED##*$'\t'}"
+  if [ -n "${HUBVIBE_EXPECT_ADDRESS:-}" ] \
+     && [ "$(printf '%s' "$PHRASE_ADDRESS" | tr 'A-Z' 'a-z')" != "$(printf '%s' "$HUBVIBE_EXPECT_ADDRESS" | tr 'A-Z' 'a-z')" ]; then
+    die "the recovery phrase derives $PHRASE_ADDRESS, not HUBVIBE_EXPECT_ADDRESS=$HUBVIBE_EXPECT_ADDRESS. Wrong phrase, or the app shows a different account."
+  fi
+  ok "paying from your own wallet (recovery phrase): $PHRASE_ADDRESS"
+  warn "delete the phrase once this settles:  rm -f $PHRASE_FILE"
+elif [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
   ok "wallet key from HUBVIBE_WALLET_KEY"
 elif [ -r "$WALLET_FILE" ]; then
   HUBVIBE_WALLET_KEY=$(cat "$WALLET_FILE")
