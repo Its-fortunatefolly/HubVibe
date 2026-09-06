@@ -1535,3 +1535,298 @@ def test_the_mcp_challenge_is_empty_whenever_the_header_would_be(monkeypatch):
     monkeypatch.setattr(module, "_facilitator_supports", lambda version, network: False)
     assert module.payment_required_v2_dict("$0.03") == {}
     assert module.payment_required_header("$0.03") == {}
+
+
+# --- 2026-09-06 audit: v1 payers, local match, reasons, honest settlement ---
+#
+# The audit's live harness paid the node with the official client on the v1
+# path (PAYMENT-REQUIRED stripped, X-PAYMENT sent) and watched the node hand
+# the facilitator a v1 payload beside v2-shaped requirements. The facilitator
+# refused; the payer got a bare 402. Every pre-v2 client was being turned
+# away by a rail the 402 advertised. These tests pin the repair and the three
+# fixes found beside it.
+
+from types import SimpleNamespace
+
+
+class _V1Payload:
+    """What decode_payment_signature_header returns for an X-PAYMENT header."""
+
+    x402_version = 1
+
+    def __init__(self, to, value, nonce="0xv1nonce", network="base"):
+        self.scheme = "exact"
+        self.network = network
+        self.payload = {
+            "authorization": {"to": to, "value": value, "nonce": nonce, "from": "0x" + "11" * 20},
+            "signature": "0xsig",
+        }
+
+    def get_scheme(self):
+        return self.scheme
+
+    def get_network(self):
+        return self.network
+
+
+def _price_locally(monkeypatch, module):
+    """parse_price without the (mocked) scheme: $0.03 -> 30000 atomic USDC."""
+    def _priced(price):
+        return SimpleNamespace(
+            amount=str(int(round(float(price.lstrip("$")) * 1_000_000))),
+            asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            extra={"name": "USD Coin", "version": "2"},
+        )
+
+    monkeypatch.setattr(module, "_priced_asset", _priced)
+    monkeypatch.setattr(module, "_facilitator_supports", lambda version, network: True)
+
+
+def _capturing_verify(server):
+    seen = {}
+
+    async def _verify(payload, requirements, *a, **k):
+        seen["payload"], seen["requirements"] = payload, requirements
+        result = MagicMock()
+        result.is_valid = True
+        return result
+
+    server.verify_payment = _verify
+    return seen
+
+
+def test_a_v1_payment_is_verified_against_v1_requirements(monkeypatch):
+    """THE repair. A v1 payload must reach the facilitator beside a
+    PaymentRequirementsV1 built from the same accepts[] entry the 402
+    advertised -- legacy network name, maxAmountRequired, the resource --
+    not the v2 object every payment used to be checked against."""
+    from x402.schemas.v1 import PaymentRequirementsV1
+
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+    _price_locally(monkeypatch, module)
+    seen = _capturing_verify(server)
+    monkeypatch.setattr(
+        module, "decode_payment_signature_header",
+        lambda h: _V1Payload(to=VALID_PAY_TO, value="30000"),
+    )
+
+    pending = module.verify_only_sync(
+        "signed-v1", price="$0.03", resource_url="https://hubvibe-io.com/audit/wcag"
+    )
+
+    assert pending is not None, module.last_rejection()
+    requirements = seen["requirements"]
+    assert isinstance(requirements, PaymentRequirementsV1), type(requirements)
+    assert requirements.network == "base"
+    assert requirements.max_amount_required == "30000"
+    assert requirements.pay_to == VALID_PAY_TO
+    assert requirements.resource == "https://hubvibe-io.com/audit/wcag"
+    # And settle carries the same v1 object, not a v2 one.
+    assert pending.requirements[0] is requirements
+
+
+def test_a_v2_payment_still_uses_the_v2_requirements(monkeypatch):
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+    seen = _capturing_verify(server)
+    payload = MagicMock()
+    payload.x402_version = 2
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: payload)
+
+    assert module.verify_only_sync("signed-v2", price="$0.03") is not None
+    assert seen["requirements"] is server.build_payment_requirements.return_value[0]
+
+
+def test_a_v1_payment_for_a_cheaper_route_is_refused_before_the_facilitator(monkeypatch):
+    """A $0.03 authorization sent to the $0.10 route. Standard facilitators
+    refuse it; this node no longer waits to find out, and says why."""
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+    _price_locally(monkeypatch, module)
+    seen = _capturing_verify(server)
+    monkeypatch.setattr(
+        module, "decode_payment_signature_header",
+        lambda h: _V1Payload(to=VALID_PAY_TO, value="30000"),
+    )
+
+    assert module.verify_only_sync("signed-v1", price="$0.10", resource_url="https://n/x") is None
+    assert "requirements" not in seen, "the mismatch reached the facilitator"
+    reason, detail = module.last_rejection()
+    assert reason == "payment_mismatch"
+    assert "amount" in detail
+
+
+def test_a_v1_payment_to_another_recipient_is_refused_before_the_facilitator(monkeypatch):
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+    _price_locally(monkeypatch, module)
+    seen = _capturing_verify(server)
+    monkeypatch.setattr(
+        module, "decode_payment_signature_header",
+        lambda h: _V1Payload(to="0x" + "ab" * 20, value="30000"),
+    )
+
+    assert module.verify_only_sync("signed-v1", price="$0.03", resource_url="https://n/x") is None
+    assert "requirements" not in seen
+    assert module.last_rejection()[0] == "payment_mismatch"
+
+
+def test_a_v2_payment_that_matches_no_requirement_is_refused_before_the_facilitator(monkeypatch):
+    """v2 delegates the comparison to the library's find_matching_requirements."""
+    module = _load_x402(monkeypatch)
+    server = _install_fake_server(monkeypatch, module)
+    seen = _capturing_verify(server)
+    server.find_matching_requirements = MagicMock(return_value=None)
+    payload = MagicMock()
+    payload.x402_version = 2
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: payload)
+
+    assert module.verify_only_sync("signed-v2", price="$0.03") is None
+    assert "requirements" not in seen
+    assert module.last_rejection()[0] == "payment_mismatch"
+
+
+def test_a_refused_v1_payment_releases_its_nonce_for_a_corrected_retry(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    _price_locally(monkeypatch, module)
+    monkeypatch.setattr(
+        module, "decode_payment_signature_header",
+        lambda h: _V1Payload(to=VALID_PAY_TO, value="30000", nonce="0xsame"),
+    )
+    assert module.verify_only_sync("v1", price="$0.10", resource_url="https://n/x") is None
+    # Same nonce, now against the route it was signed for: admitted.
+    assert module.verify_only_sync("v1", price="$0.03", resource_url="https://n/x") is not None
+
+
+def test_the_refusal_reason_is_left_for_the_402(monkeypatch):
+    """A payer with an empty wallet and a payer facing a facilitator outage
+    used to get byte-identical 402s. The route reads the reason from here."""
+    module = _load_x402(monkeypatch, facilitator="https://fac.example")
+    server = _install_fake_server(monkeypatch, module)
+
+    _rejecting_verify(server, reason="insufficient_funds", message="wallet holds 0 USDC")
+    assert module.verify_only_sync("signed", price="$0.03") is None
+    assert module.last_rejection() == ("insufficient_funds", "wallet holds 0 USDC")
+    assert module.rejection_is_transient("insufficient_funds") is False
+
+    _exploding_verify(server, ConnectionError("Name or service not known"))
+    assert module.verify_only_sync("signed", price="$0.03") is None
+    reason, detail = module.last_rejection()
+    assert reason == "facilitator_unavailable"
+    assert "retry" in detail
+    assert module.rejection_is_transient(reason) is True
+
+
+def test_a_replay_is_reported_as_a_replay(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: _payload_with_nonce("0xCC"))
+    assert module.verify_only_sync("signed", price="$0.03") is not None
+    assert module.last_rejection() is None, "a success must clear the previous reason"
+    assert module.verify_only_sync("signed", price="$0.03") is None
+    assert module.last_rejection()[0] == "payment_replayed"
+
+
+def test_an_undecodable_header_is_reported_as_such(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+
+    def _boom(header):
+        raise ValueError("not base64")
+
+    monkeypatch.setattr(module, "decode_payment_signature_header", _boom)
+    assert module.verify_only_sync("garbage", price="$0.03") is None
+    assert module.last_rejection()[0] == "invalid_payment_payload"
+
+
+def _settle_response(**overrides):
+    from x402.schemas import SettleResponse
+
+    fields = dict(success=False, network="eip155:8453", payer="0x" + "11" * 20, transaction="")
+    fields.update(overrides)
+    return SettleResponse(**fields)
+
+
+def test_a_pending_settlement_is_pending_not_refused_and_hands_over_the_hash(monkeypatch):
+    """settlement_pending with a transaction is money in flight. The payer
+    used to be told 'not charged' and given no receipt while USDC landed."""
+    module = _load_x402(monkeypatch)
+    tx = "0x" + "ab" * 32
+    _install_fake_server(
+        monkeypatch, module, settled=False,
+        settle_response=_settle_response(errorReason="settlement_pending", transaction=tx),
+    )
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "pending"
+    assert pending.settle_result is not None
+    headers = module.receipt_headers(pending)
+    assert headers, "a pending settlement with a hash must still hand the payer the hash"
+    from x402.http.utils import decode_payment_response_header
+
+    assert decode_payment_response_header(headers["PAYMENT-RESPONSE"]).transaction == tx
+    assert module.receipt_meta(pending)[module.MCP_PAYMENT_RESPONSE_META_KEY]["transaction"] == tx
+
+
+def test_a_refusal_that_names_a_reverted_transaction_is_still_a_refusal(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(
+        monkeypatch, module, settled=False,
+        settle_response=_settle_response(errorReason="transaction_reverted", transaction="0x" + "cd" * 32),
+    )
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "refused"
+    assert module.receipt_headers(pending) == {}
+    assert module.receipt_meta(pending) == {}
+
+
+def test_a_settle_timeout_is_unknown_not_refused(monkeypatch, caplog):
+    """The facilitator may complete a settle this node stopped waiting for."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    def _timeout(coro, timeout=None):
+        coro.close()
+        raise TimeoutError("facilitator call exceeded 45s")
+
+    monkeypatch.setattr(module, "_run_coro_sync", _timeout)
+    with caplog.at_level(logging.WARNING):
+        assert module.settle_sync(pending) is False
+    assert pending.settle_state == "unknown"
+    assert "UNKNOWN" in caplog.text
+    assert "reconcile" in caplog.text
+
+
+def test_a_settled_payment_is_marked_settled(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module, settle_response=_settle_response(success=True, transaction="0x" + "ef" * 32))
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    assert module.settle_sync(pending) is True
+    assert pending.settle_state == "settled"
+
+
+def test_the_openapi_offer_prices_the_x402_rail_or_says_nothing(monkeypatch):
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    _price_locally(monkeypatch, module)
+    monkeypatch.setattr(module, "payment_required_v2", lambda **kw: object())
+
+    offer = module.discovery_offer("$0.10")
+    assert offer["method"] == "x402"
+    assert offer["amount"] == "100000"
+    assert offer["payTo"] == VALID_PAY_TO
+    assert offer["x402Versions"] == [1, 2]
+
+    # Neither version verifiable -> no offer at all, same as the 402.
+    monkeypatch.setattr(module, "_facilitator_supports", lambda version, network: False)
+    monkeypatch.setattr(module, "payment_required_v2", lambda **kw: None)
+    assert module.discovery_offer("$0.10") == {}
+
+    unconfigured = _load_x402(monkeypatch, facilitator=None)
+    assert unconfigured.discovery_offer("$0.03") == {}

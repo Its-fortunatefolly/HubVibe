@@ -654,6 +654,28 @@ def main() -> int:
             + (f" -- {schema_problem}" if schema_problem else ""),
         )
 
+        step("v1: a pre-v2 client that never sees PAYMENT-REQUIRED pays from the body with X-PAYMENT")
+        with state.lock:
+            verifies_before_v1 = sum(1 for e in state.log if e["path"] == "/verify")
+        v1_status, v1_tx, v1_header = _paid_call_v1(base, payer, f"{facilitator}/page")
+        with state.lock:
+            v1_verifies = [e for e in state.log if e["path"] == "/verify"][verifies_before_v1:]
+            v1_settles = [e for e in state.log if e["path"] == "/settle"]
+        last_v1 = v1_verifies[-1] if v1_verifies else {}
+        checks.expect(v1_header == "X-PAYMENT", f"the client paid through the v1 header ({v1_header})")
+        checks.expect(
+            last_v1.get("x402Version") == 1,
+            f"the node sent the facilitator an x402 v{last_v1.get('x402Version')} verify",
+        )
+        checks.expect(
+            last_v1.get("reason") is None and v1_status == 200,
+            f"a v1 payer gets the audit (HTTP {v1_status}, facilitator reason={last_v1.get('reason')})",
+        )
+        checks.expect(
+            v1_tx is not None and v1_settles and v1_tx == v1_settles[-1].get("transaction"),
+            f"X-PAYMENT-RESPONSE carries the v1 settlement transaction ({v1_tx})",
+        )
+
         step("Replay: the same signed payment sent again")
         with state.lock:
             verifies_before = sum(1 for e in state.log if e["path"] == "/verify")
@@ -851,6 +873,35 @@ def _paid_call_receipt(base: str, payer, target_url: str):
         if not header:
             return None, pay_headers
         return decode_payment_response_header(header).transaction, pay_headers
+
+
+def _paid_call_v1(base: str, payer, target_url: str):
+    """The pre-v2 client path: strip PAYMENT-REQUIRED so the official client
+    reads the v1 body, sign, send X-PAYMENT. Returns (status, tx hash from
+    the receipt or None, the header the client used).
+
+    Until 2026-09-06 this leg did not exist and the node verified every v1
+    payment against v2 requirements; the facilitator refused each one and
+    every pre-v2 agent was turned away by a rail the 402 advertised."""
+    import httpx
+    from x402.http.utils import decode_payment_response_header
+
+    http_client = _x402_http_client(payer)
+    with httpx.Client(timeout=90) as http:
+        first = http.post(f"{base}/audit/wcag", json={"url": target_url})
+        if first.status_code != 402:
+            print(f"      expected a 402, got {first.status_code}")
+            return first.status_code, None, None
+        body_only = {k: v for k, v in first.headers.items() if k.lower() != "payment-required"}
+        pay_headers = _sign(http_client, body_only, first.content, f"{base}/audit/wcag")
+        header_used = next((k.upper() for k in pay_headers if k.upper() in ("X-PAYMENT", "PAYMENT-SIGNATURE")), None)
+        paid = http.post(f"{base}/audit/wcag", json={"url": target_url}, headers=pay_headers)
+        print(f"      v1 paid call: HTTP {paid.status_code} (sent {header_used})")
+        if paid.status_code != 200:
+            print(f"      body: {paid.text[:300]}")
+        receipt = paid.headers.get("X-PAYMENT-RESPONSE") or paid.headers.get("PAYMENT-RESPONSE")
+        tx = decode_payment_response_header(receipt).transaction if receipt else None
+        return paid.status_code, tx, header_used
 
 
 def _output_schema_problem(base: str, tool_name: str, result: dict):

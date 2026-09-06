@@ -48,6 +48,15 @@ case "$DOMAIN" in
   *) die "'$DOMAIN' does not look like a domain (no dot)" ;;
 esac
 
+# This script installs a SERVER. Google Cloud Shell is a temporary terminal
+# that is recycled, has no public address, and cannot hold ports 80/443 --
+# the owner pasted the one-liner there once (2026-09-05) and it failed at
+# the git clone, which is the only reason it did not go on to install Docker
+# into a throwaway VM. Refuse by name, before anything is touched.
+if [ "${CLOUD_SHELL:-}" = "true" ] || [ -n "${DEVSHELL_PROJECT_ID:-}" ]; then
+  die "this is Google Cloud Shell -- a temporary terminal, not a server. Run this on the VPS itself (Hostinger: VPS -> Browser terminal; or ssh root@YOUR_VPS_IP). Nothing was installed."
+fi
+
 # The recipient gate, same discipline as go-live.sh: shape is checked, the
 # zero address is refused (well-formed, unownable, USDC reverts transfers to
 # it), and the two addresses this repo knows nobody holds the key to are

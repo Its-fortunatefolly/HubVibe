@@ -171,3 +171,47 @@ def test_a_rerun_keeps_the_existing_env():
     assert "keeping it" in script, (
         "a re-run that rewrote .env would destroy live Stripe keys"
     )
+
+
+# --- 2026-09-06: the two mistakes the first real install could make ---
+
+
+def test_the_installer_refuses_to_run_in_google_cloud_shell(tmp_path):
+    """The owner pasted the one-liner into Cloud Shell -- a temporary
+    terminal, not a server -- and it failed only because a folder happened
+    to exist. Refuse by name, before Docker is touched."""
+    result = _run("hubvibe-io.com", env={"CLOUD_SHELL": "true"}, tmp_path=tmp_path)
+    assert result.returncode == 1
+    assert "Cloud Shell" in result.stdout
+    assert "Nothing was installed" in result.stdout
+    assert "Checking Docker" not in result.stdout, "Cloud Shell got as far as Docker"
+
+    result = _run("hubvibe-io.com", env={"DEVSHELL_PROJECT_ID": "resolver-time"}, tmp_path=tmp_path)
+    assert result.returncode == 1
+    assert "Cloud Shell" in result.stdout
+
+
+def test_caddy_serves_www_as_a_redirect_and_caps_request_bodies():
+    """The runbook says to point www at the box too. A Caddyfile that names
+    only the apex would refuse a certificate for www and close the
+    connection. And the app's body cap must be mirrored at the edge."""
+    import os
+    import re
+    import shutil
+
+    text = (VPS_DIR / "Caddyfile").read_text()
+    apex = re.search(r"^\{\$DOMAIN\}\s*\{(.*?)^\}", text, re.S | re.M)
+    www = re.search(r"^www\.\{\$DOMAIN\}\s*\{(.*?)^\}", text, re.S | re.M)
+    assert apex and "reverse_proxy hubvibe:8080" in apex.group(1)
+    assert www, "no www site block"
+    assert re.search(r"redir\s+https://\{\$DOMAIN\}\{uri\}\s+permanent", www.group(1))
+    assert "reverse_proxy" not in www.group(1), "www must redirect, not serve a second identity"
+    assert re.search(r"request_body\s*\{\s*max_size\s+4MB", apex.group(1))
+
+    caddy = os.environ.get("CADDY_BIN") or shutil.which("caddy")
+    if caddy:
+        result = subprocess.run(
+            [caddy, "validate", "--config", str(VPS_DIR / "Caddyfile"), "--adapter", "caddyfile"],
+            capture_output=True, text=True, timeout=60, env={"DOMAIN": "example.com", "PATH": "/usr/bin:/bin"},
+        )
+        assert result.returncode == 0, result.stderr + result.stdout
