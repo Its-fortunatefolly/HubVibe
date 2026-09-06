@@ -56,15 +56,19 @@
 # Optional:
 #     TARGET_URL   the site to audit         (default https://example.com)
 #     ROUTE        which paid route          (default /audit/wcag -- cheapest)
-#     FACILITATOR  facilitator base URL      (default https://facilitator.xpay.sh)
-#     BASE         the node under test       (default the live Cloud Run URL)
+#     FACILITATOR  facilitator base URL      (default https://x402.dexter.cash)
+#     BASE         the node under test       (default https://hubvibe-io.com)
 
 set -uo pipefail
 
 BASE="${BASE:-https://hubvibe-io.com}"
 ROUTE="${ROUTE:-/audit/wcag}"
 TARGET_URL="${TARGET_URL:-https://example.com}"
-FACILITATOR="${FACILITATOR:-https://facilitator.xpay.sh}"
+# Dexter has a live discovery index at /discovery/resources; xpay.sh does not.
+# For the index check here to match the facilitator the server actually uses,
+# this must equal X402_FACILITATOR_URL on the live service -- pinned to
+# vps-install.sh's default by test_the_deploy_default_facilitator_matches_the_scripts_that_pay.
+FACILITATOR="${FACILITATOR:-https://x402.dexter.cash}"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$1"; }

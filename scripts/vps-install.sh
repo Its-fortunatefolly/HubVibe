@@ -89,6 +89,51 @@ done
 ok "recipient ${PAY_TO:0:6}...${PAY_TO: -4} passes every gate this repo has"
 
 # ---------------------------------------------------------------------------
+# The facilitator gate. Same principle as the recipient gate one step up: a
+# rail that cannot settle must never be advertised -- and here the failure is
+# SILENT. The node reads /supported at startup and drops any rail its
+# facilitator cannot verify, so a facilitator that is reachable but does not
+# do `exact` on Base mainnet produces a box whose /health answers 200, whose
+# landing page loads, and which sells nothing, forever, with no error.
+#
+# Reachable and wrong is a definite misconfiguration and stops the install.
+# Unreachable is not: facilitators have outages, the node retries, and
+# refusing to install because of a blip would be worse than saying so.
+# ---------------------------------------------------------------------------
+step "Checking the facilitator can settle on Base mainnet"
+SUPPORTED_FILE="$(mktemp)"
+SUPPORTED_CODE=$(curl -s -m 20 -o "$SUPPORTED_FILE" -w '%{http_code}' "$FACILITATOR/supported" 2>/dev/null)
+if [ "$SUPPORTED_CODE" = "200" ]; then
+  # `exact` on Base MAINNET, under either vocabulary: v2's CAIP-2 eip155:8453
+  # or v1's legacy "base". One of them is enough to take money.
+  #
+  # The trailing delimiter is load-bearing. Base Sepolia is eip155:84532,
+  # which CONTAINS eip155:8453 -- a plain substring match let a testnet-only
+  # facilitator through this gate, i.e. exactly the silent no-sale node the
+  # gate exists to prevent. Same for "base" vs "base-sepolia".
+  if grep -q '"exact"' "$SUPPORTED_FILE" \
+     && grep -Eq 'eip155:8453("|[^0-9])|"base"' "$SUPPORTED_FILE"; then
+    ok "$FACILITATOR settles exact/Base mainnet"
+    if curl -s -m 15 -o /dev/null -w '%{http_code}' "$FACILITATOR/discovery/resources" 2>/dev/null | grep -q '^200$'; then
+      ok "and runs a Bazaar index, so the first paid call registers this node"
+    else
+      warn "but serves no /discovery/resources -- payments settle, and no paid"
+      warn "call will register this node for capability search. To change it"
+      warn "later, safely:  bash scripts/switch-facilitator.sh https://..."
+    fi
+  else
+    rm -f "$SUPPORTED_FILE"
+    die "$FACILITATOR answered /supported but does not list exact on Base mainnet. The node would advertise NO payment rail and sell nothing, silently. Set X402_FACILITATOR_URL to one that does. Nothing was installed."
+  fi
+else
+  warn "$FACILITATOR/supported did not answer (HTTP $SUPPORTED_CODE)."
+  warn "Installing anyway -- the node re-reads it and fails closed until it"
+  warn "answers. If no rail shows up later, that is why:"
+  warn "  BASE=https://$DOMAIN bash scripts/payment-status.sh"
+fi
+rm -f "$SUPPORTED_FILE"
+
+# ---------------------------------------------------------------------------
 # 2. Docker.
 # ---------------------------------------------------------------------------
 

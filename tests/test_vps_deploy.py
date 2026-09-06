@@ -247,3 +247,99 @@ def test_the_deploy_default_facilitator_matches_the_scripts_that_pay():
     # And the only safe way to change it on a live box is named where an
     # operator reading the file will see it.
     assert "switch-facilitator.sh" in env_example
+
+
+# --- The facilitator gate ---------------------------------------------------
+#
+# The recipient gate above catches a wallet that cannot receive. This catches
+# the other half of the same failure, and it is the quieter one: a facilitator
+# that cannot settle on Base makes the node drop every rail at startup, so the
+# box answers /health 200 and sells nothing with no error anywhere.
+
+
+def _run_with_facilitator(tmp_path, supported_body, *, supported_code="200", index_code="404"):
+    """Drive the installer with docker AND curl stubbed, so the facilitator
+    gate sees exactly the /supported answer this test is about."""
+    import subprocess as sp
+    import textwrap
+
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir(exist_ok=True)
+    (stub_dir / "docker").write_text("#!/bin/sh\nexit 1\n")
+    (stub_dir / "curl").write_text(textwrap.dedent(f"""\
+        #!/bin/sh
+        OUT=""; PREV=""
+        for a in "$@"; do
+          [ "$PREV" = "-o" ] && OUT="$a"
+          PREV="$a"
+        done
+        for a in "$@"; do case "$a" in
+          */discovery/resources)
+            [ -n "$OUT" ] && printf '%s' '{{"items":[]}}' > "$OUT"
+            printf '{index_code}'; exit 0 ;;
+        esac; done
+        [ -n "$OUT" ] && printf '%s' '{supported_body}' > "$OUT"
+        printf '{supported_code}'
+        """))
+    for name in ("docker", "curl"):
+        (stub_dir / name).chmod(0o755)
+    return sp.run(
+        ["bash", str(SCRIPT), "hubvibe-io.com"], capture_output=True, text=True, timeout=90,
+        env={"PATH": f"{stub_dir}:/usr/bin:/bin", "HOME": str(tmp_path)}, cwd=REPO_ROOT,
+    )
+
+
+_BASE_V2 = '{"kinds":[{"x402Version":2,"scheme":"exact","network":"eip155:8453"}]}'
+_BASE_V1 = '{"kinds":[{"x402Version":1,"scheme":"exact","network":"base"}]}'
+_SEPOLIA_ONLY = '{"kinds":[{"x402Version":2,"scheme":"exact","network":"eip155:84532"}]}'
+_SEPOLIA_V1_ONLY = '{"kinds":[{"x402Version":1,"scheme":"exact","network":"base-sepolia"}]}'
+
+
+@pytest.mark.parametrize("body", [_BASE_V2, _BASE_V1])
+def test_a_facilitator_that_settles_base_mainnet_passes_the_gate(tmp_path, body):
+    """Either vocabulary is enough to take money: v2's CAIP-2 name or v1's."""
+    result = _run_with_facilitator(tmp_path, body)
+    assert "settles exact/Base mainnet" in result.stdout
+    assert "Checking Docker" in result.stdout, "the gate blocked a usable facilitator"
+
+
+@pytest.mark.parametrize("body", [_SEPOLIA_ONLY, _SEPOLIA_V1_ONLY])
+def test_a_facilitator_that_cannot_settle_base_stops_the_install(tmp_path, body):
+    """THE test. Reachable and wrong is a definite misconfiguration, and the
+    node's own failure mode for it is silence -- so it must stop here.
+
+    Both testnet names are checked because both CONTAIN a mainnet name:
+    eip155:84532 contains eip155:8453, and base-sepolia contains base. A
+    substring match passed a testnet-only facilitator on the first run of
+    this test -- the precise bug the gate exists to catch."""
+    result = _run_with_facilitator(tmp_path, body)
+    assert result.returncode == 1
+    assert "does not list exact on Base mainnet" in result.stdout
+    assert "Nothing was installed" in result.stdout
+    assert "Checking Docker" not in result.stdout, "it went on to install anyway"
+    assert not (VPS_DIR / ".env").exists(), "wrote an .env for a facilitator that cannot settle"
+
+
+def test_an_unreachable_facilitator_warns_but_still_installs(tmp_path):
+    """An outage is not a misconfiguration. The node re-reads /supported and
+    fails closed on its own, so refusing to install would be worse."""
+    result = _run_with_facilitator(tmp_path, "", supported_code="000")
+    assert "did not answer" in result.stdout
+    assert "Checking Docker" in result.stdout
+    assert "payment-status.sh" in result.stdout, "must say how to see the rail later"
+
+
+def test_a_facilitator_with_no_index_is_flagged_not_hidden(tmp_path):
+    """Settling and indexing are different capabilities. xpay.sh settles and
+    indexes nothing, which is how the live node ended up unable to register
+    itself no matter how many payments it took."""
+    result = _run_with_facilitator(tmp_path, _BASE_V2, index_code="404")
+    assert "serves no /discovery/resources" in result.stdout
+    assert "switch-facilitator.sh" in result.stdout
+    assert "Checking Docker" in result.stdout, "no index is a warning, not a refusal"
+
+
+def test_a_facilitator_with_an_index_says_the_paid_call_will_register(tmp_path):
+    result = _run_with_facilitator(tmp_path, _BASE_V2, index_code="200")
+    assert "runs a Bazaar index" in result.stdout
+    assert "Checking Docker" in result.stdout

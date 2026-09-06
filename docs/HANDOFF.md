@@ -42,6 +42,19 @@ Nine tests drive the real script (docker and curl stubbed, a fake node whose
 changes → rollback, same-URL no-op, non-https refused, index absent →
 said out loud. Four mutations proved red.
 
+**The installer now refuses a facilitator that cannot settle.** The recipient
+gate catches a wallet that cannot receive; this catches the other half, and it
+is the quieter one. `vps-install.sh` reads `/supported` before writing `.env`:
+reachable and lacking `exact` on Base mainnet stops the install (that is a
+definite misconfiguration whose only symptom would be a node selling nothing),
+unreachable warns and continues (an outage is not a misconfiguration, and the
+node fails closed on its own), and a facilitator with no `/discovery/resources`
+is flagged rather than hidden. Writing the check surfaced a real bug in it:
+**Base Sepolia is `eip155:84532`, which contains `eip155:8453`**, so a plain
+substring match passed a testnet-only facilitator -- exactly the silent
+no-sale node the gate exists to prevent. Matching now requires a delimiter,
+and both testnet names (`eip155:84532`, `base-sepolia`) are in the test.
+
 **On the box, before the first paid call:**
 `cd ~/HubVibe && git pull -q origin main && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
 
