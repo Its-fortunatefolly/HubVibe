@@ -1358,9 +1358,6 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
             parts = path.parts
             if any(p in parts for p in (".git", "node_modules", "venv", "venv_clean")):
                 continue
-            # Other services in this monorepo have their own pricing.
-            if any(p in parts for p in ("privacy-compliance-scanner", "dead-end-resolver")):
-                continue
             if path.name == "HANDOFF.md":  # history is allowed to remember prices
                 continue
             if path.name == Path(__file__).name:  # this test names them on purpose

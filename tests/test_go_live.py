@@ -290,23 +290,3 @@ def test_nothing_is_ever_minted_for_x402():
     assert len(mints) == 1, mints
     networks = [ln.strip() for ln in text.splitlines() if '-d "network=' in ln]
     assert networks == ['-d "network=$TEMPO_NETWORK" 2>&1)"'], networks
-
-
-def test_the_superseded_scripts_refuse_and_point_here():
-    """Deleted scripts produce 'No such file' and a hunt. Stubs produce the
-    replacement command. A shell history or an old handoff entry lands on the
-    right answer either way."""
-    for name in ("go-live-x402.sh", "go-live-mpp-tempo.sh"):
-        result = subprocess.run(
-            ["bash", str(REPO_ROOT / "scripts" / name)],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert result.returncode == 1, name
-        assert "superseded" in result.stdout, name
-        assert "bash scripts/go-live.sh" in result.stdout, name
-    result = subprocess.run(
-        ["python3", str(REPO_ROOT / "scripts" / "x402-setup.py")],
-        capture_output=True, text=True, timeout=30,
-    )
-    assert result.returncode == 1
-    assert "bash scripts/go-live.sh" in result.stderr

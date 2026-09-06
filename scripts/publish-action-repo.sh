@@ -7,9 +7,9 @@
 #
 #   GitHub's Marketplace publishing rules require that the repo contain a
 #   single action.yml AT ITS ROOT, and that the repo contain NO WORKFLOW
-#   FILES AT ALL. HubVibe has .github/workflows/python-app.yml and
-#   google-cloudrun-docker.yml, so this repo can never itself be published to
-#   Marketplace, no matter where action.yml sits.
+#   FILES AT ALL. HubVibe has .github/workflows/python-app.yml (its CI), so
+#   this repo can never itself be published to Marketplace, no matter where
+#   action.yml sits.
 #
 #   Note the two are separate things:
 #     * Direct use  -- `uses: Its-fortunatefolly/HubVibe@v1` already works

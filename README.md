@@ -282,8 +282,6 @@ never have landed.
 wcag-audit-engine/        the audit service (this is the product)
   app/                    FastAPI app, audit engines, payment rails
   integrations/           MCP server, LangChain tool, GitHub Action
-privacy-compliance-scanner/
-dead-end-resolver/
 scripts/verify-live.sh    verifies a deployed node from outside
 scripts/simulate-paid-call.py
                           the whole x402 paid path, locally, for free
