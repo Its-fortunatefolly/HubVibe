@@ -505,11 +505,28 @@ step "Deploying the current source"
 #                       stops a hung audit from holding an instance for 5 min.
 #   --cpu-boost         full CPU during cold start, so a paying agent's
 #                       first call after idle is not the one that times out.
+# The identity every 402 and manifest advertises. The code's default is the
+# domain (https://hubvibe-io.com) -- right on the VPS, where Caddy serves it,
+# and WRONG here until that domain points at Cloud Run: deployed without
+# this, every resource URL and the Bazaar record would name a parked page.
+# So on Cloud Run the identity is this service's own URL, unless the operator
+# says otherwise (PUBLIC_BASE_URL=https://hubvibe-io.com once the domain is
+# mapped to this service). Fail closed if neither is known.
+PUBLIC_URL="${PUBLIC_BASE_URL:-$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("status", {}).get("url", ""))
+except Exception:
+    pass
+' "$SVC_JSON")}"
+[ -n "$PUBLIC_URL" ] || die "cannot tell which URL this node should advertise; set PUBLIC_BASE_URL=https://... and re-run"
+
 gcloud run deploy "$SERVICE" --source="$SOURCE_DIR" --project="$PROJECT" --region="$REGION" \
   --memory="${MEMORY:-2Gi}" --cpu="${CPU:-2}" --concurrency="${CONCURRENCY:-8}" \
   --max-instances="${MAX_INSTANCES:-3}" --timeout="${REQUEST_TIMEOUT:-120}" --cpu-boost \
+  --update-env-vars="PUBLIC_BASE_URL=$PUBLIC_URL" \
   || die "deploy failed. The previous revision keeps serving; fix the error above and re-run."
-ok "deployed"
+ok "deployed -- advertising $PUBLIC_URL as this node's identity"
 
 # SKIP_VERIFY exists so a deploy and its verification can be run separately --
 # verify-live.sh makes real network calls with retries, which is right after a

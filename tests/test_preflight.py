@@ -49,6 +49,9 @@ _NO_X402 = [{"name": "PUBLIC_BASE_URL", "value": "https://x"}]
 
 def _stub(env=None, firestore_ok=True, min_scale="0"):
     body = json.dumps({
+        # Real describe output always carries the service URL; the deploy
+        # pins PUBLIC_BASE_URL to it.
+        "status": {"url": "https://hubvibe-stub-uc.a.run.app"},
         "spec": {"template": {
             "metadata": {"annotations": {"autoscaling.knative.dev/minScale": min_scale}},
             "spec": {"containers": [{"env": env if env is not None else _PAY_TO_GOOD}]},
@@ -67,7 +70,7 @@ J
   *"run services describe"*)
     printf 'name:  STRIPE_SECRET_KEY\\n  secretKeyRef.name:  SECRET_STRIPE_KEY\\n' ;;
   *"run services update"*) echo "UPDATE_INVOKED $*" >> "$GCLOUD_CALL_LOG"; echo "UPDATE_INVOKED $*" ;;
-  *"run deploy"*) echo "DEPLOY_INVOKED" ;;
+  *"run deploy"*) echo "DEPLOY_INVOKED $*" >> "$GCLOUD_CALL_LOG"; echo "DEPLOY_INVOKED" ;;
   *) exit 0 ;;
 esac
 """
@@ -538,7 +541,7 @@ def test_the_deploy_installs_a_spend_alert_and_never_blocks_on_it(tmp_path):
         "#!/usr/bin/env bash\n"
         'case "$*" in\n'
         '  *"secrets describe"*) exit 0 ;;\n'
-        '  *"services describe"*) echo \'{"spec":{"template":{"spec":{"containers":[{"env":[]}]}}}}\' ;;\n'
+        '  *"services describe"*) echo \'{"status":{"url":"https://hubvibe-stub-uc.a.run.app"},"spec":{"template":{"spec":{"containers":[{"env":[]}]}}}}\' ;;\n'
         '  *"billing projects describe"*) exit 1 ;;\n'
         '  *"run deploy"*) echo DEPLOY_INVOKED ;;\n'
         "  *) exit 0 ;;\n"
@@ -551,3 +554,26 @@ def test_the_deploy_installs_a_spend_alert_and_never_blocks_on_it(tmp_path):
     result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=60)
     assert "no billing account is linked" in result.stdout
     assert "DEPLOY_INVOKED" in result.stdout, result.stdout
+
+
+# --- 2026-09-06: a Cloud Run deploy must not advertise the parked domain ---
+
+
+def test_a_cloud_run_deploy_advertises_the_service_url_not_the_parked_domain(tmp_path):
+    """main.py's PUBLIC_BASE_URL default became https://hubvibe-io.com when
+    the identity moved to the domain -- correct on the VPS behind Caddy, and
+    wrong on Cloud Run until that domain points here: every 402 would name
+    resource URLs on a registrar parking page and the Bazaar would catalogue
+    them. The deploy pins the identity to the service's own URL."""
+    result = _run(tmp_path)
+    deploys = [line for line in result.gcloud_calls.splitlines() if line.startswith("DEPLOY_INVOKED")]
+    assert deploys, result.stdout + result.stderr
+    assert "--update-env-vars=PUBLIC_BASE_URL=https://hubvibe-stub-uc.a.run.app" in deploys[0]
+    assert "hubvibe-io.com" not in deploys[0]
+
+
+def test_an_operator_can_name_the_identity_once_the_domain_points_at_cloud_run(tmp_path):
+    result = _run(tmp_path, extra_env={"PUBLIC_BASE_URL": "https://hubvibe-io.com"})
+    deploys = [line for line in result.gcloud_calls.splitlines() if line.startswith("DEPLOY_INVOKED")]
+    assert deploys, result.stdout + result.stderr
+    assert "--update-env-vars=PUBLIC_BASE_URL=https://hubvibe-io.com" in deploys[0]
