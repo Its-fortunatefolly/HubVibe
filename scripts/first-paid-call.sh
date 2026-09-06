@@ -205,6 +205,13 @@ fi
 PHRASE_FILE="${HUBVIBE_WALLET_PHRASE_FILE:-${HOME:-/tmp}/.hubvibe-wallet-phrase}"
 if [ -n "${HUBVIBE_WALLET_MNEMONIC:-}" ] || [ -r "$PHRASE_FILE" ]; then
   export PHRASE_FILE
+  # One phrase, many accounts: a wallet app shows account 0 by default but the
+  # address the owner actually holds funds in may be any of them (the Base app
+  # lets you add accounts, and hubvibe.base.eth is not necessarily the first).
+  # So when HUBVIBE_EXPECT_ADDRESS names the wallet, the first 10 accounts are
+  # derived and the matching one is used; without it, account 0. Failing on
+  # "wrong phrase" when the phrase was right and only the index differed would
+  # send the owner hunting for a second seed that does not exist.
   DERIVED=$(python3 -c '
 import os, sys
 from eth_account import Account
@@ -213,18 +220,25 @@ phrase = os.environ.get("HUBVIBE_WALLET_MNEMONIC") or open(os.environ["PHRASE_FI
 phrase = " ".join(phrase.split())
 if len(phrase.split()) not in (12, 15, 18, 21, 24):
     sys.exit("expected a 12- or 24-word recovery phrase, got %d words" % len(phrase.split()))
-acct = Account.from_mnemonic(phrase, account_path="m/44%s/60%s/0%s/0/0" % ("\x27", "\x27", "\x27"))
-key = acct.key.hex()
-print("%s\t%s" % (key if key.startswith("0x") else "0x" + key, acct.address))
+q = "\x27"
+want = (os.environ.get("HUBVIBE_EXPECT_ADDRESS") or "").strip().lower()
+seen = []
+for i in range(10 if want else 1):
+    acct = Account.from_mnemonic(phrase, account_path="m/44%s/60%s/0%s/0/%d" % (q, q, q, i))
+    seen.append(acct.address)
+    if not want or acct.address.lower() == want:
+        key = acct.key.hex()
+        print("%s\t%s\t%d" % (key if key.startswith("0x") else "0x" + key, acct.address, i))
+        break
+else:
+    sys.exit("this phrase does not hold %s in its first 10 accounts. It derives: %s"
+             % (os.environ["HUBVIBE_EXPECT_ADDRESS"], ", ".join(seen)))
 ' 2>&1) || die "could not derive a wallet from the recovery phrase: ${DERIVED}"
   HUBVIBE_WALLET_KEY="${DERIVED%%$'\t'*}"
   export HUBVIBE_WALLET_KEY
-  PHRASE_ADDRESS="${DERIVED##*$'\t'}"
-  if [ -n "${HUBVIBE_EXPECT_ADDRESS:-}" ] \
-     && [ "$(printf '%s' "$PHRASE_ADDRESS" | tr 'A-Z' 'a-z')" != "$(printf '%s' "$HUBVIBE_EXPECT_ADDRESS" | tr 'A-Z' 'a-z')" ]; then
-    die "the recovery phrase derives $PHRASE_ADDRESS, not HUBVIBE_EXPECT_ADDRESS=$HUBVIBE_EXPECT_ADDRESS. Wrong phrase, or the app shows a different account."
-  fi
-  ok "paying from your own wallet (recovery phrase): $PHRASE_ADDRESS"
+  PHRASE_ADDRESS=$(printf '%s' "$DERIVED" | cut -f2)
+  PHRASE_INDEX=$(printf '%s' "$DERIVED" | cut -f3)
+  ok "paying from your own wallet (recovery phrase, account $PHRASE_INDEX): $PHRASE_ADDRESS"
   warn "delete the phrase once this settles:  rm -f $PHRASE_FILE"
 elif [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
   ok "wallet key from HUBVIBE_WALLET_KEY"
