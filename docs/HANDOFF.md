@@ -38,6 +38,51 @@ file. Three mutations proved red. Suite 697 passed / 1 skipped, lint 0.
 
 **To take it live on the box:** merge, then on the VPS
 `cd ~/HubVibe && git pull -q origin main && cd deploy/vps && docker compose up -d --build`.
+## 2026-09-06, ~04:00 UTC: THE NODE IS LIVE ON THE OWNER'S BOX -- https://hubvibe-io.com
+
+Hostinger KVM at `2.25.172.160` (hostname srv1959297). DNS `@` and `www` ->
+that IP (parking removed). `scripts/vps-install.sh hubvibe-io.com` ran clean
+from the box's own terminal; Caddy obtained the Let's Encrypt certificate
+(89 days). Repo on the box: `/root/HubVibe`; redeploy = `git pull` there,
+then `cd deploy/vps && docker compose up -d --build`.
+
+**Probed from Cloud Shell over the real network, 25/25:** every discovery
+surface 200 and domain-only; openapi x402 offers 30000/100000; mcp.json
+1.2.0; the 402 on all six routes (v1 body + decoded v2 header: payTo
+0x837C...77dd, base / eip155:8453, resource = the domain, Bazaar record,
+no checkout URL, other_rails []); CORS preflight + expose headers;
+http->https 308; www 301; HTTP/2; metadata/loopback targets 400; empty
+body 400 billed:false; 5 MB body 413; MCP initialize 1.2.0, tools/list 5
+with outputSchema, unpaid tools/call = v2 PaymentRequired at /mcp, array
+-32600, bad JSON -32700; /health median 30 ms. `payment-status.sh`:
+"x402 is LIVE", "the node pays YOU".
+
+**The first paid call has NOT happened:** the payer wallet
+`0x5bcea6496599D65E432E50340056194D92F95d06` holds $0.00 USDC. Fund it
+with ~$1 USDC ON BASE (no ETH; the facilitator pays gas), then from any
+machine with the repo: `BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh`.
+The owner's primary wallet holds $2.00 USDC (read off the chain).
+
+**payment-status.sh bug fixed here:** mainnet.base.org answers HTTP 403 to
+Python's default `User-Agent` ("Python-urllib/3.x") while curl reads it
+fine, so the script said "RPC unreachable" from Cloud Shell. It now names
+itself and tries a comma-separated `BASE_RPC` list in order
+(mainnet.base.org, base.publicnode.com, base-rpc.publicnode.com). Two
+tests drive a fake edge that refuses the Python UA and a dead-first-RPC
+fallback; both proved red without the fix.
+
+**Still owner-side (each blocked from an agent by policy, not by code):**
+1. Action repo tags: `v1`/`v1.0.0` still at 5e77da7 (run.app default).
+   From Cloud Shell: `git clone https://github.com/Its-fortunatefolly/hubvibe-audit-action && cd hubvibe-audit-action && git tag -f v1 origin/main && git tag v1.0.1 origin/main && git push -f origin v1 v1.0.1`
+2. MCP registry still serves 1.1.0 -> run.app/mcp. `server.json` (1.2.0,
+   domain URL) validates with the registry's own tool (`./mcp-publisher
+   validate`, binary gitignored in the repo root). From `~/HubVibe`:
+   `./mcp-publisher login github` (device code, phone browser) then
+   `./mcp-publisher publish`.
+3. Old Cloud Run revision (v1.1.2) still serves on run.app and pays the
+   owner; optional stopgap until the registry is republished:
+   `bash scripts/repair-and-deploy.sh` (pins PUBLIC_BASE_URL to the
+   service URL since #98, min-instances 0).
 
 ## 2026-09-06, from Cloud Shell: what is actually live, read off the project
 
