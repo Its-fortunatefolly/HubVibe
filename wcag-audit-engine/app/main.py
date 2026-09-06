@@ -604,7 +604,10 @@ def _payment_required_response(
             }
         )
 
-    if billing.is_configured():
+    # The subscription-backed key rail is listed only while a plan is for
+    # sale. With the human tiers retired (2026-09-06) that is never; the
+    # prepaid key the MPP top-up sells is advertised by that rail instead.
+    if billing.is_configured() and billing.human_plans_live():
         other_rails.append(
             {
                 "protocol": "api_key",
@@ -628,12 +631,11 @@ def _payment_required_response(
     alternative = {
         "header": "X-API-Key",
         "detail": (
-            "Key issued with a human plan, priced per site watched. "
-            "For machine volume, pay per call with a rail in `accepts`."
+            "A prepaid key: bought with the MPP top-up rail in `other_rails` "
+            "where that rail is live, and spent per call at the same rates. "
+            "There are no subscriptions; pay per call with a rail in `accepts`."
         ),
     }
-    if billing.is_configured():
-        alternative["get_one"] = f"{PUBLIC_BASE_URL}/billing/checkout"
 
     body = {
         "error": error or "payment_required",
@@ -1290,8 +1292,8 @@ _AUTH_DESCRIPTION = (
     "cannot know it: read `payment.methods` in /.well-known/agent.json, or "
     "the `accepts[]` array in any 402 response. Both list only rails that can "
     "genuinely settle right now. The headers each scheme uses: X-API-Key (a "
-    "key issued with a human plan; plans are priced per site watched, so a "
-    "machine caller wanting volume should use a per-call rail); X-PAYMENT "
+    "prepaid key bought through the MPP top-up rail and spent per call at "
+    "the same rates; there are no subscriptions); X-PAYMENT "
     "(x402 -- price/network/payTo arrive in the 402 body); Authorization: "
     "Payment ... (MPP -- Stripe SPT for fiat or Tempo for crypto, challenges "
     "arrive in the WWW-Authenticate headers on a 402)"
@@ -1480,7 +1482,7 @@ def _payment_methods_live() -> list:
         methods.append("mpp-stripe")
     if mpp_payments.tempo_configured():
         methods.append("mpp-tempo")
-    if billing.is_configured():
+    if billing.is_configured() and billing.human_plans_live():
         methods.append("stripe_api_key")
     return methods
 
@@ -1510,26 +1512,6 @@ async def agent_manifest(request: Request):
                 "Per-call pricing is the product and is what a machine caller "
                 "should use -- no account, no minimum, no subscription."
             ),
-            "human_plans": {
-                "billed_by": "sites watched, not scans",
-                "audience": (
-                    "People who want a recurring report rather than an "
-                    "integration. Not a cheaper way to buy calls."
-                ),
-                # Only where a plan can actually be bought: /billing/checkout
-                # answers 501 on a deploy without Stripe billing.
-                **({"checkout": f"{base}/billing/checkout"} if billing.is_configured() else {}),
-                "tiers": [
-                    {
-                        "id": plan["id"],
-                        "name": plan["name"],
-                        "usd": plan["usd"],
-                        "interval": plan["interval"],
-                        "covers": plan["covers"],
-                    }
-                    for plan in billing.human_plans_live()
-                ],
-            },
         },
         "payment": {
             "methods": live_methods,

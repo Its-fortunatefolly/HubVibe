@@ -433,7 +433,7 @@ import json, sys
 try:
     tiers = json.load(sys.stdin)["pricing"]["human_plans"]["tiers"]
 except Exception:
-    print("  (no human_plans block -- deploy predates the pricing fix)")
+    print("  no human_plans block -- the human tiers are retired; per call is the only price")
     sys.exit(0)
 if not tiers:
     print("  no tiers offered -- either no Stripe plan Price IDs are set on")

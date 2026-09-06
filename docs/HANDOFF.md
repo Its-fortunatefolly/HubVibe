@@ -9,6 +9,36 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-06: the node is LIVE on the owner's box at hubvibe-io.com; human tiers retired
+
+**Live.** Hostinger KVM at `2.25.172.160`; `@` and `www` A records point at
+it; `scripts/vps-install.sh hubvibe-io.com` ran clean (image built 62 s,
+7/7 up, health OK inside the box); `https://hubvibe-io.com/health` answers
+`{"status":"ok"}` with a Let's Encrypt certificate. The first paid call
+has not been made yet. `payment-status.sh` from Cloud Shell needs no
+checkout: `curl -fsSL https://raw.githubusercontent.com/Its-fortunatefolly/HubVibe/main/scripts/payment-status.sh | BASE=https://hubvibe-io.com bash`
+(the Cloud Shell clone has diverged and `git pull` refuses; that is the
+owner's other session's commit, harmless).
+
+**Human tiers retired, owner's call** ("why would anyone pay that when the
+scans are 5 cents"): `billing.HUMAN_PLANS = []`; `plan_available` /
+`oneoff_report_available` are False for any plan not in it, so a configured
+Price ID is not an offer; `create_checkout_session` refuses a plan
+("retired"); `/billing/report` answers 501. Removed from every surface:
+agent.json (no `human_plans` block; `stripe_api_key` not in
+`payment.methods`), the 402 (`alternative` describes the prepaid key, no
+`get_one`; no `api_key` rail in `other_rails`), landing page (tier cards,
+report form, plan buttons, JSON-LD offers), docs/index.html, llms.txt, both
+READMEs, action.yml, snapshot-state.sh. What remains for humans: the MPP
+$0.50 prepaid block at per-call rates, where Stripe/MPP is configured. The
+Stripe payment links are now unpublished; the quota plumbing stays for keys
+issued before today. `test_no_shipped_surface_still_quotes_the_retired_plan`
+now also refuses $29.99 / $79 / $249 / "human_plans" anywhere but this
+file. Three mutations proved red. Suite 697 passed / 1 skipped, lint 0.
+
+**To take it live on the box:** merge, then on the VPS
+`cd ~/HubVibe && git pull -q origin main && cd deploy/vps && docker compose up -d --build`.
+
 ## 2026-09-06, from Cloud Shell: what is actually live, read off the project
 
 Checked from the owner's Cloud Shell (gcloud, real network), not remembered:

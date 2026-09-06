@@ -97,17 +97,18 @@ SAAS_MONTHLY_QUOTA = int(os.environ.get("SAAS_MONTHLY_QUOTA", "1500"))
 # Per-plan monthly call caps.
 #
 # One global 1,500 cap for every subscriber was a plan-breaking bug. Agency
-# is sold as "50 sites, audited daily": 50 bundle calls a day is 1,550 in a
-# 31-day month, so the customer paying $249 got cut off before month end --
-# and if they audited per-dimension rather than bundling (4 calls per site
-# per day) they hit the wall around day 7 and started getting 402s on a plan
-# they had already paid for. Pro and Agency also shared the same ceiling, so
-# tripling the price bought no extra capacity at all.
+# was sold as "50 sites, audited daily": 50 bundle calls a day is 1,550 in a
+# 31-day month, so that customer got cut off before month end -- and if they
+# audited per-dimension rather than bundling (4 calls per site per day) they
+# hit the wall around day 7 and started getting 402s on a plan they had
+# already paid for. Pro and Agency also shared the same ceiling, so tripling
+# the price bought no extra capacity at all.
 #
 # These are sized to the promise with real headroom, because the cap exists
 # to stop runaway abuse, not to meter value: marginal cost is ~$0.00007 per
-# audit, so even 10,000 audits is about $0.70 against $249 of revenue.
-# Under-sizing this costs a customer; over-sizing it costs pennies.
+# audit, so even 10,000 audits is about $0.70 against a plan's revenue.
+# Under-sizing this costs a customer; over-sizing it costs pennies. Kept
+# for keys issued before the plans were retired (2026-09-06).
 PLAN_MONTHLY_QUOTA = {
     "pro": int(os.environ.get("QUOTA_PRO", "2000")),  # 5 sites x 4 checks x 31d = 620
     "agency": int(os.environ.get("QUOTA_AGENCY", "10000")),  # 50 x 4 x 31 = 6,200
@@ -142,37 +143,28 @@ ONEOFF_REPORT_PRICE_ID = os.environ.get("STRIPE_PRICE_ONEOFF_REPORT")
 # advertising the retired subscription long after Stripe had stopped selling
 # it, because the number lived in a second place nobody thought to update --
 # a quoted price that no checkout will honour is worse than no price at all.
-HUMAN_PLANS = [
-    {
-        "id": "report",
-        "name": "Single report",
-        "usd": 29.99,
-        "interval": "once",
-        "covers": "One site, all four checks, delivered as a shareable report page.",
-    },
-    {
-        "id": "pro",
-        "name": "Pro",
-        "usd": 79.0,
-        "interval": "month",
-        "covers": "5 sites, audited daily across all four dimensions, with history.",
-    },
-    {
-        "id": "agency",
-        "name": "Agency",
-        "usd": 249.0,
-        "interval": "month",
-        "covers": "50 sites, audited daily, with reports you can hand to clients.",
-    },
-]
+#
+# RETIRED 2026-09-06, owner's call: "why would anyone pay that when the
+# scans are 5 cents". The per-call rails are the product and the only
+# thing sold. Empty on purpose: human_plans_live() is [] on every deploy,
+# no surface advertises a tier, and /billing/checkout refuses a plan. The
+# quota and price-ID plumbing below stays only so a key issued before this
+# date keeps working until it lapses.
+HUMAN_PLANS: list = []
+
+
+def _plan_offered(plan_id: str) -> bool:
+    """Only a plan in HUMAN_PLANS can be sold; a configured Price ID for a
+    retired plan is not an offer."""
+    return any(p["id"] == plan_id for p in HUMAN_PLANS)
 
 
 def plan_available(plan: str) -> bool:
-    return bool(stripe_key_looks_valid() and PLAN_PRICE_IDS.get(plan))
+    return bool(_plan_offered(plan) and stripe_key_looks_valid() and PLAN_PRICE_IDS.get(plan))
 
 
 def oneoff_report_available() -> bool:
-    return bool(stripe_key_looks_valid() and ONEOFF_REPORT_PRICE_ID)
+    return bool(_plan_offered("report") and stripe_key_looks_valid() and ONEOFF_REPORT_PRICE_ID)
 
 
 def human_plans_live() -> list:
@@ -302,6 +294,11 @@ def create_checkout_session(
     surfaced as an opaque 500 instead of telling the caller what to pick.
     """
     if plan:
+        if not _plan_offered(plan):
+            raise ValueError(
+                f"Plan {plan!r} is retired: there are no subscriptions. "
+                "Pay per call ($0.03 an audit, $0.10 the bundle) with a rail from the 402."
+            )
         price_id = PLAN_PRICE_IDS.get(plan)
         if not price_id:
             raise ValueError(f"Plan {plan!r} is not configured on this deployment")
