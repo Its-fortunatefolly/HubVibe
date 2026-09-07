@@ -56,15 +56,19 @@
 # Optional:
 #     TARGET_URL   the site to audit         (default https://example.com)
 #     ROUTE        which paid route          (default /audit/wcag -- cheapest)
-#     FACILITATOR  facilitator base URL      (default https://facilitator.xpay.sh)
-#     BASE         the node under test       (default the live Cloud Run URL)
+#     FACILITATOR  facilitator base URL      (default https://x402.dexter.cash)
+#     BASE         the node under test       (default https://hubvibe-io.com)
 
 set -uo pipefail
 
 BASE="${BASE:-https://hubvibe-io.com}"
 ROUTE="${ROUTE:-/audit/wcag}"
 TARGET_URL="${TARGET_URL:-https://example.com}"
-FACILITATOR="${FACILITATOR:-https://facilitator.xpay.sh}"
+# Dexter has a live discovery index at /discovery/resources; xpay.sh does not.
+# For the index check here to match the facilitator the server actually uses,
+# this must equal X402_FACILITATOR_URL on the live service -- pinned to
+# vps-install.sh's default by test_the_deploy_default_facilitator_matches_the_scripts_that_pay.
+FACILITATOR="${FACILITATOR:-https://x402.dexter.cash}"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$1"; }
@@ -123,9 +127,32 @@ print("%s\t%s" % (key if key.startswith("0x") else "0x" + key, a.address))
 
 step "Checking the client dependencies are installed"
 if ! python3 -c 'import x402, eth_account, httpx' 2>/dev/null; then
-  warn "installing the x402 client extras"
-  pip install --quiet "x402[evm,extensions]" eth-account httpx \
+  # A fresh Ubuntu box (the VPS) ships python3 with no pip and no venv
+  # module, and refuses system-wide pip installs anyway (PEP 668). So the
+  # client lives in its own environment beside the wallet key, and every
+  # python3 below resolves to it through PATH. Found on the owner's VPS
+  # 2026-09-06: `pip: command not found` at the first paid call.
+  VENV="${HUBVIBE_VENV:-${HOME:-/tmp}/.hubvibe-venv}"
+  if [ ! -x "$VENV/bin/python3" ]; then
+    warn "creating a private Python environment at $VENV"
+    if ! python3 -m venv "$VENV" 2>/dev/null; then
+      rm -rf "$VENV"
+      command -v apt-get >/dev/null 2>&1 \
+        || die "python3 cannot create a venv here and there is no apt-get. Install python3-venv and re-run."
+      warn "installing python3-venv (apt)"
+      { apt-get install -y -q python3-venv >/dev/null 2>&1 \
+        || { apt-get update -q >/dev/null 2>&1 && apt-get install -y -q python3-venv >/dev/null 2>&1; }; } \
+        || die "apt-get could not install python3-venv (run as root, or install it by hand and re-run)"
+      python3 -m venv "$VENV" || die "could not create a Python environment at $VENV"
+    fi
+  fi
+  export PATH="$VENV/bin:$PATH"
+  warn "installing the x402 client extras into $VENV"
+  python3 -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+  python3 -m pip install --quiet "x402[evm,extensions]==2.22.0" eth-account httpx \
     || die "could not install the x402 client extras"
+  python3 -c 'import x402, eth_account, httpx' 2>/dev/null \
+    || die "the x402 client installed but does not import; read the errors above"
 fi
 ok "x402 client is importable"
 
@@ -172,7 +199,52 @@ except Exception as exc:
   exit 0
 fi
 
-if [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
+# Pay from the owner's OWN wallet. The Base app (and Coinbase Wallet) export
+# a 12/24-word recovery phrase, not a raw key, so the phrase is accepted and
+# the first account (m/44'/60'/0'/0/0, the one the app shows) is derived in
+# memory: the key never touches disk. Takes precedence over a key file, so a
+# throwaway wallet made earlier is simply ignored. Owner's call 2026-09-06:
+# no third address in the loop -- the buyer is their wallet, the seller is
+# their wallet. Delete the phrase file once the call has settled.
+PHRASE_FILE="${HUBVIBE_WALLET_PHRASE_FILE:-${HOME:-/tmp}/.hubvibe-wallet-phrase}"
+if [ -n "${HUBVIBE_WALLET_MNEMONIC:-}" ] || [ -r "$PHRASE_FILE" ]; then
+  export PHRASE_FILE
+  # One phrase, many accounts: a wallet app shows account 0 by default but the
+  # address the owner actually holds funds in may be any of them (the Base app
+  # lets you add accounts, and hubvibe.base.eth is not necessarily the first).
+  # So when HUBVIBE_EXPECT_ADDRESS names the wallet, the first 10 accounts are
+  # derived and the matching one is used; without it, account 0. Failing on
+  # "wrong phrase" when the phrase was right and only the index differed would
+  # send the owner hunting for a second seed that does not exist.
+  DERIVED=$(python3 -c '
+import os, sys
+from eth_account import Account
+Account.enable_unaudited_hdwallet_features()
+phrase = os.environ.get("HUBVIBE_WALLET_MNEMONIC") or open(os.environ["PHRASE_FILE"]).read()
+phrase = " ".join(phrase.split())
+if len(phrase.split()) not in (12, 15, 18, 21, 24):
+    sys.exit("expected a 12- or 24-word recovery phrase, got %d words" % len(phrase.split()))
+q = "\x27"
+want = (os.environ.get("HUBVIBE_EXPECT_ADDRESS") or "").strip().lower()
+seen = []
+for i in range(10 if want else 1):
+    acct = Account.from_mnemonic(phrase, account_path="m/44%s/60%s/0%s/0/%d" % (q, q, q, i))
+    seen.append(acct.address)
+    if not want or acct.address.lower() == want:
+        key = acct.key.hex()
+        print("%s\t%s\t%d" % (key if key.startswith("0x") else "0x" + key, acct.address, i))
+        break
+else:
+    sys.exit("this phrase does not hold %s in its first 10 accounts. It derives: %s"
+             % (os.environ["HUBVIBE_EXPECT_ADDRESS"], ", ".join(seen)))
+' 2>&1) || die "could not derive a wallet from the recovery phrase: ${DERIVED}"
+  HUBVIBE_WALLET_KEY="${DERIVED%%$'\t'*}"
+  export HUBVIBE_WALLET_KEY
+  PHRASE_ADDRESS=$(printf '%s' "$DERIVED" | cut -f2)
+  PHRASE_INDEX=$(printf '%s' "$DERIVED" | cut -f3)
+  ok "paying from your own wallet (recovery phrase, account $PHRASE_INDEX): $PHRASE_ADDRESS"
+  warn "delete the phrase once this settles:  rm -f $PHRASE_FILE"
+elif [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
   ok "wallet key from HUBVIBE_WALLET_KEY"
 elif [ -r "$WALLET_FILE" ]; then
   HUBVIBE_WALLET_KEY=$(cat "$WALLET_FILE")

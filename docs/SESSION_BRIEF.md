@@ -43,9 +43,12 @@ Do not build SaaS features, checkout UIs, dashboards, or logins.
 
 Fixed facts: the node runs from `deploy/vps` on the owner's box; the Cloud
 Run stopgap is project `resolver-time`, service `hubvibe`, region
-`us-south1`. Facilitator `facilitator.xpay.sh` (keyless, Base mainnet, zero
-fee). Coinbase CDP is **abandoned, not pending** — its review wants proof of a
-DBA that does not exist, and its code is gone. Do not suggest Coinbase.
+`us-south1`. Facilitator: `x402.dexter.cash` is the default everywhere
+(keyless, Base mainnet, indexes on the first payment); the box was installed
+on `facilitator.xpay.sh`, which settles but indexes nothing, and is moved
+only with `scripts/switch-facilitator.sh`. Coinbase CDP is **abandoned, not
+pending** — its review wants proof of a DBA that does not exist, and its
+code is gone. Do not suggest Coinbase.
 
 ## Things already settled — do not re-litigate
 

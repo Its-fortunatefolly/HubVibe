@@ -13,26 +13,35 @@ get HTTP 402 carrying the price and the rails that can settle it, pay, and
 receive the audit. $0.03 per single audit, $0.10 per bundle, ~98% gross
 margin. Per call is the only price. Revenue is machine traffic; nothing else.
 
-## Live state (2026-09-06)
+## Live state (2026-09-07)
 
 - **Node:** `https://hubvibe-io.com`, on the owner's Hostinger KVM
   (`2.25.172.160`, repo at `/root/HubVibe`, `deploy/vps` compose stack:
   Caddy TLS in front of uvicorn, SQLite key store). `@` and `www` A records
   point at it. 25/25 live probes from Cloud Shell on go-live day.
-- **Facilitator:** `https://facilitator.xpay.sh` — keyless, Base mainnet,
-  zero fee; `/supported` lists x402 v2 `eip155:8453` and v1 `base`. It
-  serves **no** Bazaar index (`/discovery/resources` answers 200 with
-  `{"message":"Not Found"}`), so capability discovery through the Bazaar is
-  not live; MCP registry, GitHub Action and the discovery surfaces are.
+- **Facilitator on the box:** `https://facilitator.xpay.sh` — what
+  `vps-install.sh` wrote into the box's `.env` on 2026-09-06. It settles on
+  Base mainnet (v2 `eip155:8453`, v1 `base`) but keeps **no** Bazaar index
+  (`/discovery/resources` answers `{"message":"Not Found"}`), so a payment
+  through it registers the node nowhere.
+- **Facilitator in the repo:** `https://x402.dexter.cash` — the default in
+  `vps-install.sh`, `.env.example`, `first-paid-call.sh` and `go-live.sh`
+  since #66/#101 (keyless, Base mainnet, indexes a resource in its
+  marketplace on the first settled payment). Its `/supported` is
+  UNVERIFIED from any sandbox; `scripts/switch-facilitator.sh` verifies the
+  switch against the live 402 and rolls back if the rail vanishes. The box
+  has NOT been switched yet.
 - **Pay-to:** `0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd`
   (`hubvibe.base.eth`). x402 revenue lands on-chain there and never appears
   in Stripe. The wallet is the counter; `x402 SETTLED` log lines are the
-  per-call ledger.
+  per-call ledger. It holds 2 USDC the owner sent on 2026-09-06.
 - **Rails live on the node:** x402 only. Stripe/MPP are unset on the box, so
   `other_rails` is `[]` and no key can be bought; the code keeps those rails
   fail-closed until their variables are exported.
-- **First paid call:** NOT yet made. The payer wallet
-  `0x5bcea6496599D65E432E50340056194D92F95d06` holds $0.00 USDC.
+- **First paid call:** NOT yet made. The throwaway payer `0x5bce…5d06` is
+  retired (owner's instruction); the buyer is the owner's own wallet, paid
+  from its recovery phrase, and a payment from `0x837C…77dd` to itself needs
+  `HUBVIBE_ALLOW_SELF_PAYMENT=1`.
 - **Old Cloud Run node:** still serves at `https://hubvibe-831480473793.us-south1.run.app`
   on a 2026-09-03 revision (v1.1.2), pays the same wallet, min-instances 0.
   The MCP registry still points at it (1.1.0 entry).
@@ -52,13 +61,16 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   receipt headers, replay refusal, 64/64 concurrent payers on keep-alive,
   fail-closed outage handling, and the target gate. Run it before any
   deploy that touches payments; needs a Chromium Playwright can launch.
+  The shipped container image was rebuilt and paid the same three ways
+  (24/24) on 2026-09-06.
 - A failed audit costs nothing on every rail: x402 is settled only after
   delivery; a prepaid debit is refunded; the key an MPP top-up bought is
   returned on the 502 holding everything it bought; an MPP credential a
   failed audit consumed is accepted again on the retry
   (`tests/test_failed_audit_is_not_charged.py`).
-- `bash scripts/verify-live.sh` checks a deployed node from outside; a run
-  whose check count is below the current checker's is a stale checkout.
+- `bash scripts/verify-live.sh` checks a deployed node from outside
+  (positional URL, then `$BASE`, then the domain); a run whose check count
+  is below the current checker's is a stale checkout.
 
 ## Settled decisions — do not re-litigate
 
@@ -68,15 +80,26 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   `X402_PAY_TO_ADDRESS=...`, on `vps-install.sh` or `go-live.sh`). Only an
   EVM address on Base mainnet can receive here; funds sent to any other
   chain are unrecoverable.
-- **Never pay from the receiving wallet.** The payer is a second wallet
-  (`first-paid-call.sh --new-wallet` mints one); a self-transfer proves
-  nothing. `HUBVIBE_ALLOW_SELF_PAYMENT=1` overrides deliberately.
+- **The first paid call is a self-payment from the owner's wallet**
+  (owner's instruction, 2026-09-06): no throwaway buyer. The self-payment
+  guard in `first-paid-call.sh` stays and is overridden on purpose with
+  `HUBVIBE_ALLOW_SELF_PAYMENT=1`; the recovery phrase is read from
+  `HUBVIBE_WALLET_MNEMONIC` or `~/.hubvibe-wallet-phrase`, the key is
+  derived in memory and never written to disk, and
+  `HUBVIBE_EXPECT_ADDRESS` finds the funded account among the phrase's
+  first ten.
 - **`0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256` and the zero address are
   never recipients.** The first is an unidentified address that was once
   deployed for weeks; the second satisfies every shape gate and can never
   receive. Both are refused by name in every gate. Shape is not payability.
 - **Coinbase CDP is abandoned, not pending** (its review wants a business
   entity that does not exist). Its code is gone. Do not suggest it.
+- **Dexter is the facilitator, because it indexes.** xpay.sh settles and
+  indexes nothing; a facilitator's index is the only path into the Bazaar,
+  so the default moved to Dexter (#66, #101). Change it on a running box
+  only with `scripts/switch-facilitator.sh`: the node refuses to advertise
+  a rail its facilitator cannot verify, so a bad URL leaves `/health` at
+  200 while nothing can be sold.
 - **Stripe does MPP, not x402.** One rail per network: Base is x402, fiat
   and Tempo are MPP. x402 revenue is on-chain and never in Stripe.
 - **Human tiers are retired (2026-09-06).** No subscriptions, no reports,
@@ -91,10 +114,8 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   and omits what is not configured. This is the core discipline.
 - **Bazaar indexing needs a payment, not a registration.** A facilitator
   catalogs a resource when a paid `PaymentPayload` carrying the discovery
-  record reaches it. xpay.sh keeps no index; a facilitator that does would
-  index this node on the first payment (PR #66 proposes one; unverified
-  from any sandbox — the owner checks `/supported` and
-  `/discovery/resources` before switching).
+  record reaches it. The first paid call through Dexter is what indexes
+  this node.
 - **Payable is not discoverable, and demand is not plumbing.** Until #61
   no conforming client could pay the 402 at all; that was fixed. Do not
   restate "the constraint is demand" as established.
@@ -106,12 +127,17 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 
 - What the money is doing, from any machine:
   `curl -fsSL https://raw.githubusercontent.com/Its-fortunatefolly/HubVibe/main/scripts/payment-status.sh | BASE=https://hubvibe-io.com bash`
-- First paid call: fund `0x5bcea6496599D65E432E50340056194D92F95d06` with
-  ~$1 USDC **on Base** (no ETH; the facilitator pays gas), then
-  `BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh`. The
-  receipt line and the Basescan link are the proof.
 - Redeploy the node after a merge, on the box:
   `cd /root/HubVibe && git pull -q origin main && cd deploy/vps && docker compose up -d --build`
+- Point the box at the facilitator that indexes (verifies itself, rolls
+  back on a dead rail), on the box:
+  `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
+- First paid call, from any machine with the repo (the script builds its
+  own Python environment in `~/.hubvibe-venv`), with the recovery phrase in
+  `~/.hubvibe-wallet-phrase`:
+  `BASE=https://hubvibe-io.com HUBVIBE_EXPECT_ADDRESS=0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd HUBVIBE_ALLOW_SELF_PAYMENT=1 bash scripts/first-paid-call.sh`
+  The receipt line and the Basescan link are the proof; the script then
+  reads Dexter's index.
 - Move this repo's action tag to current main so `@v1` uses the domain:
   `git tag -f v1 origin/main && git push -f origin v1` (from a clone of
   HubVibe; the push output must say `HubVibe.git`).
@@ -133,11 +159,11 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 ## Hard-won rules
 
 - Never claim a live fact without seeing its output. The sandbox cannot
-  reach the node, run.app, Stripe, the facilitator or Base RPC; it can
+  reach the node, run.app, Stripe, either facilitator or Base RPC; it can
   reach PyPI, the GitHub API and the MCP registry.
 - Setting env vars is not a deploy. `gcloud run services update` keeps the
   old image; deploy source (`repair-and-deploy.sh`), or `docker compose up
-  -d --build` on the box.
+  -d --build` on the box. Never edit the facilitator in `.env` by hand.
 - When a surface is consumed by someone else's parser, test it with their
   parser (the x402 client, the Bazaar validator, `mppx`, the MCP SDK).
   Presence is not acceptance — this shipped four bugs green.
@@ -146,7 +172,10 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   module that guards a shipped artifact converts a missing pin into a
   green run. Pin, import hard, assert the pin.
 - Green tests do not prove a deploy; `verify-live.sh` does. A stale
-  checkout is not a pass.
+  checkout is not a pass. A tool must check the thing it was asked to
+  check: two scripts silently read production instead of `$BASE`.
+- A substring match on a network id is a bug: `eip155:84532` (Base
+  Sepolia) contains `eip155:8453`. Match with delimiters.
 - `gcloud --format=flattened` pads names; always `--format=json`. Secret
   Manager `latest` is the highest version number regardless of state;
   repair additively, never by disabling. Write secrets with `printf '%s'`.
@@ -158,13 +187,14 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 
 | Script | Purpose | Where |
 |---|---|---|
-| `scripts/vps-install.sh` | the whole service on a flat-rate box, one command | box |
+| `scripts/vps-install.sh` | the whole service on a flat-rate box, one command; gates the recipient and the facilitator before writing anything | box |
+| `scripts/switch-facilitator.sh` | change the facilitator on a running box: edit `.env`, restart, read the live 402, roll back if the rail vanished | box |
 | `scripts/payment-status.sh` | wallets, live 402, recipient match, payer readiness, verdict | anywhere |
-| `scripts/first-paid-call.sh` | one real $0.03 x402 payment with preflight and receipt | anywhere with a funded key |
+| `scripts/first-paid-call.sh` | one real $0.03 x402 payment from the owner's wallet, with preflight, receipt and index check | anywhere with the phrase |
 | `scripts/simulate-paid-call.py` | the whole paid path locally, for free | dev |
 | `scripts/verify-live.sh` | end-to-end checks of a deployed node | anywhere |
 | `scripts/probe-facilitators.sh` | which facilitators this library can use, and which keep a Bazaar index | anywhere |
 | `scripts/publish-action-repo.sh` | generates the standalone Marketplace action repo verbatim | dev |
 | `scripts/repair-and-deploy.sh`, `go-live.sh`, `launch.sh` | Cloud Run source deploy with preflight; `go-live` resolves recipients first; `launch` sweeps costs then deploys | Cloud Shell |
-| `scripts/repair-secrets.sh`, `cost-sweep.sh`, `snapshot-state.sh`, `measure-call-cost.sh`, `x402-log.sh`, `lib-api-key.sh` | Cloud Run operations: secrets, idle billing, live config snapshot, per-call cost, payment log, key resolution | Cloud Shell |
+| `scripts/repair-secrets.sh`, `cost-sweep.sh`, `snapshot-state.sh`, `measure-call-cost.sh`, `x402-log.sh`, `lib-api-key.sh` | Cloud Run operations: secrets, idle billing, live config snapshot (reads the box's facilitator), per-call cost, payment log, key resolution | Cloud Shell |
 | `scripts/prospect_scan.py`, `draft_outreach.py` | find sites with failing audits and draft outreach that only claims what a run backs | dev |

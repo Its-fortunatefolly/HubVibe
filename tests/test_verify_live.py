@@ -466,3 +466,37 @@ def test_the_checker_proves_the_deployed_node_refuses_internal_targets():
         assert internal in block, f"the checker never probes {internal}"
     assert '"400"' in block
     assert "ALLOW_PRIVATE_TARGETS" in block, "the fix for a failing gate is not named"
+
+
+def test_the_checker_verifies_the_node_it_was_ASKED_to_verify():
+    """It read only $1, while every other script here reads $BASE. So
+    `BASE=http://... bash scripts/verify-live.sh` -- the form the runbook and
+    habit both produce -- silently checked PRODUCTION instead. Against a
+    healthy local node that read as 34 failures (2026-09-06); against a
+    broken production it would have reported someone else's node passing.
+    A verifier that checks a different thing than it was asked to is worse
+    than no verifier."""
+    import subprocess
+
+    script = REPO_ROOT / "scripts" / "verify-live.sh"
+    text = script.read_text()
+    assert 'BASE="${1:-${BASE:-' in text, "BASE is not read from the environment"
+
+    def target(env=None, args=()):
+        # The header line names what it is about to check; reading it needs
+        # no network, so this works in a sandbox that can reach nothing.
+        out = subprocess.run(
+            ["bash", str(script), *args], capture_output=True, text=True, timeout=120,
+            env={"PATH": "/usr/bin:/bin", "HOME": "/tmp", **(env or {})},
+        ).stdout
+        for line in out.splitlines():
+            if "live verification:" in line:
+                return line.split("live verification:")[1].strip()
+        raise AssertionError(f"no target line in output: {out[:300]}")
+
+    assert target(env={"BASE": "http://127.0.0.1:18080"}) == "http://127.0.0.1:18080"
+    # A positional argument still wins, so existing habits keep working.
+    assert target(env={"BASE": "http://127.0.0.1:18080"}, args=("http://127.0.0.1:19090",)) \
+        == "http://127.0.0.1:19090"
+    # And with neither, it checks production, as before.
+    assert target() == "https://hubvibe-io.com"

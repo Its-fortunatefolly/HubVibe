@@ -8,11 +8,21 @@
 # image. Green tests do not prove a deploy.
 #
 # Usage:  bash scripts/verify-live.sh [BASE_URL]
+#         BASE=https://... bash scripts/verify-live.sh
 # Exit:   0 if everything expected is reachable and correct, 1 otherwise.
 
 set -uo pipefail
 
-BASE="${1:-https://hubvibe-io.com}"
+# Positional first, then the BASE variable, then the production domain.
+#
+# Reading ONLY $1 was a trap: every other script here takes the node's URL
+# from $BASE, so `BASE=http://... bash scripts/verify-live.sh` -- the form
+# the runbook and habit both produce -- silently ignored it and checked
+# PRODUCTION instead. Against a node that was fine, that read as 34 failures
+# (2026-09-06); against a broken production it would read as someone else's
+# node passing. A verifier that checks a different thing than it was asked
+# to is worse than no verifier.
+BASE="${1:-${BASE:-https://hubvibe-io.com}}"
 FAILURES=0
 PASSES=0
 

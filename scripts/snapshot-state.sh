@@ -17,6 +17,11 @@
 
 set -uo pipefail
 
+# This script is pasted into shells that are not in the repo (Cloud Shell,
+# the box), so the repo may not be here at all -- every read below tolerates
+# that and falls back rather than failing the whole snapshot.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd || echo /nonexistent)"
+
 PROJECT="${PROJECT:-resolver-time}"
 SERVICE="${SERVICE:-hubvibe}"
 REGION="${REGION:-us-south1}"
@@ -86,9 +91,22 @@ PYEOF
   fi
 
   section "Fixed facts (from the repo's own records, so the snapshot is self-contained)"
-  cat <<'FACTS'
+  # The facilitator is READ, never restated. A hardcoded one here said
+  # xpay.sh for a day after the repo moved to Dexter, which is exactly how a
+  # saved snapshot becomes a record of something that is not true. Order:
+  # what the live box is configured with, else what a fresh install would
+  # write.
+  SNAP_FACILITATOR=$(grep -h '^X402_FACILITATOR_URL=' "$REPO_ROOT/deploy/vps/.env" 2>/dev/null | head -1 | cut -d= -f2-)
+  if [ -z "$SNAP_FACILITATOR" ]; then
+    SNAP_FACILITATOR=$(sed -n 's/^FACILITATOR="\${X402_FACILITATOR_URL:-\(https:[^}]*\)}"/\1/p' \
+      "$REPO_ROOT/scripts/vps-install.sh" 2>/dev/null | head -1)
+    SNAP_FACILITATOR="${SNAP_FACILITATOR:-(unknown -- read scripts/vps-install.sh)} (repo default; this box has no deploy/vps/.env)"
+  else
+    SNAP_FACILITATOR="$SNAP_FACILITATOR (from deploy/vps/.env on this box)"
+  fi
+  cat <<FACTS
 receiving wallet (x402 pay-to, owner-affirmed): 0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd  (hubvibe.base.eth)
-facilitator: https://facilitator.xpay.sh  (keyless, Base mainnet, both v1+v2 vocabularies confirmed)
+facilitator: $SNAP_FACILITATOR
 NEVER use as recipient: 0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256 (unidentified),
                         0x32b08c5e927c69877d0fcab35618c265674922bc (test constant), the zero address
 Stripe account: acct_1U28tvDA21T9EAQB
