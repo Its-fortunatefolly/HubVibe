@@ -468,9 +468,21 @@ def test_a_recovery_phrase_pays_from_the_owners_own_wallet(tmp_path):
     assert "New Base wallet created" not in out, "a phrase must never mint a throwaway wallet"
     assert not (tmp_path / ".hubvibe-wallet-key").exists(), "the derived key must not be written to disk"
 
+    # One phrase, many accounts: the wallet the owner funded may not be the
+    # app's first. Naming it finds it rather than failing as "wrong phrase".
+    out = subprocess.run(
+        ["bash", str(script)], capture_output=True, text=True, timeout=180,
+        env={**env, "HUBVIBE_EXPECT_ADDRESS": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"},
+    ).stdout
+    assert "account 2" in out, out[:400]
+    assert "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" in out
+
+    # A phrase that genuinely does not hold the wallet says so, and lists what
+    # it does hold, instead of sending the owner after a second seed.
     out = subprocess.run(
         ["bash", str(script)], capture_output=True, text=True, timeout=180,
         env={**env, "HUBVIBE_EXPECT_ADDRESS": "0x37555E884c5EbA10f6E816DbecEA30965B9b38C0"},
     ).stdout
-    assert "STOP" in out and "not HUBVIBE_EXPECT_ADDRESS" in out
+    assert "STOP" in out and "first 10 accounts" in out
+    assert "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" in out, "must show what the phrase does derive"
     assert os.environ.get("HUBVIBE_WALLET_KEY") is None

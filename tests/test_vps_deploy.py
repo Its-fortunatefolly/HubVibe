@@ -152,12 +152,15 @@ def test_the_env_example_names_every_variable_the_stack_reads():
 
 def test_the_installer_writes_only_intended_defaults():
     """The .env the installer writes is read straight off the script text:
-    the affirmed wallet and the xpay facilitator as defaults, overridable,
+    the affirmed wallet and an https facilitator as defaults, overridable,
     and never an AUDIT_API_KEY (an unmetered bypass has no place in a
-    default production env)."""
+    default production env). WHICH facilitator is pinned by
+    test_the_deploy_default_facilitator_matches_the_scripts_that_pay, not
+    by name here -- naming it here is how the installer and the paying
+    scripts drifted apart in the first place."""
     script = SCRIPT.read_text()
     assert 'DEFAULT_X402_PAY_TO="0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"' in script
-    assert "facilitator.xpay.sh" in script
+    assert 'FACILITATOR="${X402_FACILITATOR_URL:-https://' in script
     assert 'chmod 600 "$ENV_FILE"' in script, "the env file holds Stripe keys; it must not be world-readable"
     writes = script.split("Writing deploy/vps/.env", 1)[1]
     assert "AUDIT_API_KEY=" not in writes.split("---")[0].replace("for var in", ""), (
@@ -215,3 +218,128 @@ def test_caddy_serves_www_as_a_redirect_and_caps_request_bodies():
             capture_output=True, text=True, timeout=60, env={"DOMAIN": "example.com", "PATH": "/usr/bin:/bin"},
         )
         assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_the_deploy_default_facilitator_matches_the_scripts_that_pay():
+    """A node installed against one facilitator while first-paid-call.sh
+    checks another indexes nothing and reports it as failure. The live box
+    was installed on xpay.sh after #66 moved everything else to Dexter;
+    pinning them together is what stops that recurring."""
+    import re
+
+    def default(path, var):
+        text = (REPO_ROOT / path).read_text()
+        m = re.search(rf'^{var}="\$\{{[A-Z0-9_]+:-(https://[^}}"]+)\}}"', text, re.M)
+        assert m, f"no default facilitator found in {path}"
+        return m.group(1)
+
+    installer = default("scripts/vps-install.sh", "FACILITATOR")
+    payer = default("scripts/first-paid-call.sh", "FACILITATOR")
+    assert installer == payer, (
+        f"vps-install.sh installs against {installer} but first-paid-call.sh "
+        f"checks {payer} -- a paid call would register the node nowhere"
+    )
+
+    env_example = (VPS_DIR / ".env.example").read_text()
+    assert f"X402_FACILITATOR_URL={installer}" in env_example, (
+        ".env.example names a different facilitator than the installer writes"
+    )
+    # And the only safe way to change it on a live box is named where an
+    # operator reading the file will see it.
+    assert "switch-facilitator.sh" in env_example
+
+
+# --- The facilitator gate ---------------------------------------------------
+#
+# The recipient gate above catches a wallet that cannot receive. This catches
+# the other half of the same failure, and it is the quieter one: a facilitator
+# that cannot settle on Base makes the node drop every rail at startup, so the
+# box answers /health 200 and sells nothing with no error anywhere.
+
+
+def _run_with_facilitator(tmp_path, supported_body, *, supported_code="200", index_code="404"):
+    """Drive the installer with docker AND curl stubbed, so the facilitator
+    gate sees exactly the /supported answer this test is about."""
+    import subprocess as sp
+    import textwrap
+
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir(exist_ok=True)
+    (stub_dir / "docker").write_text("#!/bin/sh\nexit 1\n")
+    (stub_dir / "curl").write_text(textwrap.dedent(f"""\
+        #!/bin/sh
+        OUT=""; PREV=""
+        for a in "$@"; do
+          [ "$PREV" = "-o" ] && OUT="$a"
+          PREV="$a"
+        done
+        for a in "$@"; do case "$a" in
+          */discovery/resources)
+            [ -n "$OUT" ] && printf '%s' '{{"items":[]}}' > "$OUT"
+            printf '{index_code}'; exit 0 ;;
+        esac; done
+        [ -n "$OUT" ] && printf '%s' '{supported_body}' > "$OUT"
+        printf '{supported_code}'
+        """))
+    for name in ("docker", "curl"):
+        (stub_dir / name).chmod(0o755)
+    return sp.run(
+        ["bash", str(SCRIPT), "hubvibe-io.com"], capture_output=True, text=True, timeout=90,
+        env={"PATH": f"{stub_dir}:/usr/bin:/bin", "HOME": str(tmp_path)}, cwd=REPO_ROOT,
+    )
+
+
+_BASE_V2 = '{"kinds":[{"x402Version":2,"scheme":"exact","network":"eip155:8453"}]}'
+_BASE_V1 = '{"kinds":[{"x402Version":1,"scheme":"exact","network":"base"}]}'
+_SEPOLIA_ONLY = '{"kinds":[{"x402Version":2,"scheme":"exact","network":"eip155:84532"}]}'
+_SEPOLIA_V1_ONLY = '{"kinds":[{"x402Version":1,"scheme":"exact","network":"base-sepolia"}]}'
+
+
+@pytest.mark.parametrize("body", [_BASE_V2, _BASE_V1])
+def test_a_facilitator_that_settles_base_mainnet_passes_the_gate(tmp_path, body):
+    """Either vocabulary is enough to take money: v2's CAIP-2 name or v1's."""
+    result = _run_with_facilitator(tmp_path, body)
+    assert "settles exact/Base mainnet" in result.stdout
+    assert "Checking Docker" in result.stdout, "the gate blocked a usable facilitator"
+
+
+@pytest.mark.parametrize("body", [_SEPOLIA_ONLY, _SEPOLIA_V1_ONLY])
+def test_a_facilitator_that_cannot_settle_base_stops_the_install(tmp_path, body):
+    """THE test. Reachable and wrong is a definite misconfiguration, and the
+    node's own failure mode for it is silence -- so it must stop here.
+
+    Both testnet names are checked because both CONTAIN a mainnet name:
+    eip155:84532 contains eip155:8453, and base-sepolia contains base. A
+    substring match passed a testnet-only facilitator on the first run of
+    this test -- the precise bug the gate exists to catch."""
+    result = _run_with_facilitator(tmp_path, body)
+    assert result.returncode == 1
+    assert "does not list exact on Base mainnet" in result.stdout
+    assert "Nothing was installed" in result.stdout
+    assert "Checking Docker" not in result.stdout, "it went on to install anyway"
+    assert not (VPS_DIR / ".env").exists(), "wrote an .env for a facilitator that cannot settle"
+
+
+def test_an_unreachable_facilitator_warns_but_still_installs(tmp_path):
+    """An outage is not a misconfiguration. The node re-reads /supported and
+    fails closed on its own, so refusing to install would be worse."""
+    result = _run_with_facilitator(tmp_path, "", supported_code="000")
+    assert "did not answer" in result.stdout
+    assert "Checking Docker" in result.stdout
+    assert "payment-status.sh" in result.stdout, "must say how to see the rail later"
+
+
+def test_a_facilitator_with_no_index_is_flagged_not_hidden(tmp_path):
+    """Settling and indexing are different capabilities. xpay.sh settles and
+    indexes nothing, which is how the live node ended up unable to register
+    itself no matter how many payments it took."""
+    result = _run_with_facilitator(tmp_path, _BASE_V2, index_code="404")
+    assert "serves no /discovery/resources" in result.stdout
+    assert "switch-facilitator.sh" in result.stdout
+    assert "Checking Docker" in result.stdout, "no index is a warning, not a refusal"
+
+
+def test_a_facilitator_with_an_index_says_the_paid_call_will_register(tmp_path):
+    result = _run_with_facilitator(tmp_path, _BASE_V2, index_code="200")
+    assert "runs a Bazaar index" in result.stdout
+    assert "Checking Docker" in result.stdout
