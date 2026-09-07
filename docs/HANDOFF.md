@@ -42,6 +42,13 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   retired (owner's instruction); the buyer is the owner's own wallet, paid
   from its recovery phrase, and a payment from `0x837C…77dd` to itself needs
   `HUBVIBE_ALLOW_SELF_PAYMENT=1`.
+- **Base app registration:** the homepage serves
+  `<meta name="base:app_id" content="6a83832901463168d7e651ca" />`, the id
+  the owner's Add Domain dialog asked for on 2026-09-07. It replaced
+  `6a8383066ea1f57fed333625` (#84): the two are 35 seconds apart as
+  ObjectIDs, so the app was created twice and setup is open on the second.
+  Verification is NOT done — Base fetches the live page when Register is
+  pressed, so the box must carry this deploy first.
 - **Old Cloud Run node:** still serves at `https://hubvibe-831480473793.us-south1.run.app`
   on a 2026-09-03 revision (v1.1.2), pays the same wallet, min-instances 0.
   The MCP registry still points at it (1.1.0 entry).
@@ -138,6 +145,11 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   `BASE=https://hubvibe-io.com HUBVIBE_EXPECT_ADDRESS=0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd HUBVIBE_ALLOW_SELF_PAYMENT=1 bash scripts/first-paid-call.sh`
   The receipt line and the Basescan link are the proof; the script then
   reads Dexter's index.
+- Finish the Base app registration, in this order and no other: merge,
+  redeploy the box (line above), confirm the live page carries the id with
+  `curl -s https://hubvibe-io.com/ | grep base:app_id`, and only then enter
+  `hubvibe-io.com` in the dashboard's Add Domain box and press Register.
+  Pressing it before the deploy verifies nothing.
 - Move this repo's action tag to current main so `@v1` uses the domain:
   `git tag -f v1 origin/main && git push -f origin v1` (from a clone of
   HubVibe; the push output must say `HubVibe.git`).

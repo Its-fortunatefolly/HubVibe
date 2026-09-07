@@ -3129,7 +3129,11 @@ def test_the_base_app_id_meta_tag_is_served_in_the_head(monkeypatch):
     # Byte-identical to the snippet Base's Add Domain dialog hands out,
     # self-closing slash included. A parser does not care; a verifier that
     # string-matches its own snippet does, and that failure is silent.
-    assert '<meta name="base:app_id" content="6a8383066ea1f57fed333625" />' in head
+    assert '<meta name="base:app_id" content="6a83832901463168d7e651ca" />' in head
+    # And exactly one: a second base:app_id (the retired 6a838306... this
+    # replaced, say) leaves the verifier picking between two claims, which
+    # is the one way to have the tag present and prove nothing.
+    assert html.count('name="base:app_id"') == 1, "more than one Base app is claimed here"
 
 
 # --- The paid 200 carries the settlement receipt ----------------------------
