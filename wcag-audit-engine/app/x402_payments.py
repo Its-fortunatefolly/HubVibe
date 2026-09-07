@@ -165,7 +165,7 @@ class _StaticAuthProvider:
     the library accepts via CreateHeadersAuthProvider. Faking it with a
     static header would produce a facilitator that rejects every payment,
     which fails closed but silently, and that is the single worst outcome
-    for a payment rail. The live facilitator (xpay.sh) is keyless.
+    for a payment rail. The default facilitator (Dexter) is keyless.
     """
 
     __slots__ = ("_headers",)

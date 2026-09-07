@@ -209,13 +209,17 @@ either way:
 
 #### Choosing a facilitator
 
-The live node uses `https://facilitator.xpay.sh`: keyless, Base mainnet,
-zero fee, x402 v1 and v2 (its `/supported` lists both `eip155:8453` and
-the legacy name `base`). `scripts/probe-facilitators.sh` checks any other
-candidate for the two things this server library needs: the CAIP-2 network
-name in `/supported`, and whether it serves a Bazaar index. A facilitator
-that authenticates the resource server with a fixed bearer token is covered
-by `X402_FACILITATOR_AUTH_HEADERS`; one that signs a fresh credential per
+The default is `https://x402.dexter.cash`: keyless, Base mainnet, and it
+indexes a resource in its marketplace on the first settled payment, which
+is the only path into capability-based discovery. `facilitator.xpay.sh`
+also settles on Base mainnet (x402 v1 and v2; its `/supported` lists both
+`eip155:8453` and the legacy name `base`) but keeps no index.
+`scripts/probe-facilitators.sh` checks any candidate for the two things
+this server library needs: the CAIP-2 network name in `/supported`, and
+whether it serves a Bazaar index; `scripts/switch-facilitator.sh` changes
+it on a running box and rolls back if the rail vanishes. A facilitator that
+authenticates the resource server with a fixed bearer token is covered by
+`X402_FACILITATOR_AUTH_HEADERS`; one that signs a fresh credential per
 request is not supported.
 
 Turning it on, without disturbing anything else on the service:
