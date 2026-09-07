@@ -19,18 +19,16 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   (`2.25.172.160`, repo at `/root/HubVibe`, `deploy/vps` compose stack:
   Caddy TLS in front of uvicorn, SQLite key store). `@` and `www` A records
   point at it. 25/25 live probes from Cloud Shell on go-live day.
-- **Facilitator on the box:** `https://facilitator.xpay.sh` — what
-  `vps-install.sh` wrote into the box's `.env` on 2026-09-06. It settles on
-  Base mainnet (v2 `eip155:8453`, v1 `base`) but keeps **no** Bazaar index
-  (`/discovery/resources` answers `{"message":"Not Found"}`), so a payment
-  through it registers the node nowhere.
-- **Facilitator in the repo:** `https://x402.dexter.cash` — the default in
-  `vps-install.sh`, `.env.example`, `first-paid-call.sh` and `go-live.sh`
-  since #66/#101 (keyless, Base mainnet, indexes a resource in its
-  marketplace on the first settled payment). Its `/supported` is
-  UNVERIFIED from any sandbox; `scripts/switch-facilitator.sh` verifies the
-  switch against the live 402 and rolls back if the rail vanishes. The box
-  has NOT been switched yet.
+- **Facilitator on the box:** `https://x402.dexter.cash` — confirmed from
+  the box on 2026-09-07: `switch-facilitator.sh` reported "already on"
+  and made no change, and `payment-status.sh` read a live 402 advertising
+  the Base rail through it. Dexter is keyless, settles on Base mainnet (v2
+  `eip155:8453`, v1 `base`) and keeps a Bazaar index (`/discovery/resources`
+  is reachable; 0 entries for this pay-to until the first settled payment).
+  `https://facilitator.xpay.sh` — the earlier default — settles but indexes
+  nothing, so a payment through it registers the node nowhere. The repo
+  defaults everywhere (`vps-install.sh`, `.env.example`,
+  `first-paid-call.sh`, `go-live.sh`) are Dexter since #66/#101.
 - **Pay-to:** `0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd`
   (`hubvibe.base.eth`). x402 revenue lands on-chain there and never appears
   in Stripe. The wallet is the counter; `x402 SETTLED` log lines are the
@@ -38,10 +36,14 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - **Rails live on the node:** x402 only. Stripe/MPP are unset on the box, so
   `other_rails` is `[]` and no key can be bought; the code keeps those rails
   fail-closed until their variables are exported.
-- **First paid call:** NOT yet made. The throwaway payer `0x5bce…5d06` is
-  retired (owner's instruction); the buyer is the owner's own wallet, paid
-  from its recovery phrase, and a payment from `0x837C…77dd` to itself needs
-  `HUBVIBE_ALLOW_SELF_PAYMENT=1`.
+- **First paid call:** NOT yet made — **only the money is missing.** The
+  throwaway payer `0x5bce…5d06` is retired (owner's instruction). The payer
+  is now `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`, created on the box by
+  `first-paid-call.sh --new-wallet`, its key at `~/.hubvibe-payer-key`. Its
+  last attempt was refused `invalid_exact_evm_insufficient_balance`: the
+  EIP-3009 signature was VALID and every step up to the balance is proven.
+  Fund it with ~$1 USDC **on Base** (no ETH needed) and re-run. There is no
+  recovery phrase for the owner's own wallet — do not build for one.
 - **Base app registration:** the homepage serves
   `<meta name="base:app_id" content="6a83832901463168d7e651ca" />`, the id
   the owner's Add Domain dialog asked for on 2026-09-07. It replaced
@@ -78,6 +80,20 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - `bash scripts/verify-live.sh` checks a deployed node from outside
   (positional URL, then `$BASE`, then the domain); a run whose check count
   is below the current checker's is a stale checkout.
+- **The repo is public and is now guarded.** A scan of the working tree and
+  of all git history found no credential was ever committed — every history
+  match is a redaction fixture (`sk_live_ABC123XYZ`) that exists to prove
+  the redactor. The Stripe account id and three `buy.stripe.com` links for
+  the retired plans were removed from the tree anyway.
+  `tests/test_no_secrets_in_repo.py` scans every tracked file for ten
+  credential shapes plus those two private identifiers, allows only the
+  ERC-20 Transfer topic0 and the fixtures under `tests/`, and asserts no
+  `.env`, wallet key, `.pem` or `id_rsa` is tracked and that `.gitignore`
+  covers them. Wallet addresses stay: an EVM address is public by
+  construction and the code needs the pay-to. History still holds the
+  account id and the links — not credentials, and not worth rewriting a
+  public repo's history over; deactivate the links in Stripe if they should
+  be dead.
 
 ## Settled decisions — do not re-litigate
 
@@ -87,14 +103,13 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   `X402_PAY_TO_ADDRESS=...`, on `vps-install.sh` or `go-live.sh`). Only an
   EVM address on Base mainnet can receive here; funds sent to any other
   chain are unrecoverable.
-- **The first paid call is a self-payment from the owner's wallet**
-  (owner's instruction, 2026-09-06): no throwaway buyer. The self-payment
-  guard in `first-paid-call.sh` stays and is overridden on purpose with
-  `HUBVIBE_ALLOW_SELF_PAYMENT=1`; the recovery phrase is read from
-  `HUBVIBE_WALLET_MNEMONIC` or `~/.hubvibe-wallet-phrase`, the key is
-  derived in memory and never written to disk, and
-  `HUBVIBE_EXPECT_ADDRESS` finds the funded account among the phrase's
-  first ten.
+- **The first paid call is funded by the owner, from the box's own payer
+  wallet** (owner's instruction, 2026-09-07): no throwaway buyer, and **no
+  recovery phrase — the owner does not have twelve words.** The phrase path
+  in `first-paid-call.sh` stays for anyone who does, but the supported route
+  is the box wallet `0x104feA…dd35` funded with USDC on Base. The
+  self-payment guard stays and is overridden on purpose with
+  `HUBVIBE_ALLOW_SELF_PAYMENT=1` only when paying from `0x837C…77dd` itself.
 - **`0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256` and the zero address are
   never recipients.** The first is an unidentified address that was once
   deployed for weeks; the second satisfies every shape gate and can never
@@ -139,10 +154,11 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - Point the box at the facilitator that indexes (verifies itself, rolls
   back on a dead rail), on the box:
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
-- First paid call, from any machine with the repo (the script builds its
-  own Python environment in `~/.hubvibe-venv`), with the recovery phrase in
-  `~/.hubvibe-wallet-phrase`:
-  `BASE=https://hubvibe-io.com HUBVIBE_EXPECT_ADDRESS=0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd HUBVIBE_ALLOW_SELF_PAYMENT=1 bash scripts/first-paid-call.sh`
+- First paid call, on the box (the script builds its own Python environment
+  in `~/.hubvibe-venv` and uses the payer key at `~/.hubvibe-payer-key`).
+  Send ~$1 USDC on Base to `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`
+  first, then:
+  `cd ~/HubVibe && BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh`
   The receipt line and the Basescan link are the proof; the script then
   reads Dexter's index.
 - Finish the Base app registration, in this order and no other: merge,
@@ -202,7 +218,7 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 | `scripts/vps-install.sh` | the whole service on a flat-rate box, one command; gates the recipient and the facilitator before writing anything | box |
 | `scripts/switch-facilitator.sh` | change the facilitator on a running box: edit `.env`, restart, read the live 402, roll back if the rail vanished | box |
 | `scripts/payment-status.sh` | wallets, live 402, recipient match, payer readiness, verdict | anywhere |
-| `scripts/first-paid-call.sh` | one real $0.03 x402 payment from the owner's wallet, with preflight, receipt and index check | anywhere with the phrase |
+| `scripts/first-paid-call.sh` | one real $0.03 x402 payment from the box's payer wallet, with preflight, receipt and index check; an empty wallet is reported as an empty wallet, not a broken rail | box |
 | `scripts/simulate-paid-call.py` | the whole paid path locally, for free | dev |
 | `scripts/verify-live.sh` | end-to-end checks of a deployed node | anywhere |
 | `scripts/probe-facilitators.sh` | which facilitators this library can use, and which keep a Bazaar index | anywhere |
