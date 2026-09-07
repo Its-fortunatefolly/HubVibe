@@ -514,13 +514,11 @@ def test_rate_limit_is_enforced_before_any_payment_is_settled(monkeypatch):
 
     settled = []
 
-    def _exploding_verify(payment_header, price=None):
+    def _exploding_verify(payment_header, price=None, resource_url=None):
         settled.append(payment_header)
         return True
 
-    monkeypatch.setattr(
-        module.x402_payments, "verify_and_settle_sync", _exploding_verify
-    )
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", _exploding_verify)
     # Exhaust the limiter for this key before the request comes in.
     monkeypatch.setattr(module, "_audit_limiter", module._SlidingWindowLimiter(limit=0, window_seconds=60.0))
 
@@ -1357,9 +1355,6 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
         for path in REPO_ROOT.rglob(pattern):
             parts = path.parts
             if any(p in parts for p in (".git", "node_modules", "venv", "venv_clean")):
-                continue
-            # Other services in this monorepo have their own pricing.
-            if any(p in parts for p in ("privacy-compliance-scanner", "dead-end-resolver")):
                 continue
             if path.name == "HANDOFF.md":  # history is allowed to remember prices
                 continue
@@ -3134,7 +3129,11 @@ def test_the_base_app_id_meta_tag_is_served_in_the_head(monkeypatch):
     # Byte-identical to the snippet Base's Add Domain dialog hands out,
     # self-closing slash included. A parser does not care; a verifier that
     # string-matches its own snippet does, and that failure is silent.
-    assert '<meta name="base:app_id" content="6a8383066ea1f57fed333625" />' in head
+    assert '<meta name="base:app_id" content="6a83832901463168d7e651ca" />' in head
+    # And exactly one: a second base:app_id (the retired 6a838306... this
+    # replaced, say) leaves the verifier picking between two claims, which
+    # is the one way to have the tag present and prove nothing.
+    assert html.count('name="base:app_id"') == 1, "more than one Base app is claimed here"
 
 
 # --- The paid 200 carries the settlement receipt ----------------------------

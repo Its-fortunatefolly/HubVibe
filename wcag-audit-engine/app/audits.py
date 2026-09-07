@@ -7,8 +7,7 @@ an honest 502, never a fabricated result.
 
 Each function returns `{"status": "ok", "pass": bool, ..., "findings": [...]}`
 where every finding is `{"id": str, "severity": str, "detail": str}`,
-matching the shape used across every other product in this repo
-(privacy-compliance-scanner's `findings` included).
+the one finding shape every route in this service returns.
 
 These are real, narrow, disclosed signals -- not a replacement for a full
 SEO audit, a penetration test, or a Lighthouse run. Each function's
