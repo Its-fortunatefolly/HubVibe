@@ -486,3 +486,27 @@ def test_a_recovery_phrase_pays_from_the_owners_own_wallet(tmp_path):
     assert "STOP" in out and "first 10 accounts" in out
     assert "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" in out, "must show what the phrase does derive"
     assert os.environ.get("HUBVIBE_WALLET_KEY") is None
+
+
+def test_an_empty_wallet_is_not_reported_as_a_broken_rail():
+    """The facilitator refusing for want of funds means the signature was
+    VALID -- everything up to the money is working. The generic branch told
+    the owner their rail was broken and to fix it "before spending any
+    effort on demand" (2026-09-07), which is a checker lying about the one
+    thing it exists to report."""
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parent.parent / "scripts" / "first-paid-call.sh").read_text()
+    failure = text.split("the payment did not go through", 1)[1].split("esac", 1)[0]
+
+    assert "insufficient_balance" in failure, "the empty-wallet case is not distinguished"
+    assert "insufficient_funds" in failure, "only one of the two facilitator spellings is handled"
+    assert "The rail is fine" in failure, "an empty wallet must not read as a broken rail"
+    assert "$PAYER" in failure, "must name the address to fund"
+
+    # The alarming wording must survive for the case it was written for: a
+    # real rejection (bad signature, wrong network, unreachable facilitator)
+    # IS the answer worth having.
+    generic = failure.split("*)", 2)[-1]
+    assert "answer worth having" in generic
+    assert "insufficient" not in generic, "the alarm now fires on an empty wallet again"

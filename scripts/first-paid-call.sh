@@ -558,10 +558,31 @@ case "$PAID" in
   FAIL*)
     printf '  \033[31mSTOP\033[0m  the payment did not go through:\n'
     printf '%s\n' "$PAID" | cut -f2- | sed 's/^/        /'
-    printf '\n  This is the answer worth having. Settlement was never proven\n'
-    printf '  before now, and an agent hitting this would have bounced in\n'
-    printf '  silence -- which reads as nobody buying. Fix this before\n'
-    printf '  spending any effort on demand.\n'
+    # An empty wallet is not a broken rail, and saying so is not a nicety:
+    # the generic wording below told the owner to "fix this before spending
+    # any effort on demand" when the facilitator had merely reported that a
+    # freshly created wallet holds no USDC (2026-09-07). Telling someone
+    # their payment rail is broken when it is working is the same class of
+    # error as the reverse -- it is a checker lying about the thing it
+    # exists to report.
+    case "$PAID" in
+      *insufficient_balance*|*insufficient_funds*)
+        printf '\n  \033[1mThe rail is fine. The paying wallet is empty.\033[0m The facilitator\n'
+        printf '  checked the signature, found it valid, and refused only for want of\n'
+        printf '  funds -- which means everything up to the money is proven working.\n\n'
+        if [ -n "${PAYER:-}" ]; then
+          printf '  Send USDC on Base (\$1 is plenty; NO ETH needed) to:\n\n'
+          printf '      \033[1m%s\033[0m\n\n' "$PAYER"
+        fi
+        printf '  Then run this same command again.\n'
+        ;;
+      *)
+        printf '\n  This is the answer worth having. Settlement was never proven\n'
+        printf '  before now, and an agent hitting this would have bounced in\n'
+        printf '  silence -- which reads as nobody buying. Fix this before\n'
+        printf '  spending any effort on demand.\n'
+        ;;
+    esac
     exit 1
     ;;
 esac
