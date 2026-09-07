@@ -19,8 +19,17 @@
      its own snippet does not, and that failure is silent: the tag is
      present, the page is correct, and registration simply never completes.
      Matching the vendor's exact bytes costs nothing and removes the
-     guess. -->
-<meta name="base:app_id" content="6a8383066ea1f57fed333625" />
+     guess.
+
+     The id below is the one the owner's Add Domain dialog was serving on
+     2026-09-07, read off the dashboard. It REPLACED 6a8383066ea1f57fed333625,
+     which this page carried since #84: as ObjectIDs the two were minted 35
+     seconds apart, so the app was created twice and the dashboard finished
+     setup on the second. One page can prove one app -- the tag is singular
+     and two would verify neither -- so it names the app whose setup is
+     actually open. If Base ever asks for the older id again, swap it back
+     here and in its test; nothing else reads it. -->
+<meta name="base:app_id" content="6a83832901463168d7e651ca" />
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HubVibe">
 <meta property="og:title" content="HubVibe — machine-payable site audits for AI agents">
