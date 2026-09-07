@@ -17,6 +17,15 @@ services:
     build:
       context: ../../wcag-audit-engine
     restart: unless-stopped
+    # Rotate container logs. Docker's json-file driver keeps every line
+    # forever by default; at paid-traffic volume (one INFO line per
+    # settlement plus uvicorn's access log) that fills the box's disk in
+    # months and takes the node down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     env_file: .env
     environment:
       # The public identity every manifest and 402 advertises. The domain,
@@ -44,6 +53,11 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     ports:
       - "80:80"
       - "443:443"

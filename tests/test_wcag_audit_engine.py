@@ -514,13 +514,11 @@ def test_rate_limit_is_enforced_before_any_payment_is_settled(monkeypatch):
 
     settled = []
 
-    def _exploding_verify(payment_header, price=None):
+    def _exploding_verify(payment_header, price=None, resource_url=None):
         settled.append(payment_header)
         return True
 
-    monkeypatch.setattr(
-        module.x402_payments, "verify_and_settle_sync", _exploding_verify
-    )
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", _exploding_verify)
     # Exhaust the limiter for this key before the request comes in.
     monkeypatch.setattr(module, "_audit_limiter", module._SlidingWindowLimiter(limit=0, window_seconds=60.0))
 
@@ -1357,9 +1355,6 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
         for path in REPO_ROOT.rglob(pattern):
             parts = path.parts
             if any(p in parts for p in (".git", "node_modules", "venv", "venv_clean")):
-                continue
-            # Other services in this monorepo have their own pricing.
-            if any(p in parts for p in ("privacy-compliance-scanner", "dead-end-resolver")):
                 continue
             if path.name == "HANDOFF.md":  # history is allowed to remember prices
                 continue

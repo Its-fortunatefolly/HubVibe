@@ -2,7 +2,7 @@
 
 The bug these exist to prevent: x402ResourceServer.initialize() is a plain
 synchronous method, but this module used to `await` it. `await None` raises
-TypeError, and verify_and_settle catches every exception and fails closed --
+TypeError, and verify_only_sync catches every exception and fails closed --
 so a fully configured x402 deployment rejected 100% of payments with no
 diagnostic anywhere. Fail-closed is the right default, but it means a wiring
 mistake is indistinguishable from a genuinely invalid payment unless
@@ -105,18 +105,20 @@ def _install_fake_server(monkeypatch, module, *, valid=True, settled=True,
 
 
 def test_valid_payment_is_accepted(monkeypatch):
-    """The regression. Before the fix this returned False -- always."""
+    """The regression. Before the fix verify returned None -- always."""
     module = _load_x402(monkeypatch)
     _install_fake_server(monkeypatch, module)
 
-    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    assert pending is not None
+    assert module.settle_sync(pending) is True
 
 
 def test_initialize_is_called_synchronously_not_awaited(monkeypatch):
     module = _load_x402(monkeypatch)
     server = _install_fake_server(monkeypatch, module)
 
-    module.verify_and_settle_sync("signed-payment", price="$0.03")
+    module.verify_only_sync("signed-payment", price="$0.03")
 
     server.initialize.assert_called_once()
 
@@ -125,7 +127,7 @@ def test_facilitator_rejection_fails_closed(monkeypatch):
     module = _load_x402(monkeypatch)
     _install_fake_server(monkeypatch, module, valid=False)
 
-    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is False
+    assert module.verify_only_sync("signed-payment", price="$0.03") is None
 
 
 def test_failed_settlement_fails_closed(monkeypatch):
@@ -133,13 +135,15 @@ def test_failed_settlement_fails_closed(monkeypatch):
     module = _load_x402(monkeypatch)
     _install_fake_server(monkeypatch, module, valid=True, settled=False)
 
-    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is False
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    assert pending is not None
+    assert module.settle_sync(pending) is False
 
 
 def test_unconfigured_deployment_never_accepts(monkeypatch):
     module = _load_x402(monkeypatch, facilitator=None, pay_to=None)
     assert module.is_configured() is False
-    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is False
+    assert module.verify_only_sync("signed-payment", price="$0.03") is None
 
 
 def test_requirements_are_cached_per_price_not_shared(monkeypatch):
@@ -147,9 +151,9 @@ def test_requirements_are_cached_per_price_not_shared(monkeypatch):
     module = _load_x402(monkeypatch)
     server = _install_fake_server(monkeypatch, module)
 
-    module.verify_and_settle_sync("p", price="$0.03")
-    module.verify_and_settle_sync("p", price="$0.10")
-    module.verify_and_settle_sync("p", price="$0.03")
+    module.verify_only_sync("p", price="$0.03")
+    module.verify_only_sync("p", price="$0.10")
+    module.verify_only_sync("p", price="$0.03")
 
     prices = {c.kwargs["price"] for c in module.ResourceConfig.call_args_list}
     assert prices == {"$0.03", "$0.10"}
@@ -168,7 +172,7 @@ def test_server_is_not_cached_when_initialize_fails(monkeypatch):
     boom.initialize = MagicMock(side_effect=RuntimeError("facilitator unreachable"))
     monkeypatch.setattr(module, "x402ResourceServer", MagicMock(return_value=boom))
 
-    assert module.verify_and_settle_sync("p", price="$0.03") is False
+    assert module.verify_only_sync("p", price="$0.03") is None
     assert module._server is None, "a server that failed to initialize was cached"
 
 
@@ -248,7 +252,7 @@ def test_malformed_payment_header_fails_closed(monkeypatch, bad_header):
         raise ValueError("malformed payment header")
 
     monkeypatch.setattr(module, "decode_payment_signature_header", _explode)
-    assert module.verify_and_settle_sync(bad_header, price="$0.03") is False
+    assert module.verify_only_sync(bad_header, price="$0.03") is None
 
 
 # --- Authenticated facilitators ------------------------------------------
@@ -287,7 +291,7 @@ def test_auth_provider_is_handed_to_the_facilitator_client(monkeypatch):
     )
     _install_fake_server(monkeypatch, module)
 
-    module.verify_and_settle_sync("signed-payment", price="$0.03")
+    module.verify_only_sync("signed-payment", price="$0.03")
 
     assert module.FacilitatorConfig.call_args is not None, "FacilitatorConfig was never built"
     provider = module.FacilitatorConfig.call_args.kwargs.get("auth_provider")
@@ -307,104 +311,13 @@ def test_malformed_auth_headers_raise_rather_than_silently_dropping(monkeypatch,
         module._auth_provider()
 
 
-# --- Coinbase CDP facilitator --------------------------------------------
-#
-# CDP is the facilitator that matters commercially: it settles on mainnet and
-# it is what gets a resource listed in the x402 Bazaar. It signs a fresh JWT
-# per call, bound to that call's method, host and FULL path -- so unlike a
-# bearer token these headers cannot be computed once and reused, and a wrong
-# path means every request is rejected with a signature that looks valid.
-
-
-def _cdp_secret():
-    """A real Ed25519 keypair in CDP's base64(private||public) format, so the
-    SDK actually signs rather than being mocked into agreeing with us."""
-    import base64
-
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import ed25519
-
-    priv = ed25519.Ed25519PrivateKey.generate()
-    raw = priv.private_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PrivateFormat.Raw,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    pub = priv.public_key().public_bytes(
-        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
-    )
-    return base64.b64encode(raw + pub).decode()
-
-
-def _load_cdp(monkeypatch, url="https://api.cdp.coinbase.com/platform/v2/x402", **kw):
-    monkeypatch.setenv("CDP_API_KEY_ID", "11111111-2222-3333-4444-555555555555")
-    monkeypatch.setenv("CDP_API_KEY_SECRET", _cdp_secret())
-    return _load_x402(monkeypatch, facilitator=url, **kw)
-
-
-def _jwt_claims(header_value):
-    import base64
-
-    payload = header_value.split(" ", 1)[1].split(".")[1]
-    payload += "=" * (-len(payload) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload))
-
-
-def test_cdp_signs_each_endpoint_with_its_own_method_and_full_path(monkeypatch):
-    """The signed `uris` claim must name the real method and the real path,
-    prefix included. CDP's facilitator lives under /platform/v2/x402, and a
-    JWT signed for the bare path authenticates nothing -- which would present
-    as x402 configured and every payment rejected."""
-    module = _load_cdp(monkeypatch)
-    headers = module._auth_provider().get_auth_headers()
-
-    expected = {
-        "verify": "POST api.cdp.coinbase.com/platform/v2/x402/verify",
-        "settle": "POST api.cdp.coinbase.com/platform/v2/x402/settle",
-        "supported": "GET api.cdp.coinbase.com/platform/v2/x402/supported",
-        "bazaar": "GET api.cdp.coinbase.com/platform/v2/x402/discovery/resources",
-    }
-    for endpoint, uri in expected.items():
-        claims = _jwt_claims(getattr(headers, endpoint)["Authorization"])
-        assert claims["uris"] == [uri], f"{endpoint} signed for the wrong request"
-
-
-def test_cdp_tokens_are_distinct_per_endpoint(monkeypatch):
-    """Reusing one token across endpoints is the obvious shortcut and it does
-    not work -- each is bound to its own method and path."""
-    module = _load_cdp(monkeypatch)
-    headers = module._auth_provider().get_auth_headers()
-    tokens = {
-        getattr(headers, e)["Authorization"]
-        for e in ("verify", "settle", "supported", "bazaar")
-    }
-    assert len(tokens) == 4
-
-
-def test_cdp_takes_precedence_over_static_headers(monkeypatch):
-    """Nobody sets a CDP key pair by accident; it is the more specific config."""
-    module = _load_cdp(
-        monkeypatch, auth_headers=json.dumps({"Authorization": "Bearer stale"})
-    )
-    provider = module._auth_provider()
-    assert type(provider).__name__ == "_CdpAuthProvider"
-    assert "stale" not in provider.get_auth_headers().verify["Authorization"]
-
-
-def test_cdp_rejects_a_facilitator_url_it_cannot_sign_for(monkeypatch):
-    """Without a host there is nothing to bind the JWT to, so fail loudly at
-    construction rather than emitting tokens no facilitator will accept."""
-    with pytest.raises(ValueError):
-        _load_cdp(monkeypatch, url="not-a-url")._auth_provider()
-
-
-def test_static_headers_still_used_when_no_cdp_credentials(monkeypatch):
-    monkeypatch.delenv("CDP_API_KEY_ID", raising=False)
-    monkeypatch.delenv("CDP_API_KEY_SECRET", raising=False)
+def test_static_headers_provider_is_used_when_configured(monkeypatch):
     module = _load_x402(
         monkeypatch, auth_headers=json.dumps({"Authorization": "Bearer tok"})
     )
-    assert type(module._auth_provider()).__name__ == "_StaticAuthProvider"
+    provider = module._auth_provider()
+    assert type(provider).__name__ == "_StaticAuthProvider"
+    assert provider.get_auth_headers().verify == {"Authorization": "Bearer tok"}
 
 
 # --- Recording settlements in Stripe -------------------------------------
@@ -489,7 +402,8 @@ def test_recording_failure_never_fails_the_settlement(monkeypatch):
     _capture_payment_intents(monkeypatch, module, boom=True)
     _install_fake_server(monkeypatch, module)
 
-    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    assert module.settle_sync(pending) is True
 
 
 def test_settlement_still_succeeds_without_a_stripe_key(monkeypatch):
@@ -501,7 +415,8 @@ def test_settlement_still_succeeds_without_a_stripe_key(monkeypatch):
     calls = _capture_payment_intents(monkeypatch, module)
     _install_fake_server(monkeypatch, module)
 
-    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    assert module.settle_sync(pending) is True
     assert calls == [], "no key, no PaymentIntent -- and no crash"
 
 
@@ -564,99 +479,6 @@ def test_settle_sync_records_after_a_successful_settle(monkeypatch):
     assert pending is not None
     assert module.settle_sync(pending) is True
     assert len(calls) == 1
-
-
-def test_verify_and_settle_records_after_a_successful_settle(monkeypatch):
-    """The legacy /audit route settles through verify_and_settle_sync, not
-    settle_sync -- if only one path records, revenue splits into visible and
-    invisible depending on which route the agent happened to call."""
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
-    monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
-    module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
-    _install_fake_server(monkeypatch, module)
-
-    assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
-    assert len(calls) == 1
-
-
-# --- Switching away from CDP -------------------------------------------------
-#
-# The handoff bills leaving CDP as "one env var": point X402_FACILITATOR_URL at
-# a keyless facilitator, redeploy. The CDP key pair stays mounted on the Cloud
-# Run service, so that claim only holds if the credentials stop being used when
-# the facilitator is no longer Coinbase's.
-
-
-def test_cdp_credentials_are_not_sent_to_a_non_coinbase_facilitator(monkeypatch):
-    """A CDP token is a JWT bound to Coinbase's own host, not a shared secret
-    anyone else could validate. Signing a third-party facilitator's requests
-    with one is meaningless at best and a 401 at worst -- and a 401 here is
-    the worst failure this file knows: x402 still advertised on every 402,
-    every payment rejected, indistinguishable from nobody buying."""
-    module = _load_cdp(monkeypatch, url="https://facilitator.xpay.sh")
-    assert module._auth_provider() is None, (
-        "CDP credentials were handed to a facilitator that cannot validate them"
-    )
-
-
-def test_the_documented_one_variable_swap_actually_works(monkeypatch):
-    """The whole point: with the CDP key pair still mounted, changing only
-    X402_FACILITATOR_URL must leave a working, advertised x402 rail."""
-    module = _load_cdp(monkeypatch, url="https://facilitator.xpay.sh")
-    _install_fake_server(monkeypatch, module)
-    assert module.is_configured(), "the rail stopped being advertised"
-    assert module.accepts_entry(price="$0.03") is not None
-
-
-def test_static_headers_still_reach_a_non_coinbase_facilitator(monkeypatch):
-    """Ignoring CDP must fall through to the generic credential path, not
-    swallow it -- a facilitator that wants a bearer token still gets one."""
-    module = _load_cdp(
-        monkeypatch,
-        url="https://facilitator.example.com",
-        auth_headers=json.dumps({"Authorization": "Bearer tok"}),
-    )
-    provider = module._auth_provider()
-    assert provider is not None
-    assert provider.get_auth_headers().verify == {"Authorization": "Bearer tok"}
-
-
-def test_cdp_is_still_used_for_coinbase_hosts(monkeypatch):
-    """The fall-through must not disarm CDP where it is the right credential."""
-    module = _load_cdp(monkeypatch)
-    provider = module._auth_provider()
-    assert provider is not None
-    assert type(provider).__name__ == "_CdpAuthProvider"
-
-
-@pytest.mark.parametrize(
-    "host",
-    [
-        "https://api.cdp.coinbase.com/platform/v2/x402",
-        "https://coinbase.com/x402",
-        "https://user:pw@api.cdp.coinbase.com:443/platform/v2/x402",
-    ],
-)
-def test_coinbase_hosts_are_recognised_through_port_and_userinfo(monkeypatch, host):
-    module = _load_cdp(monkeypatch, url=host)
-    assert module._host_is_coinbase(host) is True
-
-
-@pytest.mark.parametrize(
-    "host",
-    [
-        # The lookalike that matters: suffix matching on "coinbase.com" without
-        # the leading dot would accept this and hand over the key pair.
-        "https://api.cdp.coinbase.com.evil.example/x402",
-        "https://notcoinbase.com/x402",
-        "https://facilitator.xpay.sh",
-    ],
-)
-def test_lookalike_hosts_never_receive_cdp_credentials(monkeypatch, host):
-    module = _load_cdp(monkeypatch, url=host)
-    assert module._host_is_coinbase(host) is False
-    assert module._auth_provider() is None
 
 
 # --- Bazaar discovery records must survive the facilitator's own validator ---
@@ -794,20 +616,6 @@ def test_an_unreachable_facilitator_is_logged_as_such_not_as_a_rejection(monkeyp
     assert "REJECTED" not in text
 
 
-def test_the_legacy_verify_and_settle_path_logs_the_same_reason(monkeypatch, caplog):
-    """/audit goes through verify_and_settle_sync, not verify_only_sync. A
-    reason logged on one path and not the other splits diagnosability by
-    which route the agent happened to call."""
-    module = _load_x402(monkeypatch)
-    server = _install_fake_server(monkeypatch, module)
-    _rejecting_verify(server, reason="invalid_signature")
-
-    with caplog.at_level(logging.WARNING):
-        assert module.verify_and_settle_sync("signed", price="$0.03") is False
-
-    assert "invalid_signature" in caplog.text
-
-
 def test_a_refused_settlement_is_logged_after_delivery(monkeypatch, caplog):
     """This is the case where an audit went out unpaid. It must be the
     loudest of all, and it must carry the facilitator's reason."""
@@ -864,7 +672,8 @@ def test_the_stripe_mirror_is_off_unless_asked_for(monkeypatch, caplog):
     _install_fake_server(monkeypatch, module)
 
     with caplog.at_level(logging.INFO):
-        assert module.verify_and_settle_sync("signed-payment", price="$0.03") is True
+        pending = module.verify_only_sync("signed-payment", price="$0.03")
+        assert module.settle_sync(pending) is True
 
     assert calls == []
     assert "will not appear in Stripe" in caplog.text
@@ -989,15 +798,6 @@ def test_verify_only_sync_works_inside_a_running_loop(monkeypatch):
 
     pending = _call_in_running_loop(module.verify_only_sync, "signed", price="$0.03")
     assert pending is not None
-
-
-def test_verify_and_settle_sync_works_inside_a_running_loop(monkeypatch):
-    module = _load_x402(monkeypatch)
-    _install_fake_server(monkeypatch, module)
-
-    assert _call_in_running_loop(
-        module.verify_and_settle_sync, "signed", price="$0.03"
-    ) is True
 
 
 def test_settle_sync_works_inside_a_running_loop(monkeypatch):
@@ -1356,16 +1156,6 @@ def test_a_payload_without_a_nonce_is_not_blocked(monkeypatch):
     assert module.verify_only_sync("a", price="$0.03") is not None
     assert module.verify_only_sync("a", price="$0.03") is not None
     assert calls["verify"] == 2
-
-
-def test_the_legacy_path_has_the_same_replay_guard(monkeypatch):
-    module = _load_x402(monkeypatch)
-    calls = _counting_fake_server(monkeypatch, module)
-    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: _payload_with_nonce("0xEE"))
-
-    assert module.verify_and_settle_sync("signed", price="$0.03") is True
-    assert module.verify_and_settle_sync("signed", price="$0.03") is False
-    assert calls["verify"] == 1
 
 
 # --- every settlement leaves one countable line in the log -------------------

@@ -108,10 +108,10 @@ def test_an_index_on_the_wrong_network_does_not_win(tmp_path):
 
 @pytest.mark.parametrize("code", ["401", "403"])
 def test_a_credentialed_facilitator_is_reported_not_silently_dropped(tmp_path, code):
-    """CDP answers 401. That is a policy gate, not an absence -- and the
-    protocol is permissionless, so a facilitator whose credentials come
-    without a business review is still usable. Saying so keeps the option
-    visible instead of burying it as a failure."""
+    """A credentialed facilitator answers 401. That is a policy gate, not an
+    absence -- and the protocol is permissionless, so a facilitator whose
+    credentials come without a business review is still usable. Saying so
+    keeps the option visible instead of burying it as a failure."""
     result = _run(tmp_path, "unauthorized", code, "unauthorized", code)
     assert "credentials required" in result.stdout
     assert "business review" in result.stdout
