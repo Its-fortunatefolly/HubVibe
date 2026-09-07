@@ -53,6 +53,18 @@ esac
 # A trailing slash reaches the library as a double slash on every call.
 NEW_FACILITATOR="${NEW_FACILITATOR%/}"
 
+# Everything below assumes we are ON the box. Say so by name when we are
+# demonstrably not: this ran in Google Cloud Shell on 2026-09-07 and the
+# only complaint was a missing .env -- which reads as "the stack is broken"
+# rather than "you are in the wrong terminal", and sends the reader looking
+# for a file instead of switching windows. vps-install.sh has refused Cloud
+# Shell by name since the owner pasted IT there; this is the same mistake
+# one script over. Checked before the .env, because the missing file is the
+# symptom and this is the cause.
+if [ "${CLOUD_SHELL:-}" = "true" ] || [ -n "${DEVSHELL_PROJECT_ID:-}" ]; then
+  die "this is Google Cloud Shell -- a temporary terminal, not the server running the node. Run this on the VPS itself (Hostinger: VPS -> Browser terminal; or ssh root@YOUR_VPS_IP). Nothing was changed."
+fi
+
 [ -f "$ENV_FILE" ] || die "no $ENV_FILE -- run this on the box where the stack is installed."
 command -v docker >/dev/null 2>&1 || die "docker is not on PATH. Run this on the box."
 

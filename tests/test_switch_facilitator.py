@@ -104,6 +104,26 @@ def test_a_non_https_facilitator_is_refused(tmp_path, bad):
     assert OLD in env_file.read_text()
 
 
+@pytest.mark.parametrize(
+    "shell_env",
+    [{"CLOUD_SHELL": "true"}, {"DEVSHELL_PROJECT_ID": "resolver-time"}],
+)
+def test_google_cloud_shell_is_refused_by_name(tmp_path, shell_env):
+    """Run there on 2026-09-07, the only complaint was a missing .env: a
+    symptom that reads as "the stack is broken" and sends the reader after a
+    file instead of into the right terminal. The cause has to be named, and
+    named BEFORE the .env check -- which also means a Cloud Shell that
+    happens to hold a checkout with an .env is still refused."""
+    env_file, env = _stub_env(tmp_path, after_switch=_challenge())
+    result = _run(env | shell_env, NEW)
+
+    assert result.returncode == 1
+    assert "Cloud Shell" in result.stdout
+    assert "ssh root@" in result.stdout, "the message must say where to run it instead"
+    assert OLD in env_file.read_text(), "the env file was touched in the wrong terminal"
+    assert not Path(env["STUB_LOG"]).exists(), "docker was invoked in Cloud Shell"
+
+
 def test_a_facilitator_that_keeps_the_rail_live_is_kept(tmp_path):
     env_file, env = _stub_env(tmp_path, after_switch=_challenge())
     result = _run(env, NEW)

@@ -132,24 +132,34 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 
 ## Owner runbook (one line each)
 
-- What the money is doing, from any machine:
+**Which terminal.** Anything that changes the node runs **on the box** —
+Hostinger's Browser terminal, or `ssh root@2.25.172.160`. Google Cloud Shell
+is a temporary terminal with no stack in it: `vps-install.sh` and
+`switch-facilitator.sh` both refuse to run there by name. Read-only checks
+(`payment-status.sh`, `verify-live.sh`, `curl`) run from anywhere, Cloud
+Shell included. Each line below says which it is.
+
+- [anywhere] What the money is doing:
   `curl -fsSL https://raw.githubusercontent.com/Its-fortunatefolly/HubVibe/main/scripts/payment-status.sh | BASE=https://hubvibe-io.com bash`
-- Redeploy the node after a merge, on the box:
+- [ON THE BOX] Redeploy the node after a merge — this is what puts merged
+  code and a changed homepage in front of the world; `git pull` alone does
+  nothing, the image has to be rebuilt:
   `cd /root/HubVibe && git pull -q origin main && cd deploy/vps && docker compose up -d --build`
-- Point the box at the facilitator that indexes (verifies itself, rolls
-  back on a dead rail), on the box:
+- [ON THE BOX] Point the node at the facilitator that indexes (verifies
+  itself against the live 402, rolls back on a dead rail):
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
-- First paid call, from any machine with the repo (the script builds its
+- [anywhere with the repo] First paid call (the script builds its
   own Python environment in `~/.hubvibe-venv`), with the recovery phrase in
   `~/.hubvibe-wallet-phrase`:
   `BASE=https://hubvibe-io.com HUBVIBE_EXPECT_ADDRESS=0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd HUBVIBE_ALLOW_SELF_PAYMENT=1 bash scripts/first-paid-call.sh`
   The receipt line and the Basescan link are the proof; the script then
   reads Dexter's index.
 - Finish the Base app registration, in this order and no other: merge,
-  redeploy the box (line above), confirm the live page carries the id with
-  `curl -s https://hubvibe-io.com/ | grep base:app_id`, and only then enter
-  `hubvibe-io.com` in the dashboard's Add Domain box and press Register.
-  Pressing it before the deploy verifies nothing.
+  redeploy **on the box** (line above), confirm from anywhere that the live
+  page carries the id with `curl -s https://hubvibe-io.com/ | grep base:app_id`,
+  and only then enter `hubvibe-io.com` in the dashboard's Add Domain box and
+  press Register. That curl printing the OLD id means the box has not been
+  rebuilt, whatever `main` says; pressing Register then verifies nothing.
 - Move this repo's action tag to current main so `@v1` uses the domain:
   `git tag -f v1 origin/main && git push -f origin v1` (from a clone of
   HubVibe; the push output must say `HubVibe.git`).
