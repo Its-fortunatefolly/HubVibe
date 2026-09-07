@@ -109,7 +109,7 @@ receiving wallet (x402 pay-to, owner-affirmed): 0x837C40E2B4e976f43Ffb4451eE281A
 facilitator: $SNAP_FACILITATOR
 NEVER use as recipient: 0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256 (unidentified),
                         0x32b08c5e927c69877d0fcab35618c265674922bc (test constant), the zero address
-Stripe account: acct_1U28tvDA21T9EAQB
+Stripe account: see the Stripe dashboard (id deliberately not in this public repo)
 human plans: RETIRED 2026-09-06 (per call is the only price; the three Stripe payment links are unpublished)
 repos: github.com/Its-fortunatefolly/HubVibe (product) + hubvibe-audit-action (Marketplace action, tags v1/v1.0.0)
 full history and decisions: docs/HANDOFF.md in the HubVibe repo

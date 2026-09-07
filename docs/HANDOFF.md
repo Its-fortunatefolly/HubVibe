@@ -9,6 +9,56 @@ that do not move. It deliberately holds no numbers — every count and commit
 is read from here or from a live run, because a brief that froze them went
 stale in a chat paste and cost several sessions.
 
+## 2026-09-07: the node is PAYABLE and indexable; the public repo is scrubbed and guarded
+
+**Live and verified from the box** (`payment-status.sh` against
+https://hubvibe-io.com): x402 LIVE at $0.03 to `0x837C…77dd` on Base, the v2
+PAYMENT-REQUIRED header present, a Bazaar discovery record on the 402, the
+recipient confirmed as the owner's, and "nothing structural" blocking the
+first dollar. The box was already on `x402.dexter.cash` (whose index is
+reachable and currently holds 0 entries for this pay-to), so
+`switch-facilitator.sh` correctly reported a no-op.
+
+**Remaining before the first paid call:** the payer wallet
+`0x104feA79F30b4fB4Da86B6D65951217F914bdd35` (created on the box by
+`first-paid-call.sh --new-wallet`) holds no USDC. The facilitator's refusal
+was `invalid_exact_evm_insufficient_balance` — i.e. the signature was VALID
+and everything up to the money is proven. Fund it with ~$1 USDC on Base
+(no ETH needed) and re-run.
+
+**That refusal used to lie.** The generic failure branch told the owner
+settlement was broken and to "fix this before spending any effort on demand"
+when the facilitator had only reported an empty wallet. An empty wallet is
+not a broken rail, and a checker that says otherwise is lying about the one
+thing it exists to report. `first-paid-call.sh` now distinguishes
+`insufficient_balance`/`insufficient_funds`, says the rail is fine, and
+names the address to fund; the alarming wording survives for real
+rejections. Two mutations proved red.
+
+**The repo is PUBLIC, and is now scrubbed and guarded.** A full scan of the
+working tree AND all of git history found **no credential was ever
+committed** — every match in history is an obvious test fixture
+(`sk_live_ABC123XYZ`) that exists to prove redaction. Removed from the
+public tree anyway: the Stripe account id and three live `buy.stripe.com`
+payment links for the retired plans. `tests/test_no_secrets_in_repo.py`
+(new) scans every TRACKED file for ten credential shapes plus those two
+private identifiers, allows only the ERC-20 Transfer topic0 (a public
+constant) and the redaction fixtures under `tests/`, and asserts no `.env`,
+wallet-key, `.pem` or `id_rsa` is tracked and that `.gitignore` covers them.
+Both halves mutation-proved with planted values. Wallet addresses stay: an
+EVM address is public by construction and the code needs the pay-to.
+
+Note: git history still contains the account id and payment links. They are
+not credentials — an account id appears in every checkout URL, and payment
+links are meant to be shared — so rewriting a public repo's history (which
+would break its fork and every clone) is not worth it. If the links should
+be dead, deactivate them in the Stripe dashboard; that is the only real fix.
+
+**Caches cleared:** every `__pycache__`, all `.pyc`, `.pytest_cache`,
+`.sim-paid-call`. Packed repo size 7.84 MiB.
+
+**Checks:** suite 744 passed / 1 skipped, lint 0, simulation 48/48.
+
 ## 2026-09-06, evening: the live node settles through a facilitator that indexes NOTHING
 
 Found while setting up the first paid call. **The live box was installed on
@@ -1561,7 +1611,7 @@ before it reads the body.
 
 ### To settle who owns the address
 
-One question, to Stripe support: *"Does account `acct_1U28tvDA21T9EAQB` own
+One question, to Stripe support: *"Does account `(Stripe account id kept out of the public repo)` own
 or custody the address `0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256` — as a
 crypto deposit address, an onramp/payout destination, or anything else — and
 if so, when and by which API call was it created?"*
@@ -2014,7 +2064,7 @@ as the test that outranks everything else.
 | Live checks | `bash scripts/verify-live.sh` → **36 passed, 0 failed against the deployed node, 2026-08-27** (owner, Cloud Shell, post-#61/#62 deploy). This is the first run that ever proved payability: `accepts[] is spec-shaped: 1 payable x402 entry` and `402 carries the v2 PAYMENT-REQUIRED challenge header` both passed live. The deployed 402 is now constructible into a signature by a conforming x402 client — the #61 unpayability is fixed *in production*, not just on main. |
 | Firestore | `(default)` in `us-south1` — created 2026-08-15; before that every keyed call 500'd |
 | min-instances | `0` — was `1`, burning ~$137/mo against zero traffic |
-| Stripe account | `acct_1U28tvDA21T9EAQB`, **zero outstanding requirements** |
+| Stripe account | `(Stripe account id kept out of the public repo)`, **zero outstanding requirements** |
 | Payouts | daily → SUTTON BANK ····1444 |
 | Webhook | `/billing/webhook`, enabled, `checkout.session.completed` |
 | MCP registry | `io.github.Its-fortunatefolly/hubvibe` 1.1.0 active; `server.json` on main is **1.1.2** and not yet republished |
@@ -2707,9 +2757,6 @@ integration at all — anyone with the URL can pay:
 
 | | |
 |---|---|
-| Single report $29.99 | https://buy.stripe.com/aFa3cvf0q6x6dg2apMgQE00 |
-| Pro $79/mo | https://buy.stripe.com/7sYdR93hIbRq2BoeG2gQE01 |
-| Agency $249/mo | https://buy.stripe.com/4gM4gz6tU3kUek61TggQE02 |
 
 ## The growth math, stated plainly
 
