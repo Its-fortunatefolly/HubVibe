@@ -248,6 +248,7 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 | `scripts/switch-facilitator.sh` | change the facilitator on a running box: edit `.env`, restart, read the live 402, roll back if the rail vanished | box |
 | `scripts/payment-status.sh` | wallets, live 402, recipient match, payer readiness, verdict | anywhere |
 | `scripts/go.sh` | **the one command.** Finds or makes the payer wallet, prints the address to fund, waits for the money on-chain, then makes the paid call. Unattended: the owner's part is one transfer, whenever | box |
+| `scripts/find-my-money.sh` | "the box says it never arrived" — reads one address across Base, Ethereum, Arbitrum, Optimism and Polygon, native coin and USDC/USDbC/USDT, and says which chain holds it. Never reports an unreachable chain as an empty one | anywhere |
 | `scripts/first-paid-call.sh` | one real $0.03 x402 payment from the box's payer wallet, with preflight, receipt and index check; an empty wallet is reported as an empty wallet, not a broken rail | box |
 | `scripts/simulate-paid-call.py` | the whole paid path locally, for free | dev |
 | `scripts/verify-live.sh` | end-to-end checks of a deployed node | anywhere |
