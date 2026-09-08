@@ -89,9 +89,13 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - **The payer wallet.** The throwaway `0x5bce…5d06` is retired (owner's
   instruction). The payer
   is now `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`, created on the box by
-  `first-paid-call.sh --new-wallet` (`Account.create()` on the box, key
-  written mode 600 — it is the owner's wallet, made by their own server
-  rather than by a phone app, which is why it looks unfamiliar), its key at
+  `first-paid-call.sh --new-wallet` (`Account.create()`, key written mode
+  600). **The owner does not recognise this address and has said so
+  (2026-09-08): it is not a wallet they hold anywhere.** That is accurate —
+  it is a machine-held throwaway whose only key sits in a file on the
+  server, existing solely because a self-test needs a payer distinct from
+  the pay-to (you cannot pay yourself). Do not describe it as "the owner's
+  wallet"; do not put more in it than one call costs. Its key is at
   `~/.hubvibe-wallet-key` (`HUBVIBE_WALLET_FILE` overrides). To prove the
   box controls it:
   `~/.hubvibe-venv/bin/python -c "from eth_account import Account; print(Account.from_key(open('/root/.hubvibe-wallet-key').read().strip()).address)"`.
@@ -130,9 +134,19 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   body, MCP `_meta`), proves verify-before-audit and settle-after, the
   receipt headers, replay refusal, 64/64 concurrent payers on keep-alive,
   fail-closed outage handling, and the target gate. Run it before any
-  deploy that touches payments; needs a Chromium Playwright can launch.
-  The shipped container image was rebuilt and paid the same three ways
-  (24/24) on 2026-09-06.
+  deploy that touches payments; re-run green 2026-09-08 with the settle
+  fixes in. The shipped container image was rebuilt and paid the same three
+  ways (24/24) on 2026-09-06.
+  **It needs a Chromium the installed Playwright can drive, and version
+  skew is the usual reason it "fails".** The repo pins `playwright==1.48.0`,
+  which wants chromium **1140**; sandboxes and CI images commonly ship a
+  newer build (1194 here) with browser downloads disabled. Symlinking one
+  revision to the other gets past the *missing executable* error and then
+  dies with `Target page, context or browser has been closed` — a launch
+  the client cannot drive, which reads like a broken audit engine. Install
+  the client that matches the browser instead (1194 ⇒ `playwright==1.56.0`)
+  in the throwaway venv; leave the pin alone, since the box installs its own
+  matching pair. Cost an hour on 2026-09-08.
 - A failed audit costs nothing on every rail: x402 is settled only after
   delivery; a prepaid debit is refunded; the key an MPP top-up bought is
   returned on the 502 holding everything it bought; an MPP credential a
