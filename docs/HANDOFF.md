@@ -107,6 +107,22 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   its own gas like any other transfer; that distinction is the one the
   "NO ETH NEEDED" lines used to blur. There is no
   recovery phrase for the owner's own wallet — do not build for one.
+- **That payer address is a WALLET, not an account id.** `eth_account`
+  generated it on the box and `~/.hubvibe-wallet-key` (mode 600) is its
+  private key. Whoever holds that file controls anything sent to it — which
+  today is the box, and nobody else. The address exists identically on every
+  EVM chain, so USDC sent on Ethereum, Arbitrum, Optimism or Polygon by
+  mistake is sitting at the same address on that chain: not lost, just not
+  on Base, and spendable with that key.
+- **The balance check reads ONE token on ONE chain:** native USDC
+  (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`) on Base mainnet. Bridged
+  USDbC, ETH, or USDC on any other chain all read as `$0.00`, which looks
+  exactly like "never received". `bash scripts/find-my-money.sh` reads the
+  address across chains; `bash scripts/go.sh --check` reads the Base USDC
+  balance and prints the file that controls the address. Neither spends
+  anything. An explorer's default Transactions tab is ALSO empty for this
+  wallet — it holds no ETH, so it has no normal transactions and the USDC
+  sits under the ERC-20 tab.
 - **Base app registration:** the homepage serves
   `<meta name="base:app_id" content="6a83832901463168d7e651ca" />`, the id
   the owner's Add Domain dialog asked for on 2026-09-07. It replaced
@@ -319,6 +335,7 @@ Shell included. Each line below says which it is.
 | `scripts/switch-facilitator.sh` | change the facilitator on a running box: edit `.env`, restart, read the live 402, roll back if the rail vanished | box |
 | `scripts/payment-status.sh` | wallets, live 402, recipient match, payer readiness, verdict | anywhere |
 | `scripts/go.sh` | **the one command.** Finds or makes the payer wallet, prints the address to fund, waits for the money on-chain, then makes the paid call. Unattended: the owner's part is one transfer, whenever | box |
+| `scripts/find-my-money.sh` | "the box says it never arrived" — reads one address across Base, Ethereum, Arbitrum, Optimism and Polygon, native coin and USDC/USDbC/USDT, and says which chain holds it. Never reports an unreachable chain as an empty one | anywhere |
 | `scripts/first-paid-call.sh` | one real $0.03 x402 payment from the box's payer wallet, with preflight, receipt and index check; an empty wallet is reported as an empty wallet, not a broken rail | box |
 | `scripts/simulate-paid-call.py` | the whole paid path locally, for free | dev |
 | `scripts/verify-live.sh` | end-to-end checks of a deployed node | anywhere |

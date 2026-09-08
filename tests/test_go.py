@@ -248,6 +248,13 @@ def test_check_mode_answers_is_it_mine_and_where_is_the_money(tmp_path, monkeypa
     assert "ERC-20" in out, "the empty-Transactions-tab trap is not explained"
     # And it must not have paid for anything.
     assert "Paying for one real call" not in out
+    # A zero balance here reads only native USDC on Base. Leaving that
+    # number alone would say "your money is gone" about funds sitting on
+    # another chain, which is the most alarming thing this project can tell
+    # someone who just sent real money. Hand it to the tool that looks.
+    assert "find-my-money.sh" in out, (
+        "a zero Base balance is presented as final, with nowhere to look next"
+    )
 
 
 def test_check_mode_never_spends(tmp_path):
