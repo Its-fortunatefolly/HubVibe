@@ -537,3 +537,77 @@ def test_the_handoff_names_the_key_file_the_script_actually_uses():
     )
     for wrong in ("hubvibe-payer-key",):
         assert wrong not in handoff, f"the handoff still names ~/{wrong}, which nothing writes"
+
+
+@pytest.mark.parametrize("marker", [
+    {"CLOUD_SHELL": "true"},
+    {"DEVSHELL_PROJECT_ID": "resolver-time"},
+])
+def test_google_cloud_shell_is_refused_by_name(tmp_path, marker):
+    """The paying wallet and its key live on the box. Run from Cloud Shell --
+    a temporary container with its own home directory -- this script finds no
+    key, or a leftover from an old session, and reports a wallet problem when
+    the only problem is the machine. The owner hit exactly that on 2026-09-08.
+    Refuse before any wallet is read, so the diagnosis is the cause and not
+    the symptom, and say where to run it instead."""
+    # A perfectly good key is present: being in Cloud Shell must lose to
+    # nothing, or the guard is decorative.
+    key_file = tmp_path / "key"
+    key_file.write_text("0x" + "1" * 63 + "2")
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+           "HUBVIBE_WALLET_FILE": str(key_file), "BASE": "http://127.0.0.1:9"}
+    env.update(marker)
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, cwd=REPO_ROOT
+    )
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "Cloud Shell" in combined, "the message must name the terminal it refused"
+    assert "Browser terminal" in combined or "ssh root@" in combined, \
+        "refusing without saying where to run it strands the reader"
+    assert "No payment was attempted" in combined
+    # It must stop BEFORE resolving a wallet -- otherwise the reader is told
+    # about a key when the real fault is the machine.
+    assert "wallet key from" not in combined
+
+
+def test_a_file_that_is_not_a_phrase_is_stepped_over_not_fatal(tmp_path):
+    """A five-word leftover in a home directory is litter, not a payment
+    instruction. It aborted the owner's whole run on 2026-09-08 with a word
+    count -- hiding both the working key beside it and the real problem. Warn,
+    name the file, and use the key."""
+    key_file = tmp_path / "key"
+    key_file.write_text("0x" + "1" * 63 + "2")
+    phrase_file = tmp_path / "phrase"
+    phrase_file.write_text("these are only five words\n")
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, cwd=REPO_ROOT,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+             "HUBVIBE_WALLET_FILE": str(key_file),
+             "HUBVIBE_WALLET_PHRASE_FILE": str(phrase_file),
+             "BASE": "http://127.0.0.1:9"},
+    )
+    combined = result.stdout + result.stderr
+    assert "wallet key from" in combined, "the real wallet was not reached"
+    assert str(phrase_file) in combined, "the junk file must be named so it can be deleted"
+    assert "could not derive a wallet" not in combined, \
+        "litter is being reported as a failed payment instruction"
+
+
+def test_a_malformed_HUBVIBE_WALLET_MNEMONIC_is_still_an_error(tmp_path):
+    """Exporting the variable IS an instruction. Silently paying from some
+    other wallet because the instruction was malformed would be worse than
+    stopping -- the money would leave an account the owner did not choose."""
+    key_file = tmp_path / "key"
+    key_file.write_text("0x" + "1" * 63 + "2")
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, cwd=REPO_ROOT,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+             "HUBVIBE_WALLET_FILE": str(key_file),
+             "HUBVIBE_WALLET_MNEMONIC": "these are only five words",
+             "BASE": "http://127.0.0.1:9"},
+    )
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "HUBVIBE_WALLET_MNEMONIC is not a recovery phrase" in combined
+    assert "wallet key from" not in combined, "it fell through to another wallet"

@@ -102,6 +102,20 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH."
 # dollar of USDC on Base and zero ETH is a fully working payer.
 # ---------------------------------------------------------------------------
 
+# The paying wallet lives on the box, and so does the money. Run from Google
+# Cloud Shell -- a temporary container with a different home directory -- this
+# script finds no key, or worse finds a stale file from an old session, and
+# reports a wallet problem when the only problem is the machine. The owner hit
+# exactly that on 2026-09-08: a five-word leftover in Cloud Shell's home
+# stopped the run with "expected a 12- or 24-word recovery phrase", which says
+# nothing about being in the wrong terminal. vps-install.sh has refused Cloud
+# Shell by name since the owner pasted IT there; this is the same mistake one
+# script over. Refuse before reading any wallet, so the diagnosis is the cause
+# and not the symptom.
+if [ "${CLOUD_SHELL:-}" = "true" ] || [ -n "${DEVSHELL_PROJECT_ID:-}" ]; then
+  die "this is Google Cloud Shell -- a temporary terminal, not the node. The paying wallet and its key live on the VPS. Run this on the box (Hostinger: VPS -> Browser terminal; or ssh root@YOUR_VPS_IP), in ~/HubVibe. No payment was attempted."
+fi
+
 # ${HOME:-} because set -u makes a bare $HOME fatal in an environment that
 # does not set it -- cron, a bare `env -i`, some CI runners. Dying on an
 # unbound variable before the wallet message prints is the least useful
@@ -204,14 +218,14 @@ except Exception as exc:
   exit 0
 fi
 
-# Pay from the owner's OWN wallet. The Base app (and Coinbase Wallet) export
-# a 12/24-word recovery phrase, not a raw key, so the phrase is accepted and
-# the first account (m/44'/60'/0'/0/0, the one the app shows) is derived in
-# memory: the key never touches disk. Takes precedence over a key file, so a
-# throwaway wallet made earlier is simply ignored. Owner's call 2026-09-06:
-# no third address in the loop -- the buyer is their wallet, the seller is
-# their wallet. Delete the phrase file once the call has settled.
+# Pay from a recovery phrase, IF one exists. The Base app and Coinbase Wallet
+# export a 12/24-word phrase rather than a raw key, so the phrase is accepted
+# and the account is derived in memory: the key never touches disk. This path
+# is here for anyone who has a phrase -- the owner does NOT (affirmed
+# 2026-09-07, "there is no twelve words"), and their supported route is the
+# key file below. Delete the phrase file once a call has settled.
 PHRASE_FILE="${HUBVIBE_WALLET_PHRASE_FILE:-${HOME:-/tmp}/.hubvibe-wallet-phrase}"
+PHRASE_KEY=""
 if [ -n "${HUBVIBE_WALLET_MNEMONIC:-}" ] || [ -r "$PHRASE_FILE" ]; then
   export PHRASE_FILE
   # One phrase, many accounts: a wallet app shows account 0 by default but the
@@ -228,7 +242,10 @@ Account.enable_unaudited_hdwallet_features()
 phrase = os.environ.get("HUBVIBE_WALLET_MNEMONIC") or open(os.environ["PHRASE_FILE"]).read()
 phrase = " ".join(phrase.split())
 if len(phrase.split()) not in (12, 15, 18, 21, 24):
-    sys.exit("expected a 12- or 24-word recovery phrase, got %d words" % len(phrase.split()))
+    # MALFORMED is load-bearing: the caller treats a file that is not a phrase
+    # as junk to step over, and anything else as a phrase that failed.
+    sys.exit("MALFORMED: expected a 12- or 24-word recovery phrase, got %d words"
+             % len(phrase.split()))
 q = "\x27"
 want = (os.environ.get("HUBVIBE_EXPECT_ADDRESS") or "").strip().lower()
 seen = []
@@ -242,11 +259,37 @@ for i in range(10 if want else 1):
 else:
     sys.exit("this phrase does not hold %s in its first 10 accounts. It derives: %s"
              % (os.environ["HUBVIBE_EXPECT_ADDRESS"], ", ".join(seen)))
-' 2>&1) || die "could not derive a wallet from the recovery phrase: ${DERIVED}"
-  HUBVIBE_WALLET_KEY="${DERIVED%%$'\t'*}"
+' 2>&1) || DERIVED="FAILED:$DERIVED"
+  case "$DERIVED" in
+    # A file that is not a recovery phrase is not a payment instruction, and
+    # must not stop a run that has a perfectly good key sitting next to it.
+    # The owner hit this from Cloud Shell on 2026-09-08: a five-word leftover
+    # in a temporary home directory aborted the whole script with a word
+    # count, hiding both the real wallet and the real problem. An explicit
+    # HUBVIBE_WALLET_MNEMONIC is different -- that IS an instruction, so a
+    # malformed one is an error, not litter.
+    FAILED:MALFORMED*)
+      if [ -n "${HUBVIBE_WALLET_MNEMONIC:-}" ]; then
+        die "HUBVIBE_WALLET_MNEMONIC is not a recovery phrase: ${DERIVED#FAILED:MALFORMED: }"
+      fi
+      warn "ignoring $PHRASE_FILE -- ${DERIVED#FAILED:MALFORMED: }. Not a recovery phrase, so not a payment instruction. Delete it: rm -f $PHRASE_FILE"
+      ;;
+    # A well-formed phrase that will not derive the wanted account IS an
+    # instruction that failed. Stopping is right; guessing another payer is not.
+    FAILED:*)
+      die "could not derive a wallet from the recovery phrase: ${DERIVED#FAILED:}"
+      ;;
+    *)
+      PHRASE_KEY="${DERIVED%%$'\t'*}"
+      PHRASE_ADDRESS=$(printf '%s' "$DERIVED" | cut -f2)
+      PHRASE_INDEX=$(printf '%s' "$DERIVED" | cut -f3)
+      ;;
+  esac
+fi
+
+if [ -n "$PHRASE_KEY" ]; then
+  HUBVIBE_WALLET_KEY="$PHRASE_KEY"
   export HUBVIBE_WALLET_KEY
-  PHRASE_ADDRESS=$(printf '%s' "$DERIVED" | cut -f2)
-  PHRASE_INDEX=$(printf '%s' "$DERIVED" | cut -f3)
   ok "paying from your own wallet (recovery phrase, account $PHRASE_INDEX): $PHRASE_ADDRESS"
   warn "delete the phrase once this settles:  rm -f $PHRASE_FILE"
 elif [ -n "${HUBVIBE_WALLET_KEY:-}" ]; then
