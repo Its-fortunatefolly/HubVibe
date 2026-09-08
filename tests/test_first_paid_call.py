@@ -17,6 +17,7 @@ every rejection path is exercised without a network or a wallet.
 """
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -510,3 +511,29 @@ def test_an_empty_wallet_is_not_reported_as_a_broken_rail():
     generic = failure.split("*)", 2)[-1]
     assert "answer worth having" in generic
     assert "insufficient" not in generic, "the alarm now fires on an empty wallet again"
+
+
+def test_the_handoff_names_the_key_file_the_script_actually_uses():
+    """The runbook told the owner the payer key was at ~/.hubvibe-payer-key;
+    the script has always written ~/.hubvibe-wallet-key. Nobody hit it while
+    only scripts read the file -- but the owner asking "who is 0x104f, and
+    why should I send it money" (2026-09-08) is answered by deriving the
+    address from that key on the box, and a runbook that names a file which
+    does not exist turns the one available proof into another dead end.
+
+    Read off both files rather than restated, so they cannot drift again --
+    the same guard the facilitator defaults already carry.
+    """
+    root = Path(__file__).resolve().parent.parent
+    script = (root / "scripts" / "first-paid-call.sh").read_text()
+    handoff = (root / "docs" / "HANDOFF.md").read_text()
+
+    default = re.search(r'WALLET_FILE="\$\{HUBVIBE_WALLET_FILE:-\$\{HOME:-/tmp\}/([^}"]+)\}"', script)
+    assert default, "the script's wallet-file default is no longer where this test looks"
+    name = default.group(1)
+
+    assert name in handoff, (
+        f"the script writes the payer key to ~/{name}, and the handoff does not say so"
+    )
+    for wrong in ("hubvibe-payer-key",):
+        assert wrong not in handoff, f"the handoff still names ~/{wrong}, which nothing writes"

@@ -39,7 +39,13 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - **First paid call:** NOT yet made — **only the money is missing.** The
   throwaway payer `0x5bce…5d06` is retired (owner's instruction). The payer
   is now `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`, created on the box by
-  `first-paid-call.sh --new-wallet`, its key at `~/.hubvibe-payer-key`. Its
+  `first-paid-call.sh --new-wallet` (`Account.create()` on the box, key
+  written mode 600 — it is the owner's wallet, made by their own server
+  rather than by a phone app, which is why it looks unfamiliar), its key at
+  `~/.hubvibe-wallet-key` (`HUBVIBE_WALLET_FILE` overrides). To prove the
+  box controls it:
+  `~/.hubvibe-venv/bin/python -c "from eth_account import Account; print(Account.from_key(open('/root/.hubvibe-wallet-key').read().strip()).address)"`.
+  Its
   last attempt was refused `invalid_exact_evm_insufficient_balance`: the
   EIP-3009 signature was VALID and every step up to the balance is proven.
   Fund it with ~$1 USDC **on Base** and re-run. The payer needs no ETH — it
@@ -168,7 +174,7 @@ Shell included. Each line below says which it is.
   itself against the live 402, rolls back on a dead rail):
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
 - [ON THE BOX] First paid call (the script builds its own Python environment
-  in `~/.hubvibe-venv` and uses the payer key at `~/.hubvibe-payer-key`).
+  in `~/.hubvibe-venv` and uses the payer key at `~/.hubvibe-wallet-key`).
   Send ~$1 USDC on Base to `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`
   first, then:
   `cd ~/HubVibe && BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh`
