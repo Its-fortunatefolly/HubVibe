@@ -182,7 +182,9 @@ except Exception as exc:
         ;;
       *)
         printf '      address: \033[1m%s\033[0m\n\n' "$EXISTING"
-        printf '  Send it USDC on Base -- $1 is plenty. NO ETH NEEDED.\n'
+        printf '  Send it USDC on Base -- $1 is plenty. This wallet needs NO ETH:\n'
+        printf '  it never broadcasts anything. (The send itself is an ordinary\n'
+        printf '  transfer out of your own wallet, which pays gas as it always does.)\n'
         printf '  Then just run:  bash scripts/first-paid-call.sh\n\n'
         printf '  (Only if you are certain it holds nothing and want a fresh one:\n'
         printf '   HUBVIBE_FORCE_NEW_WALLET=1 bash scripts/first-paid-call.sh --new-wallet)\n\n'
@@ -193,8 +195,11 @@ except Exception as exc:
   ADDRESS=$(new_wallet)
   printf '\n  \033[1mNew Base wallet created.\033[0m Key saved to %s (mode 600).\n\n' "$WALLET_FILE"
   printf '      address: \033[1m%s\033[0m\n\n' "$ADDRESS"
-  printf '  Send it USDC on Base -- $1 is plenty for a $0.03 call. NO ETH NEEDED:\n'
-  printf '  x402 signs the transfer off-chain and the facilitator pays the gas.\n\n'
+  printf '  Send it USDC on Base -- $1 is plenty for a $0.03 call. THIS wallet\n'
+  printf '  needs NO ETH: x402 signs off-chain and the facilitator pays the gas,\n'
+  printf '  so it never broadcasts and never spends gas. (Sending it the dollar\n'
+  printf '  is an ordinary transfer out of YOUR wallet, which pays gas as usual --\n'
+  printf '  that is the one place on this path where gas is yours to cover.)\n\n'
   printf '  Then re-run:  bash scripts/first-paid-call.sh\n\n'
   exit 0
 fi

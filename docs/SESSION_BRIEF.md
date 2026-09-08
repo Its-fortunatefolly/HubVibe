@@ -118,9 +118,14 @@ index processes it:
 
 ```bash
 bash scripts/first-paid-call.sh --new-wallet   # only if no wallet yet
-# fund the printed address with USDC on Base -- $1 is plenty, NO ETH needed
+# fund the printed address with USDC on Base -- $1 is plenty
 BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh
 ```
 
-No ETH because x402's exact-EVM scheme signs an EIP-3009 authorization
-off-chain; the facilitator submits it and pays the gas.
+That payer wallet needs no ETH: x402's exact-EVM scheme signs an EIP-3009
+authorization off-chain, so it never broadcasts, and the facilitator submits
+the transfer and pays the gas. The send that FUNDS it is an ordinary transfer
+out of whichever wallet holds the dollar, and covers its own gas like any
+other -- the one place on this path where gas is the owner's to pay. Saying
+"no ETH needed" without naming which wallet is what makes a routine gas
+prompt look like something broken.

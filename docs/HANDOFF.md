@@ -42,7 +42,11 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   `first-paid-call.sh --new-wallet`, its key at `~/.hubvibe-payer-key`. Its
   last attempt was refused `invalid_exact_evm_insufficient_balance`: the
   EIP-3009 signature was VALID and every step up to the balance is proven.
-  Fund it with ~$1 USDC **on Base** (no ETH needed) and re-run. There is no
+  Fund it with ~$1 USDC **on Base** and re-run. The payer needs no ETH — it
+  signs off-chain and the facilitator pays the gas — but the transfer that
+  funds it is an ordinary send out of the owner's own wallet, which covers
+  its own gas like any other transfer; that distinction is the one the
+  "NO ETH NEEDED" lines used to blur. There is no
   recovery phrase for the owner's own wallet — do not build for one.
 - **Base app registration:** the homepage serves
   `<meta name="base:app_id" content="6a83832901463168d7e651ca" />`, the id
