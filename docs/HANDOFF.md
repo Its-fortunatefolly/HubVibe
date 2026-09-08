@@ -65,6 +65,19 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   three failure sentences, so the owner got silence and the box looked
   broken (2026-09-08). `test_the_settle_diagnostic_matches_every_failure_log`
   now pins the pattern against `x402_payments.py`.
+  **And a real money bug was found while diagnosing it.** `settle_sync`'s
+  `except TimeoutError` — the branch that exists to say "unknown, the money
+  may still have moved" — caught only the node's own 45s guard. httpx's
+  timeouts are **not** builtin `TimeoutError` (`ReadTimeout` →
+  `TimeoutException` → `TransportError` → … → `Exception`), and the client's
+  default read timeout is 30s against that 45s guard, so httpx always fired
+  first. Every mid-flight settle timeout was recorded `refused` and told the
+  payer **"this call was not charged"** about a transfer that may have
+  completed — an invitation to pay twice for one audit. Fixed by classifying
+  on whether the request could have reached the facilitator: read/write
+  timeouts and a connection dropped mid-exchange are `unknown`; connect and
+  pool failures never sent it and stay `refused`. This is a live candidate
+  for what the owner actually hit.
 - **Bazaar indexing is downstream of that**, so its zero is expected for
   now. The index CHECK was independently wrong and is fixed: it matched the
   pay-to address case-sensitively and looked for nothing else, so a

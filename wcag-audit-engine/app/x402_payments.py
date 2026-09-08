@@ -1442,6 +1442,51 @@ def record_settlement_in_stripe(settle_result, requirements) -> None:
         )
 
 
+# Which settle failures leave the money's fate UNKNOWN.
+#
+# `except TimeoutError` below exists for a settle whose outcome this node
+# cannot know: the request left, no answer came, and a transfer the
+# facilitator goes on to complete still moves the money. It caught the 45s
+# guard in `_run_coro_sync` -- and nothing else. httpx's own timeouts are NOT
+# builtin TimeoutError (ReadTimeout -> TimeoutException -> TransportError ->
+# RequestError -> HTTPError -> Exception), and the client's default read
+# timeout is 30s against our 45s guard, so httpx always fires FIRST. Every
+# mid-flight settle timeout therefore fell through to the generic handler,
+# was recorded "refused", and told the payer "this call was not charged"
+# about a transfer that may well have completed.
+#
+# Being wrong in that direction invites a second payment for one audit. So
+# classify by whether the request could have REACHED the facilitator at all:
+# a connect or pool failure never sent it and is safely "not charged"; a read
+# or write timeout, or a connection dropped mid-exchange, may have landed.
+# Matched by class NAME up the MRO so this module keeps no httpx import and
+# stays correct if the client library swaps its transport.
+_SETTLE_REACHED_EXC_NAMES = frozenset({
+    "ReadTimeout", "WriteTimeout", "TimeoutException",
+    "RemoteProtocolError", "ReadError", "WriteError",
+})
+_SETTLE_NEVER_SENT_EXC_NAMES = frozenset({
+    "ConnectTimeout", "ConnectError", "PoolTimeout", "ProxyError",
+    "UnsupportedProtocol", "InvalidURL",
+})
+
+
+def _settle_outcome_of(exc) -> str:
+    """"unknown" when settlement may still have completed, else "refused".
+
+    The leaf class wins: ConnectTimeout is a TimeoutException by inheritance
+    and still means the request was never sent.
+    """
+    if isinstance(exc, TimeoutError):
+        return "unknown"
+    for cls in type(exc).__mro__:
+        if cls.__name__ in _SETTLE_NEVER_SENT_EXC_NAMES:
+            return "refused"
+        if cls.__name__ in _SETTLE_REACHED_EXC_NAMES:
+            return "unknown"
+    return "refused"
+
+
 def settle_sync(pending) -> bool:
     """Capture a previously verified payment. Call only after delivering.
 
@@ -1509,6 +1554,20 @@ def settle_sync(pending) -> bool:
         )
         return False
     except Exception as exc:
-        pending.settle_state = "refused"
-        _log_rejection("settle", getattr(pending, "price", None), exc=exc)
+        outcome = _settle_outcome_of(exc)
+        pending.settle_state = outcome
+        if outcome == "unknown":
+            # Same sentence as the TimeoutError branch on purpose: the owner
+            # greps one string for every way a settle can fail, and the two
+            # cases mean the identical thing to whoever reads it.
+            logging.getLogger(__name__).warning(
+                "x402 settle TIMED OUT after delivery (facilitator=%s price=%s nonce=%s): "
+                "%s: %s. Settlement status UNKNOWN -- the transfer may still complete; "
+                "reconcile on-chain.",
+                _FACILITATOR_URL, pending.price,
+                (_payment_nonce(getattr(pending, "payload", None)) or "")[:18],
+                type(exc).__name__, exc,
+            )
+        else:
+            _log_rejection("settle", getattr(pending, "price", None), exc=exc)
         return False

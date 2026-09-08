@@ -1620,3 +1620,99 @@ def test_the_openapi_offer_prices_the_x402_rail_or_says_nothing(monkeypatch):
 
     unconfigured = _load_x402(monkeypatch, facilitator=None)
     assert unconfigured.discovery_offer("$0.03") == {}
+
+
+# --- httpx timeouts are not builtin TimeoutError ----------------------------
+#
+# The `except TimeoutError` branch was written to catch a settle whose outcome
+# this node cannot know, and it caught only the 45s guard in _run_coro_sync.
+# httpx's own timeouts inherit from Exception, not TimeoutError, and the
+# client's default read timeout (30s) fires BEFORE that guard -- so every
+# mid-flight settle timeout landed in the generic handler, was recorded
+# "refused", and told the payer "this call was not charged" about a transfer
+# that may have completed. That wording invites a second payment for one
+# audit. Found while diagnosing the owner's 2026-09-08 failed settle.
+
+
+def _raise_on_settle(monkeypatch, module, exc):
+    """Make the next facilitator call raise. Patched AFTER verify, so the
+    pending payment under test is a real one."""
+    def _always(coro, timeout=None):
+        coro.close()
+        raise exc
+
+    monkeypatch.setattr(module, "_run_coro_sync", _always)
+
+
+@pytest.mark.parametrize("exc_name", ["ReadTimeout", "WriteTimeout", "RemoteProtocolError"])
+def test_a_settle_that_may_have_reached_the_facilitator_is_unknown(monkeypatch, caplog, exc_name):
+    """These fire after the request went out. The transfer may have landed."""
+    import httpx
+
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    exc_cls = getattr(httpx, exc_name)
+    assert not issubclass(exc_cls, TimeoutError), (
+        f"{exc_name} is now a builtin TimeoutError; this test's premise is stale"
+    )
+    _raise_on_settle(monkeypatch, module, exc_cls("boom"))
+
+    with caplog.at_level(logging.WARNING):
+        assert module.settle_sync(pending) is False
+    assert pending.settle_state == "unknown", (
+        "a settle that may have completed is being reported as not charged"
+    )
+    assert "UNKNOWN" in caplog.text
+    assert "reconcile" in caplog.text
+    # The owner greps one token for every settle failure.
+    assert "x402 settle" in caplog.text
+
+
+@pytest.mark.parametrize("exc_name", ["ConnectTimeout", "ConnectError", "PoolTimeout"])
+def test_a_settle_that_never_left_this_node_is_refused_not_unknown(monkeypatch, exc_name):
+    """The request was never sent, so the money certainly did not move.
+
+    Calling these "unknown" would be the mirror-image lie: it sends the owner
+    hunting the chain for a transfer that cannot exist, and blocks a re-run
+    that is perfectly safe. ConnectTimeout is an httpx TimeoutException by
+    inheritance, so the leaf class has to win the classification.
+    """
+    import httpx
+
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    _raise_on_settle(monkeypatch, module, getattr(httpx, exc_name)("boom"))
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "refused", (
+        "a request that never left is being reported as possibly-charged"
+    )
+
+
+def test_a_facilitator_that_answered_non_200_is_still_refused(monkeypatch):
+    """The library raises ValueError on a non-200 from /settle, before any
+    SettleResponse is parsed. The facilitator answered; it did not settle."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    _raise_on_settle(monkeypatch, module, ValueError("Facilitator settle failed (503): busy"))
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "refused"
+
+
+def test_the_45s_guard_is_still_unknown(monkeypatch):
+    """The original case must not regress while widening the net."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    _raise_on_settle(monkeypatch, module, TimeoutError("facilitator call exceeded 45s"))
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "unknown"
