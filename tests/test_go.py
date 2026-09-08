@@ -212,3 +212,50 @@ def test_it_never_generates_a_second_wallet_over_an_existing_one(tmp_path):
     finally:
         server.shutdown()
     assert (tmp_path / "key").read_text() == KEY, "the wallet key was modified"
+
+
+def test_check_mode_answers_is_it_mine_and_where_is_the_money(tmp_path, monkeypatch):
+    """`--check` exists for the two questions a person has about an address
+    their own server generated, both unanswerable from a phone on
+    2026-09-08: is it mine, and where did my money go.
+
+    Neither confusion was a mistake. A wallet holding only USDC and no ETH
+    has NO normal transactions, so an explorer's default tab is empty and
+    the funds sit one tab over under ERC-20 transfers -- it looks exactly
+    like an empty wallet. And an address with no recovery phrase, whose key
+    is a file on a server, is not "yours" in any way a wallet app can show.
+    """
+    key = tmp_path / "key"
+    key.write_text("0x" + "1" * 63 + "2")
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "--check"], capture_output=True, text=True,
+        cwd=REPO_ROOT, timeout=180,
+        env={"PATH": os.environ["PATH"], "HOME": str(tmp_path),
+             "HUBVIBE_WALLET_FILE": str(key),
+             # An unreachable RPC: the balance may be unreadable, but the
+             # address and the explanation must still come out.
+             "BASE_RPC": "http://127.0.0.1:9",
+             # Without --check this script waits hours for money. Bound it,
+             # so removing the flag fails the test in a second instead of
+             # hanging the suite.
+             "WAIT_SECONDS": "0", "POLL_SECONDS": "1"},
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 0, out
+    assert "0x" in out, "no address printed"
+    assert str(key) in out, "it must name the file that controls the address"
+    assert "no recovery phrase" in out
+    assert "ERC-20" in out, "the empty-Transactions-tab trap is not explained"
+    # And it must not have paid for anything.
+    assert "Paying for one real call" not in out
+
+
+def test_check_mode_never_spends(tmp_path):
+    """A read-only question must stay read-only. `--check` returning before
+    the funded branch is the whole point; if it ever falls through it would
+    fire a real payment at someone who only wanted to look."""
+    text = SCRIPT.read_text()
+    check = text[text.index('if [ "${1:-}" = "--check" ]'):]
+    body = check[:check.index("\nfi\n")]
+    assert "exit 0" in body, "--check can fall through into the paying path"
+    assert "first-paid-call.sh" not in body
