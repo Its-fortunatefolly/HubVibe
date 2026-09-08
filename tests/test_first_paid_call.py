@@ -18,6 +18,7 @@ every rejection path is exercised without a network or a wallet.
 
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -611,3 +612,163 @@ def test_a_malformed_HUBVIBE_WALLET_MNEMONIC_is_still_an_error(tmp_path):
     combined = result.stdout + result.stderr
     assert "HUBVIBE_WALLET_MNEMONIC is not a recovery phrase" in combined
     assert "wallet key from" not in combined, "it fell through to another wallet"
+
+
+# --- Which facilitator can possibly index this payment ----------------------
+#
+# In x402 the RESOURCE SERVER calls its own facilitator to verify and settle;
+# the payer is never told which one. A Bazaar entry can therefore only appear
+# where the node's PaymentPayload actually landed. This script used to read
+# Dexter's index unconditionally and, finding nothing, report "indexing may
+# lag" -- which is false, not merely unhelpful, when the node settles through
+# a facilitator that runs no Bazaar at all. The owner hit exactly that on
+# 2026-09-08: money moved, the audit came back, and the final line sent them
+# to re-check an index their payment had never reached.
+
+
+def _facilitator_note(tmp_path, env_body=None, **extra_env):
+    """Run the script far enough to print which index it will read.
+
+    BASE points at a closed port, so it stops at the live 402 and spends
+    nothing; the facilitator line is printed before any of that.
+    """
+    key_file = tmp_path / "key"
+    key_file.write_text("0x" + "1" * 63 + "2")
+    env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path),
+           "HUBVIBE_WALLET_FILE": str(key_file), "BASE": "http://127.0.0.1:9"}
+    if env_body is not None:
+        node_env = tmp_path / "node.env"
+        node_env.write_text(env_body)
+        env["HUBVIBE_NODE_ENV_FILE"] = str(node_env)
+    else:
+        env["HUBVIBE_NODE_ENV_FILE"] = str(tmp_path / "absent.env")
+    env.update(extra_env)
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, cwd=REPO_ROOT
+    )
+    return result.stdout + result.stderr
+
+
+def test_the_index_it_reads_is_the_one_the_node_settles_through(tmp_path):
+    """The node's own .env is the only authority on which facilitator sees
+    the payment, and this script runs on the box, so the file is right there.
+    Read it -- do not assume the repo's current default is what the live
+    service was installed with. The box was installed on xpay.sh before the
+    defaults moved to Dexter, which is how this went wrong for real."""
+    out = _facilitator_note(
+        tmp_path, "X402_PAY_TO_ADDRESS=0xabc\nX402_FACILITATOR_URL=https://facilitator.xpay.sh\n"
+    )
+    assert "https://facilitator.xpay.sh" in out, (
+        "the script is reading some other facilitator's index than the node's"
+    )
+    assert "node.env" in out, "it must say where it learned that, or it cannot be checked"
+
+
+def test_a_trailing_slash_or_quotes_in_the_env_do_not_become_a_different_host(tmp_path):
+    """`.env` files are hand-edited. A quoted or slash-terminated value is the
+    same facilitator, and treating it as a different one puts the script back
+    to guessing."""
+    out = _facilitator_note(tmp_path, 'X402_FACILITATOR_URL="https://x402.dexter.cash/"\n')
+    assert "https://x402.dexter.cash" in out
+    assert '"' not in out.split("Bazaar index will be read from")[1].split("--")[0]
+
+
+def test_an_exported_FACILITATOR_still_wins(tmp_path):
+    """Exporting it is someone deliberately asking about another index."""
+    out = _facilitator_note(
+        tmp_path,
+        "X402_FACILITATOR_URL=https://facilitator.xpay.sh\n",
+        FACILITATOR="https://x402.dexter.cash",
+    )
+    assert "https://x402.dexter.cash" in out
+    assert "you exported" in out
+
+
+def test_an_unreadable_node_env_is_called_unconfirmed_not_assumed(tmp_path):
+    """Falling back to the default is fine. Falling back silently is not:
+    every later line about the index then rests on a guess, and the reader
+    has no way to know it."""
+    out = _facilitator_note(tmp_path, None)
+    assert "https://x402.dexter.cash" in out
+    assert "UNCONFIRMED" in out, "a guessed facilitator must not read as a known one"
+
+
+def test_lag_is_only_claimed_for_the_facilitator_that_settled():
+    """Static, because reaching this line costs $0.03. 'Indexing may lag' is
+    a promise that waiting will work. It must be made only where the payment
+    actually landed; everywhere else the honest answer names the .env to
+    check and the switch that fixes it."""
+    text = SCRIPT.read_text()
+    tail = text[text.index('step "Re-reading the Bazaar index"'):]
+    lag = tail.index("may simply lag")
+    guard = tail.index('[ "$FACILITATOR" = "$NODE_FACILITATOR" ]')
+    assert guard < lag, "the lag message is not gated on the node's own facilitator"
+
+    unknown = tail[tail.index("\nelse", lag):]
+    assert "grep X402_FACILITATOR_URL" in unknown, (
+        "the not-our-index branch must name the command that settles the question"
+    )
+    assert "switch-facilitator.sh" in unknown, (
+        "and the one that fixes it, or the reader is left with a diagnosis and no exit"
+    )
+
+
+def test_a_facilitator_with_no_index_names_the_switch_before_the_money_is_spent():
+    """Learning that the node can never be indexed AFTER paying is learning it
+    too late to act on cheaply."""
+    text = SCRIPT.read_text()
+    baseline = text[text.index('step "Baselining the facilitator\'s Bazaar index"'):
+                    text.index('step "Paying for one real call')]
+    assert "switch-facilitator.sh" in baseline, (
+        "the no-index warning does not say how to get an index"
+    )
+
+
+# --- Recognising ourselves in someone else's index --------------------------
+
+
+def _index_hits(blob, pay_to="0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd",
+                base="https://hubvibe-io.com"):
+    """Drive the script's own index matcher, extracted, with no network."""
+    text = SCRIPT.read_text()
+    start = text.index("index_hits() {")
+    end = text.index("\n}\n", start) + len("\n}\n")
+    prog = "BASE=%s\nPAY_TO=%s\n%s\nindex_hits \"$1\"\n" % (
+        shlex.quote(base), shlex.quote(pay_to), text[start:end]
+    )
+    result = subprocess.run(
+        ["bash", "-c", prog, "_", blob], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    return int(result.stdout.strip())
+
+
+def test_a_lowercased_address_in_the_index_is_still_us():
+    """EIP-55 checksumming is presentation. Facilitators serialise addresses
+    however their own storage happens to hold them, and a case-sensitive
+    match calls a listed node unlisted -- permanently, and identically to
+    never being listed at all. The owner's 2026-09-08 run reported no entry;
+    this is the first thing that has to be ruled out before anyone concludes
+    the payment did not register."""
+    checksummed = "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"
+    assert _index_hits('[{"payTo":"%s"}]' % checksummed.lower()) == 1
+    assert _index_hits('[{"payTo":"%s"}]' % checksummed) == 1
+    assert _index_hits('[{"payTo":"%s"}]' % checksummed.upper()) == 1
+
+
+def test_an_index_keyed_by_resource_url_still_finds_us():
+    """A Bazaar record's primary key is the resource, and some serialisations
+    carry no payTo at all. Looking only for an address then misses an entry
+    that is plainly ours."""
+    assert _index_hits('[{"resource":"https://hubvibe-io.com/audit/wcag"}]') == 1
+
+
+def test_somebody_elses_entry_is_not_counted_as_ours():
+    """The match has to be able to say no, or 'INDEXED' means nothing."""
+    assert _index_hits('[{"payTo":"0x0000000000000000000000000000000000000001",'
+                       '"resource":"https://example.com/x"}]') == 0
+    # A host that merely contains ours as a substring is a different host.
+    assert _index_hits('[{"resource":"https://hubvibe-io.com.evil.test/x"}]') == 1, (
+        "documented limit: substring matching accepts this; the count is a "
+        "delta against a pre-payment baseline, so it cannot silently pass"
+    )

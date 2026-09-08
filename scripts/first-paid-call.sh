@@ -64,16 +64,58 @@ set -uo pipefail
 BASE="${BASE:-https://hubvibe-io.com}"
 ROUTE="${ROUTE:-/audit/wcag}"
 TARGET_URL="${TARGET_URL:-https://example.com}"
-# Dexter has a live discovery index at /discovery/resources; xpay.sh does not.
-# For the index check here to match the facilitator the server actually uses,
-# this must equal X402_FACILITATOR_URL on the live service -- pinned to
-# vps-install.sh's default by test_the_deploy_default_facilitator_matches_the_scripts_that_pay.
-FACILITATOR="${FACILITATOR:-https://x402.dexter.cash}"
+# Which facilitator sees this payment is the NODE's decision, not this
+# script's: in x402 the resource server calls its own facilitator to verify
+# and settle, and the payer is never told which one. A Bazaar entry appears
+# only where the PaymentPayload actually landed. So reading Dexter's index
+# after paying a node configured for xpay.sh answers a question about someone
+# else's facilitator, and reports "indexing may lag" when the truth is "your
+# payment never went near this index." The box was installed on xpay.sh
+# before the defaults moved to Dexter, so this is not hypothetical.
+#
+# This script runs on the box, so the node's own `.env` is right here and is
+# the only authority. Read it. An explicitly exported FACILITATOR still wins
+# -- that is someone deliberately asking a different question.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NODE_ENV_FILE="${HUBVIBE_NODE_ENV_FILE:-$SCRIPT_DIR/../deploy/vps/.env}"
+NODE_FACILITATOR=""
+if [ -r "$NODE_ENV_FILE" ]; then
+  NODE_FACILITATOR=$(sed -n 's/^[[:space:]]*X402_FACILITATOR_URL[[:space:]]*=[[:space:]]*//p' \
+    "$NODE_ENV_FILE" | tail -n 1 | tr -d '"'"'"'' | tr -d '\r' | sed 's:/*$::')
+fi
+if [ -n "${FACILITATOR:-}" ]; then
+  FACILITATOR_SOURCE="the FACILITATOR variable you exported"
+elif [ -n "$NODE_FACILITATOR" ]; then
+  FACILITATOR="$NODE_FACILITATOR"
+  FACILITATOR_SOURCE="the node's $NODE_ENV_FILE"
+else
+  FACILITATOR="https://x402.dexter.cash"
+  FACILITATOR_SOURCE="the default -- the node's own .env was not readable from here, so which facilitator settles is UNCONFIRMED"
+fi
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$1"; }
 warn() { printf '  \033[33mNOTE\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31mSTOP\033[0m  %s\n' "$1"; exit 1; }
+
+# How we recognise ourselves in someone else's index.
+#
+# The Bazaar record is serialised by the facilitator, not by us, so match it
+# the way THEIR serialiser might have written it. An EIP-55 checksummed
+# address and a lowercased one are the same address, and `grep` without -i
+# calls them different -- so a node that IS listed reads as "not indexed",
+# forever, indistinguishably from never having been listed. An index keyed by
+# resource URL names our host and no address at all, so accept that too.
+# This repo has shipped three green checks that asked whether a field was
+# present in OUR shape rather than whether the consumer's shape matched.
+index_hits() {
+  local host
+  host=$(printf '%s' "$BASE" | sed -e 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##' \
+                                   -e 's#[/?].*$##' -e 's/:[0-9]*$//')
+  printf '%s' "$1" \
+    | grep -oiE "$(printf '%s|%s' "$PAY_TO" "$host" | sed 's/\./\\./g')" \
+    | wc -l | tr -d ' '
+}
 
 # ---------------------------------------------------------------------------
 # Preflight. Every check below is here to avoid spending money on a call that
@@ -138,6 +180,9 @@ print("%s\t%s" % (key if key.startswith("0x") else "0x" + key, a.address))
   chmod 600 "$WALLET_FILE"
   printf '%s' "${generated##*$'\t'}"
 }
+
+# Said before a cent moves, because it decides what the last step can mean.
+warn "Bazaar index will be read from $FACILITATOR -- from $FACILITATOR_SOURCE"
 
 step "Checking the client dependencies are installed"
 if ! python3 -c 'import x402, eth_account, httpx' 2>/dev/null; then
@@ -560,10 +605,12 @@ if printf '%s' "$BEFORE" | grep -qi 'not found'; then
   warn "$FACILITATOR serves no /discovery/resources -- it settles payments and"
   warn "runs no index. This payment will prove settlement but cannot register"
   warn "the node anywhere. To get indexed, settle through a facilitator that"
-  warn "runs a Bazaar."
+  warn "runs a Bazaar:"
+  warn "  cd $SCRIPT_DIR/.. && bash scripts/switch-facilitator.sh https://x402.dexter.cash"
+  warn "then run this script once more."
 else
-  BEFORE_COUNT=$(printf '%s' "$BEFORE" | grep -o "$PAY_TO" | wc -l | tr -d ' ')
-  ok "index reachable; entries already naming our pay-to address: $BEFORE_COUNT"
+  BEFORE_COUNT=$(index_hits "$BEFORE")
+  ok "index reachable; entries already naming this node: $BEFORE_COUNT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -668,13 +715,27 @@ fi
 
 sleep 5
 AFTER=$(curl -sS -m 30 "$FACILITATOR/discovery/resources" 2>/dev/null)
-AFTER_COUNT=$(printf '%s' "$AFTER" | grep -o "$PAY_TO" | wc -l | tr -d ' ')
+AFTER_COUNT=$(index_hits "$AFTER")
 
 if [ "$AFTER_COUNT" -gt "${BEFORE_COUNT:-0}" ]; then
-  printf '\n  \033[1;32mINDEXED.\033[0m %s entries now name our pay-to address (was %s).\n' \
+  printf '\n  \033[1;32mINDEXED.\033[0m %s entries now name this node (was %s).\n' \
     "$AFTER_COUNT" "${BEFORE_COUNT:-0}"
   printf '  An agent shopping the Bazaar by capability can now find this node.\n'
+elif [ -n "$NODE_FACILITATOR" ] && [ "$FACILITATOR" = "$NODE_FACILITATOR" ]; then
+  # This index belongs to the facilitator that actually settled, so a missing
+  # entry really can be lag, and waiting is a reasonable thing to do.
+  warn "no new entry yet (still $AFTER_COUNT). This IS the facilitator the node"
+  warn "settles through, so indexing may simply lag; re-check with:"
+  warn "  curl -s $FACILITATOR/discovery/resources | grep -ci $PAY_TO"
 else
-  warn "no new entry yet (still $AFTER_COUNT). Indexing may lag; re-check with:"
-  warn "  curl -s $FACILITATOR/discovery/resources | grep -c $PAY_TO"
+  # It is not. Telling someone to wait for an index their payment never
+  # reached costs them the days it takes to stop believing it.
+  warn "no new entry (still $AFTER_COUNT) -- and this index may not be the one"
+  warn "that could ever have it. The payment settled through whichever"
+  warn "facilitator the NODE is configured for; this index was read from"
+  warn "$FACILITATOR_SOURCE. Confirm which one settled:"
+  warn "  grep X402_FACILITATOR_URL $NODE_ENV_FILE"
+  warn "If that is not $FACILITATOR, waiting will never help. Point the node at"
+  warn "a facilitator that runs a Bazaar and pay once more:"
+  warn "  cd $SCRIPT_DIR/.. && bash scripts/switch-facilitator.sh https://x402.dexter.cash"
 fi
