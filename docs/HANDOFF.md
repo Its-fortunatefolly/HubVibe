@@ -46,17 +46,25 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   still unexercised.** The node delivers an unpaid audit on purpose (the
   lesser evil versus charging for undelivered work) and flags it; that flag
   is the authority on whether money moved.
-  **Next, on the box — the reason is in the node's log:**
-  `cd /root/HubVibe/deploy/vps && docker compose logs --since 2h 2>&1 | grep "settle REFUSED" | tail -5`
-  That line names the facilitator and the error, which is the only thing
-  separating a facilitator problem from the payer's balance moving between
-  verify and settle. The wallet still holds the money.
-  Two of our own tools lied about this run and are fixed: the script
+  **Next, on the box — which of three ways it failed is in the node's log:**
+  `cd /root/HubVibe/deploy/vps && docker compose logs --since 3h 2>&1 | grep -i "x402 settle" | tail -20`
+  `settle_sync` fails three ways and logs three different sentences —
+  `REFUSED after delivery` (the facilitator declined), `TIMED OUT after
+  delivery` (no answer; status unknown, do NOT re-run), and `FAILED before
+  the facilitator could answer` (an exception on our side, logged through
+  `_log_rejection`). `x402 settle` is the only token common to all three.
+  If compose prints nothing, its project name may not match the running
+  stack — ask the daemon directly:
+  `docker logs --since 3h $(docker ps -qf name=hubvibe | head -1) 2>&1 | grep -i x402 | tail -30`
+  Three of our own tools misreported this run and are fixed: the script
   announced `settled $0.03` while printing that body (it read the HTTP
-  status, never the body — it now exits 1 and says the node was not paid),
-  and it blamed the missing PAYMENT-RESPONSE receipt on a stale deployment
-  when a settle that never happened simply has no hash (that would have sent
-  the owner rebuilding a healthy node).
+  status, never the body — it now exits 1 and says the node was not paid);
+  it blamed the missing PAYMENT-RESPONSE receipt on a stale deployment when
+  a settle that never happened simply has no hash (that would have sent the
+  owner rebuilding a healthy node); and it handed over a grep for one of the
+  three failure sentences, so the owner got silence and the box looked
+  broken (2026-09-08). `test_the_settle_diagnostic_matches_every_failure_log`
+  now pins the pattern against `x402_payments.py`.
 - **Bazaar indexing is downstream of that**, so its zero is expected for
   now. The index CHECK was independently wrong and is fixed: it matched the
   pay-to address case-sensitively and looked for nothing else, so a
@@ -204,15 +212,19 @@ Shell included. Each line below says which it is.
 - [ON THE BOX] Point the node at the facilitator that indexes (verifies
   itself against the live 402, rolls back on a dead rail):
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
-- [ON THE BOX] First paid call, **on the box and nowhere else** (the wallet
-  and its key live there; the script builds its own Python environment in
-  `~/.hubvibe-venv` and reads the key at `~/.hubvibe-wallet-key`, and it now
-  refuses Cloud Shell by name). Send **~$0.25 USDC on Base** — the call
-  spends $0.03 and no ETH is needed — to
-  `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`, then:
-  `cd ~/HubVibe && git pull -q origin main && BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh`
-  The receipt line and the Basescan link are the proof; the script then
-  reads Dexter's index.
+- [ON THE BOX] First paid call, **on the box and nowhere else** — one
+  command, start it first and send the money whenever:
+  `cd ~/HubVibe && git pull -q origin main && bash scripts/go.sh`
+  It finds or makes the wallet, prints the one address to fund, watches the
+  chain, and fires the paid call the moment the money lands. Send **~$0.25
+  USDC on Base** to `0x104feA79F30b4fB4Da86B6D65951217F914bdd35` (the call
+  spends $0.03; that wallet needs no ETH, though the transfer funding it
+  pays gas out of the sending wallet as usual). Safe to Ctrl-C and re-run.
+  The receipt line and the Basescan link are the proof; it then reads
+  Dexter's index. `scripts/first-paid-call.sh` is still there for a single
+  attempt with no waiting. **A 200 with an audit in it is not proof of
+  payment** — read `billing_warning` on the body, and see the settle
+  diagnosis in Live state above.
 - [anywhere] Finish the Base app registration. The live page already carries
   the id (confirmed 2026-09-08), so nothing needs deploying first: enter
   `hubvibe-io.com` in the dashboard's Add Domain box and press Register. If
@@ -279,6 +291,7 @@ Shell included. Each line below says which it is.
 | `scripts/vps-install.sh` | the whole service on a flat-rate box, one command; gates the recipient and the facilitator before writing anything | box |
 | `scripts/switch-facilitator.sh` | change the facilitator on a running box: edit `.env`, restart, read the live 402, roll back if the rail vanished | box |
 | `scripts/payment-status.sh` | wallets, live 402, recipient match, payer readiness, verdict | anywhere |
+| `scripts/go.sh` | **the one command.** Finds or makes the payer wallet, prints the address to fund, waits for the money on-chain, then makes the paid call. Unattended: the owner's part is one transfer, whenever | box |
 | `scripts/first-paid-call.sh` | one real $0.03 x402 payment from the box's payer wallet, with preflight, receipt and index check; an empty wallet is reported as an empty wallet, not a broken rail | box |
 | `scripts/simulate-paid-call.py` | the whole paid path locally, for free | dev |
 | `scripts/verify-live.sh` | end-to-end checks of a deployed node | anywhere |
