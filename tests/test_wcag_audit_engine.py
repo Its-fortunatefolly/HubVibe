@@ -1347,7 +1347,12 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
 
     retired = re.compile(
         r"\$49\b|1,?500 scans|1,?500 included|included_calls_per_month"
-        r"|\$29\.99|\$79\b|\$249\b|\"human_plans\"|plan-btn|per site watched"
+        r"|\$29\.99|\$79\b|\$249\b|\"human_plans\"|plan-btn"
+        # Word order is not the point, the OFFER is. The sweep looked for
+        # "per site watched" while the landing page's meta description --
+        # the one string every crawler and link preview shows -- said
+        # "watched per site on a plan" and sailed through for a day.
+        r"|per site watched|watched per site"
     )
 
     surfaces = []
@@ -4243,7 +4248,8 @@ def test_no_human_tier_is_advertised_on_any_served_surface(monkeypatch):
 
     for path in ("/", "/llms.txt"):
         text = client.get(path).text
-        for price in ("$29.99", "$79", "$249", "per site watched", "plan-btn", "human plan"):
+        for price in ("$29.99", "$79", "$249", "per site watched", "watched per site",
+                      "plan-btn", "human plan"):
             assert price not in text, f"{path} still shows {price!r}"
 
     challenge = client.post("/audit/wcag", json={"url": "https://example.com"}).json()

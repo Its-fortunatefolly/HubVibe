@@ -32,6 +32,18 @@ rate needs enormous call volume, so the whole game is machine traffic.
 The human plan tiers are retired (2026-09-06): per call is the only price.
 Do not build SaaS features, checkout UIs, dashboards, or logins.
 
+**The website is not a product surface.** Owner, 2026-09-08: "This was never a
+SaaS... it truly isnt for anything but an about HubVibe homebase. HubVibe is
+software to software. A tollbooth." The landing page exists only to say what
+HubVibe is, kept for continuity; the product is the 402 path and the discovery
+surfaces that lead agents to it. An early build drifted into a website and human
+tiers and had to be unwound, so this is restated rather than assumed -- and
+plan/subscription language surviving on any public surface is a truth bug, not
+cosmetics: the landing page's meta description, the one string every crawler and
+link preview shows, went on offering the retired per-site plan until 2026-09-08.
+(The sweep that guards this reads every shipped .md, so describe the retired
+wording here -- never quote it, or this file becomes the offender.)
+
 ## Where the truth lives
 
 | Question | Read this, do not assume |
