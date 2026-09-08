@@ -156,15 +156,17 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - Point the box at the facilitator that indexes (verifies itself, rolls
   back on a dead rail), on the box:
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
-- First paid call, **on the box and nowhere else** (the wallet and its key
-  live there; the script builds its own Python environment in
-  `~/.hubvibe-venv` and reads the key at `~/.hubvibe-wallet-key`, and it now
-  refuses Cloud Shell by name). Send **~$0.25 USDC on Base** — the call
-  spends $0.03 and no ETH is needed — to
-  `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`, then:
-  `cd ~/HubVibe && git pull -q origin main && BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh`
-  The receipt line and the Basescan link are the proof; the script then
-  reads Dexter's index.
+- First paid call, **on the box and nowhere else** — one command, start it
+  first and send the money whenever:
+  `cd ~/HubVibe && git pull -q origin main && bash scripts/go.sh`
+  It finds or makes the wallet, prints the one address to fund, watches the
+  chain, and fires the paid call the moment the money lands. Send **~$0.25
+  USDC on Base** to `0x104feA79F30b4fB4Da86B6D65951217F914bdd35` (the call
+  spends $0.03; that wallet needs no ETH, though the transfer funding it
+  pays gas out of the sending wallet as usual). Safe to Ctrl-C and re-run.
+  The receipt line and the Basescan link are the proof; it then reads
+  Dexter's index. `scripts/first-paid-call.sh` is still there for a single
+  attempt with no waiting.
 - Finish the Base app registration. The live page already carries the id
   (confirmed 2026-09-08), so nothing needs deploying first: enter
   `hubvibe-io.com` in the dashboard's Add Domain box and press Register. If
@@ -231,6 +233,7 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 | `scripts/vps-install.sh` | the whole service on a flat-rate box, one command; gates the recipient and the facilitator before writing anything | box |
 | `scripts/switch-facilitator.sh` | change the facilitator on a running box: edit `.env`, restart, read the live 402, roll back if the rail vanished | box |
 | `scripts/payment-status.sh` | wallets, live 402, recipient match, payer readiness, verdict | anywhere |
+| `scripts/go.sh` | **the one command.** Finds or makes the payer wallet, prints the address to fund, waits for the money on-chain, then makes the paid call. Unattended: the owner's part is one transfer, whenever | box |
 | `scripts/first-paid-call.sh` | one real $0.03 x402 payment from the box's payer wallet, with preflight, receipt and index check; an empty wallet is reported as an empty wallet, not a broken rail | box |
 | `scripts/simulate-paid-call.py` | the whole paid path locally, for free | dev |
 | `scripts/verify-live.sh` | end-to-end checks of a deployed node | anywhere |
