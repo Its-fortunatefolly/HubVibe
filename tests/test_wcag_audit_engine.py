@@ -4279,3 +4279,71 @@ def test_checkout_refuses_a_plan_now_that_the_tiers_are_retired(monkeypatch, loa
     assert "retired" in response.json()["detail"]
     response = client.post("/billing/report", json={"email": "b@example.com", "url": "https://example.com"})
     assert response.status_code == 501
+
+
+def test_the_settlement_failure_says_WHY_on_the_response(monkeypatch):
+    """The node is the only party that knows why a settle failed.
+
+    The payer sees a 200 with an audit in it; the operator has to be logged
+    into the box to read the log. On 2026-09-08 that cost the owner a night
+    of grepping for a one-line answer the node already had in hand. "The
+    facilitator refused it: insufficient_funds" and "ReadTimeout" call for
+    completely different next moves, and one generic sentence for both is
+    the defect -- a machine client cannot tell whether retrying is safe.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _x402_caller(monkeypatch, module, settle_ok=False)
+    real_settle = module.x402_payments.settle_sync
+
+    def _settle_with_reason(pending):
+        result = real_settle(pending)
+        pending.settle_state = "refused"
+        pending.settle_error = "the facilitator refused it: insufficient_funds"
+        return result
+
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _settle_with_reason)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    body = TestClient(module.app).post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "signed-payment"},
+    ).json()
+
+    assert calls["settled"] == 1
+    warning = body["billing_warning"]
+    assert "not charged" in warning
+    assert "insufficient_funds" in warning, (
+        "the reason is still only in the log, where the payer cannot see it"
+    )
+
+
+def test_an_unknown_settlement_says_WHY_too(monkeypatch):
+    """Unknown is the one a payer must not guess about: re-running can pay
+    twice. Whatever the node knows about why goes on the body."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _x402_caller(monkeypatch, module, settle_ok=False)
+    real_settle = module.x402_payments.settle_sync
+
+    def _settle_unknown(pending):
+        result = real_settle(pending)
+        pending.settle_state = "unknown"
+        pending.settle_error = "ReadTimeout: timed out"
+        return result
+
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _settle_unknown)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    warning = TestClient(module.app).post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "signed-payment"},
+    ).json()["billing_warning"]
+
+    assert "unknown" in warning
+    assert "do not re-pay" in warning
+    assert "ReadTimeout" in warning

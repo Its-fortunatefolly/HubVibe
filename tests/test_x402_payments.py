@@ -1716,3 +1716,55 @@ def test_the_45s_guard_is_still_unknown(monkeypatch):
 
     assert module.settle_sync(pending) is False
     assert pending.settle_state == "unknown"
+
+
+# --- the reason belongs on the response, not only in our log ----------------
+
+
+def test_a_refusal_records_the_facilitators_reason_for_the_payer(monkeypatch):
+    """The node is the only party that knows why a settle failed: the payer
+    sees a 200 with an audit in it, and the operator must be logged into the
+    box to read the log. On 2026-09-08 that cost the owner a night of
+    grepping for an answer the node had in hand and discarded."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(
+        monkeypatch, module, settled=False,
+        settle_response=_settle_response(errorReason="insufficient_funds"),
+    )
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "refused"
+    assert "insufficient_funds" in (pending.settle_error or ""), (
+        "the facilitator's reason is being discarded again"
+    )
+
+
+def test_an_exception_records_its_type_for_the_payer(monkeypatch):
+    """"ValueError: Facilitator settle failed (503)" and "ReadTimeout" call
+    for different actions. One generic sentence for both is the bug."""
+    import httpx
+
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    _raise_on_settle(monkeypatch, module, httpx.ReadTimeout("timed out"))
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "unknown"
+    assert "ReadTimeout" in (pending.settle_error or "")
+
+
+def test_the_reason_is_one_bounded_line(monkeypatch):
+    """A facilitator's error text is someone else's string -- it can be a
+    page of HTML. It goes on a JSON body and into a log line, so flatten it
+    and cap it rather than letting a remote service size our response."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    _raise_on_settle(monkeypatch, module, ValueError("x\ny\n" + "z" * 5000))
+
+    assert module.settle_sync(pending) is False
+    reason = pending.settle_error or ""
+    assert "\n" not in reason and len(reason) <= 180, f"unbounded reason: {len(reason)}"
+    assert "ValueError" in reason

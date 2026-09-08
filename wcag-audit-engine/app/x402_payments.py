@@ -973,7 +973,8 @@ class PendingPayment:
     audit that ran" true for machine payers, not just for subscribers.
     """
 
-    __slots__ = ("payload", "requirements", "price", "settle_result", "settle_state")
+    __slots__ = ("payload", "requirements", "price", "settle_result",
+                 "settle_state", "settle_error")
 
     def __init__(self, payload, requirements, price: str):
         self.payload = payload
@@ -987,6 +988,27 @@ class PendingPayment:
         # facilitator did not answer in time -- the money MAY have moved),
         # "refused" (it answered no: not charged). None until settle runs.
         self.settle_state = None
+        # WHY, in one short line, for the payer -- not just for our log.
+        # The reason existed inside this process for a few milliseconds
+        # and was discarded, so a payer whose settle failed got the same
+        # generic sentence whether the facilitator refused, never
+        # answered, or was never reached. Those need different actions,
+        # and only the node knows which one happened.
+        self.settle_error = None
+
+
+def _short(text, limit: int = 180) -> str:
+    """One line, bounded, safe to put on a response body.
+
+    A facilitator's error text is someone else's string: it can be a page of
+    HTML or contain newlines that would break a header or a log line.
+    """
+    flat = " ".join(str(text).split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def _suffix(message) -> str:
+    return " (%s)" % message if message else ""
 
 
 def _has_receipt(result) -> bool:
@@ -1531,6 +1553,12 @@ def settle_sync(pending) -> bool:
         # thing that distinguishes a facilitator outage from a payer whose
         # funds moved between verify and settle.
         pending.settle_state = "refused"
+        pending.settle_error = _short(
+            "the facilitator refused it: %s%s" % (
+                reason or "no reason given",
+                _suffix(getattr(result, "error_message", None)),
+            )
+        )
         logging.getLogger(__name__).warning(
             "x402 settle REFUSED after delivery (facilitator=%s price=%s): "
             "error=%s message=%s",
@@ -1545,6 +1573,8 @@ def settle_sync(pending) -> bool:
         # Unknown, not refused -- and said so, with the nonce, so the owner
         # can reconcile against the chain.
         pending.settle_state = "unknown"
+        pending.settle_error = _short(
+            "the facilitator did not answer in time: %s" % exc)
         logging.getLogger(__name__).warning(
             "x402 settle TIMED OUT after delivery (facilitator=%s price=%s nonce=%s): "
             "%s. Settlement status UNKNOWN -- the transfer may still complete; "
@@ -1556,6 +1586,7 @@ def settle_sync(pending) -> bool:
     except Exception as exc:
         outcome = _settle_outcome_of(exc)
         pending.settle_state = outcome
+        pending.settle_error = _short("%s: %s" % (type(exc).__name__, exc))
         if outcome == "unknown":
             # Same sentence as the TimeoutError branch on purpose: the owner
             # greps one string for every way a settle can fail, and the two
