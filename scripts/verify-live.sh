@@ -101,6 +101,31 @@ echo "Service up"
 expect_status GET /health 200 "GET /health"
 expect_status GET / 200 "GET / (landing page)"
 
+# Is the box running THIS checkout's code? The block above warns when the
+# CHECKER is stale; this is the same question pointed the other way, and it
+# is the one nothing here used to ask.
+#
+# The Base app_id is the canary: one exact string, baked into the image at
+# build time, changed only on purpose. Not hypothetical -- on 2026-09-07
+# main carried a new app_id while the live page served the old one, every
+# check here passed (an old image answers 200 on everything), and the only
+# symptom was a Base domain verification that silently never completed.
+# `git pull` on the box does not rebuild; `docker compose up -d --build`
+# does. Skipped, out loud, when there is nothing local to compare against.
+LOCAL_INDEX="${REPO_DIR:-}/wcag-audit-engine/app/static/index.html"
+if [ -n "${REPO_DIR:-}" ] && [ -f "$LOCAL_INDEX" ]; then
+  _app_id() { grep -o 'name="base:app_id" content="[^"]*"' | head -1 | sed 's/.*content="//; s/"$//'; }
+  WANT_APP_ID=$(_app_id < "$LOCAL_INDEX")
+  LIVE_APP_ID=$(curl -sS -m 30 "$BASE/" 2>/dev/null | _app_id)
+  if [ -z "$WANT_APP_ID" ]; then
+    printf '  \033[33mNOTE\033[0m  this checkout serves no base:app_id, so the deployed image cannot be compared to it.\n'
+  elif [ "$LIVE_APP_ID" = "$WANT_APP_ID" ]; then
+    pass "the deployed homepage is this checkout's ($WANT_APP_ID)"
+  else
+    fail "the node is running an OLDER IMAGE: its homepage serves base:app_id '${LIVE_APP_ID:-none}', this checkout serves '$WANT_APP_ID'. A git pull does not rebuild -- on the box: cd deploy/vps && docker compose up -d --build"
+  fi
+fi
+
 echo
 echo "Discovery surface (how agents find and price this node)"
 expect_status GET /.well-known/agent.json 200 "GET /.well-known/agent.json"
