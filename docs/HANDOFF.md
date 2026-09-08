@@ -49,8 +49,10 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   the owner's Add Domain dialog asked for on 2026-09-07. It replaced
   `6a8383066ea1f57fed333625` (#84): the two are 35 seconds apart as
   ObjectIDs, so the app was created twice and setup is open on the second.
-  Verification is NOT done — Base fetches the live page when Register is
-  pressed, so the box must carry this deploy first.
+  **The box is already serving it** — the owner's
+  `curl -s https://hubvibe-io.com/ | grep base:app_id` returned the new id on
+  2026-09-08, which also proves the box carries the current build. The
+  deploy no longer gates this: pressing Register is the whole remaining step.
 - **Old Cloud Run node:** still serves at `https://hubvibe-831480473793.us-south1.run.app`
   on a 2026-09-03 revision (v1.1.2), pays the same wallet, min-instances 0.
   The MCP registry still points at it (1.1.0 entry).
@@ -154,18 +156,22 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - Point the box at the facilitator that indexes (verifies itself, rolls
   back on a dead rail), on the box:
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
-- First paid call, on the box (the script builds its own Python environment
-  in `~/.hubvibe-venv` and uses the payer key at `~/.hubvibe-payer-key`).
-  Send ~$1 USDC on Base to `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`
-  first, then:
-  `cd ~/HubVibe && BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh`
+- First paid call, **on the box and nowhere else** (the wallet and its key
+  live there; the script builds its own Python environment in
+  `~/.hubvibe-venv` and reads the key at `~/.hubvibe-wallet-key`, and it now
+  refuses Cloud Shell by name). Send **~$0.25 USDC on Base** — the call
+  spends $0.03 and no ETH is needed — to
+  `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`, then:
+  `cd ~/HubVibe && git pull -q origin main && BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh`
   The receipt line and the Basescan link are the proof; the script then
   reads Dexter's index.
-- Finish the Base app registration, in this order and no other: merge,
-  redeploy the box (line above), confirm the live page carries the id with
-  `curl -s https://hubvibe-io.com/ | grep base:app_id`, and only then enter
-  `hubvibe-io.com` in the dashboard's Add Domain box and press Register.
-  Pressing it before the deploy verifies nothing.
+- Finish the Base app registration. The live page already carries the id
+  (confirmed 2026-09-08), so nothing needs deploying first: enter
+  `hubvibe-io.com` in the dashboard's Add Domain box and press Register. If
+  the page is ever changed, re-confirm with
+  `curl -s https://hubvibe-io.com/ | grep base:app_id` before pressing it —
+  Base fetches the live page, so pressing it ahead of a deploy verifies
+  nothing.
 - Move this repo's action tag to current main so `@v1` uses the domain:
   `git tag -f v1 origin/main && git push -f origin v1` (from a clone of
   HubVibe; the push output must say `HubVibe.git`).
@@ -207,6 +213,13 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - `gcloud --format=flattened` pads names; always `--format=json`. Secret
   Manager `latest` is the highest version number regardless of state;
   repair additively, never by disabling. Write secrets with `printf '%s'`.
+- Every script that touches the box refuses Cloud Shell by name. A temporary
+  terminal with its own home directory turns "wrong machine" into a wallet
+  error, a missing `.env`, or a stale five-word file — the symptom, never
+  the cause. `vps-install.sh` and `first-paid-call.sh` both refuse; any new
+  box script must too. And a file that is not what it claims to be is litter
+  to step over with a named warning, not a reason to abort a run that has a
+  working key beside it.
 - Say which repo a git command runs in; the action repo and this one have
   both received each other's tags. Read the push output.
 - The owner is often on a phone: one short command per line.
