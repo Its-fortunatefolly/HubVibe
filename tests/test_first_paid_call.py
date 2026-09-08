@@ -178,14 +178,25 @@ def test_the_script_never_retries_a_payment():
 
     text = SCRIPT.read_text()
     paying = text[text.index("step \"Paying for one real call"):text.index("step \"Re-reading")]
-    # Loop keywords as statements, not the word "for" inside prose.
-    loops = [
-        line for line in paying.splitlines()
-        if re.match(r"\s*(for|while|until)\b", line) or re.search(r"\bdone\b", line)
-    ]
-    assert not loops, (
-        f"the paying block loops: {loops} -- a retry around a signature is a "
-        "double charge"
+    # Loop keywords as STATEMENTS, not English. `for` was already read that
+    # way; `done` was not, so any sentence containing the word tripped it --
+    # "the facilitator declined the transfer AFTER the work was done" did,
+    # in the message explaining a refused settle. A guard that fires on prose
+    # gets edited around or switched off, which is how a real one stops being
+    # trusted. `done` closing a loop is a statement, and only that is matched.
+    def loop_statements(block):
+        return [
+            line for line in block.splitlines()
+            if re.match(r"\s*(for|while|until|done)\b", line)
+        ]
+
+    assert not loop_statements(paying), (
+        f"the paying block loops: {loop_statements(paying)} -- a retry around "
+        "a signature is a double charge"
+    )
+    # And it still catches one, so the narrowing above did not blunt it.
+    assert loop_statements("  for i in 1 2 3; do\n    pay\n  done\n"), (
+        "the loop check no longer detects a loop"
     )
 
 
@@ -373,7 +384,7 @@ def test_a_settled_call_prints_the_transaction_link():
     pay_block = text[text.index("Paying for one real call"):]
     assert "booth.last_settlement" in pay_block, "the receipt is never read off the client"
     assert "https://basescan.org/tx/$TX" in pay_block
-    assert "sent no PAYMENT-RESPONSE receipt" in pay_block
+    assert "no PAYMENT-RESPONSE receipt came back" in pay_block
 
 
 def test_a_non_json_response_shows_the_status_and_the_body():
@@ -772,3 +783,85 @@ def test_somebody_elses_entry_is_not_counted_as_ours():
         "documented limit: substring matching accepts this; the count is a "
         "delta against a pre-payment baseline, so it cannot silently pass"
     )
+
+
+# --- A delivered audit is not a paid one ------------------------------------
+
+
+def _settlement_verdict(result_json, spent="0.0300", tx=""):
+    """Drive the script's post-payment branch over one audit body.
+
+    Extracted and run standalone: reaching it for real costs $0.03 and needs
+    a facilitator, and this is the branch that decides whether the owner is
+    told revenue started.
+    """
+    text = SCRIPT.read_text()
+    start = text.index("SPENT=$(printf '%s' \"$PAID\" | cut -f2)")
+    end = text.index('step "Re-reading the Bazaar index"')
+    block = text[start:end]
+    prog = (
+        "PAID=$(printf '%%s\\t%%s\\t%%s\\t%%s' OK %s %s %s)\n"
+        "SCRIPT_DIR=/repo\nPAY_TO=0xabc\n"
+        "ok()   { printf 'OK %%s\\n' \"$1\"; }\n"
+        "warn() { printf 'NOTE %%s\\n' \"$1\"; }\n"
+        "%s" % (shlex.quote(spent), shlex.quote(tx or ""),
+                shlex.quote(result_json), block)
+    )
+    return subprocess.run(["bash", "-c", prog], capture_output=True, text=True)
+
+
+FAILED_BODY = ('{"status": "ok", "pass": true, "billing_warning": "payment '
+               'settlement failed after the audit ran; this call was not charged"}')
+
+
+def test_a_refused_settle_is_never_reported_as_settled():
+    """The node delivers the audit anyway -- deliberately, the lesser evil
+    versus charging for undelivered work -- and admits it in billing_warning.
+    Reading only the HTTP status turns that admission into a success report.
+    On 2026-09-08 this script printed `settled $0.03 and the audit returned a
+    result` directly above a body saying the call was not charged, and the
+    owner was told revenue had started when no money had moved."""
+    r = _settlement_verdict(FAILED_BODY)
+    assert r.returncode == 1, "a call that was not paid for must not exit 0"
+    assert "OK settled" not in r.stdout, "it still claims a settlement that did not happen"
+    assert "NOT paid" in r.stdout
+    # And it must hand over the one line that explains why.
+    assert "settle REFUSED" in r.stdout, "the log line that names the reason is not offered"
+
+
+def test_a_refused_settle_does_not_blame_the_deployed_revision():
+    """A settle that never happened has no hash to report. Blaming the
+    deployed revision for the missing receipt sends the reader off to rebuild
+    a node that is working."""
+    r = _settlement_verdict(FAILED_BODY)
+    assert "predates" not in r.stdout, (
+        "a refused settle is being reported as a stale deployment"
+    )
+
+
+def test_a_pending_settle_says_the_call_IS_charged():
+    """Pending is not free. Telling someone their call was not charged when
+    the transfer is in flight invites a second payment for one audit."""
+    r = _settlement_verdict('{"billing_warning": "payment settlement is pending '
+                            'on-chain (transaction 0xdead); this call is being charged"}')
+    assert r.returncode == 0
+    assert "IS charged" in r.stdout
+    assert "do not pay again" in r.stdout.lower()
+
+
+def test_an_unknown_settle_warns_against_re_running():
+    """The transfer may still land. A re-run here is how one audit gets paid
+    for twice."""
+    r = _settlement_verdict('{"billing_warning": "payment settlement status is '
+                            'unknown: the facilitator did not answer in time"}')
+    assert r.returncode == 0
+    assert "pay twice" in r.stdout
+
+
+def test_a_clean_body_still_reports_a_settlement():
+    """The guard must not swallow the case it exists to let through."""
+    r = _settlement_verdict('{"status": "ok", "pass": true, "violations": []}',
+                            tx="0xfeed")
+    assert r.returncode == 0
+    assert "OK settled $0.0300" in r.stdout
+    assert "basescan.org/tx/0xfeed" in r.stdout

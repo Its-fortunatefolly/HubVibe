@@ -684,18 +684,65 @@ esac
 
 SPENT=$(printf '%s' "$PAID" | cut -f2)
 TX=$(printf '%s' "$PAID" | cut -f3)
-ok "settled \$$SPENT and the audit returned a result"
-printf '%s\n' "$PAID" | cut -f4- | sed 's/^/        /'
+RESULT=$(printf '%s' "$PAID" | cut -f4-)
+
+# A 200 with an audit in it is NOT the same as having been charged for it.
+#
+# The node finishes and delivers an audit whose settlement failed -- on
+# purpose, as the lesser evil versus charging for undelivered work -- and
+# admits it in `billing_warning` on the body it returns. Reading only the
+# HTTP status and announcing "settled" converts that admission into a
+# success report. On 2026-09-08 this script printed `settled $0.03 and the
+# audit returned a result` directly above a body reading "payment settlement
+# failed after the audit ran; this call was not charged", and the owner was
+# told revenue had started when no money had moved at all.
+#
+# The body is the authority on whether we were paid. Read it first.
+case "$RESULT" in
+  *"settlement failed after the audit ran"*)
+    printf '  \033[31mSTOP\033[0m  the audit ran and was delivered, but the node was NOT paid:\n'
+    printf '%s\n' "$RESULT" | sed 's/^/        /'
+    printf '\n  \033[1mVerify passed and settle was refused.\033[0m The signature, the\n'
+    printf '  rail, the route and the audit all work -- the facilitator declined\n'
+    printf '  the transfer AFTER the work was done, so nothing moved and nothing\n'
+    printf '  can be indexed. The node logged the reason; it is the only thing\n'
+    printf '  that separates a facilitator outage from a wallet drained between\n'
+    printf '  verify and settle:\n\n'
+    printf '    cd %s/../deploy/vps && docker compose logs --since 1h 2>&1 \\\n' "$SCRIPT_DIR"
+    printf '      | grep "settle REFUSED" | tail -5\n\n'
+    printf '  That line names the facilitator and the error. Fix that, then run\n'
+    printf '  this again -- the wallet still holds the money, so nothing is lost.\n'
+    exit 1
+    ;;
+  *"settlement is pending on-chain"*)
+    warn "settled, but the transfer is not confirmed yet -- this call IS charged."
+    warn "the receipt header carries the hash; do not pay again."
+    ;;
+  *"settlement status is unknown"*)
+    warn "the facilitator did not answer the settle in time. The transfer may"
+    warn "still complete on-chain -- do NOT re-run this until you know, or you"
+    warn "may pay twice for one call. Check the wallet first."
+    ;;
+  *)
+    ok "settled \$$SPENT and the audit returned a result"
+    ;;
+esac
+printf '%s\n' "$RESULT" | sed 's/^/        /'
 
 # The receipt is the proof. A settled payment has a transaction hash, and
 # the node hands it back in the PAYMENT-RESPONSE header (x402 spec step 10).
 # Print the explorer link for it, so "did the money move" is one tap and not
-# a wallet-app hunt. A node whose deployed revision predates the receipt
-# sends no header; say so rather than printing an empty link.
+# a wallet-app hunt.
 if [ -n "$TX" ]; then
   ok "on-chain: https://basescan.org/tx/$TX"
 else
-  warn "the node sent no PAYMENT-RESPONSE receipt (deployed revision predates it)."
+  # There are two reasons for no header, and they are not close: a settle
+  # that never happened has no hash to report, and blaming the deployed
+  # revision for that sends the reader to rebuild a node that is fine. Only
+  # say "old revision" once the body has confirmed we WERE paid.
+  warn "no PAYMENT-RESPONSE receipt came back. If the body above reports no"
+  warn "billing problem, the deployed revision predates the receipt header"
+  warn "(rebuild: cd deploy/vps && docker compose up -d --build)."
   warn "look for the transfer at https://basescan.org/address/$PAY_TO"
 fi
 

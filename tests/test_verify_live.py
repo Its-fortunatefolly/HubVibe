@@ -568,16 +568,33 @@ def test_the_checker_verifies_the_node_it_was_ASKED_to_verify():
     assert 'BASE="${1:-${BASE:-' in text, "BASE is not read from the environment"
 
     def target(env=None, args=()):
-        # The header line names what it is about to check; reading it needs
-        # no network, so this works in a sandbox that can reach nothing.
-        out = subprocess.run(
-            ["bash", str(script), *args], capture_output=True, text=True, timeout=120,
+        # The header line names what it is about to check, and it is printed
+        # before the first network call -- so read that line and stop, rather
+        # than waiting for a full live verification to finish.
+        #
+        # Waiting was the bug. This asserts one thing about argument parsing,
+        # and waiting made it depend on whether a live node answers and on how
+        # long 25 probes take. On the CI runner, which reaches nothing, the
+        # retry backoff on the FIRST probe alone ran past the timeout, and the
+        # test failed for a reason it does not test (2026-09-08). Killing the
+        # process at the header makes it deterministic and near-instant
+        # everywhere.
+        proc = subprocess.Popen(
+            ["bash", str(script), *args], stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True,
             env={"PATH": "/usr/bin:/bin", "HOME": "/tmp", **(env or {})},
-        ).stdout
-        for line in out.splitlines():
-            if "live verification:" in line:
-                return line.split("live verification:")[1].strip()
-        raise AssertionError(f"no target line in output: {out[:300]}")
+        )
+        seen = []
+        try:
+            for line in proc.stdout:
+                seen.append(line)
+                if "live verification:" in line:
+                    return line.split("live verification:")[1].strip()
+            raise AssertionError(f"no target line in output: {''.join(seen)[:300]}")
+        finally:
+            proc.kill()
+            proc.stdout.close()
+            proc.wait(timeout=30)
 
     assert target(env={"BASE": "http://127.0.0.1:18080"}) == "http://127.0.0.1:18080"
     # A positional argument still wins, so existing habits keep working.

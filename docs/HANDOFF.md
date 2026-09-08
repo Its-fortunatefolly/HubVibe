@@ -36,24 +36,35 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - **Rails live on the node:** x402 only. Stripe/MPP are unset on the box, so
   `other_rails` is `[]` and no key can be bought; the code keeps those rails
   fail-closed until their variables are exported.
-- **First paid call: MADE, 2026-09-08.** The owner funded the payer and ran
-  the script; it reached `Re-reading the Bazaar index`, a step the script
-  only executes after `settled $… and the audit returned a result`. So the
-  settle path is exercised and revenue is no longer zero. **Not yet
-  corroborated on-chain here** — the sandbox cannot reach Basescan or a Base
-  RPC; the receipt line the run printed (`on-chain: basescan.org/tx/…`) is
-  the proof, and `scripts/payment-status.sh` reads the node's own ledger.
-  What is unresolved is indexing: the run's last line reported no new entry.
-  The box is on Dexter (confirmed 2026-09-07), so the index read was the
-  right one. The check itself was the weaker link — it matched the pay-to
-  address **case-sensitively** and looked for nothing else, so a facilitator
-  storing the address lowercased, or keying its record by resource URL,
-  reads as "not indexed" and is indistinguishable from never being listed.
-  Fixed: the script now matches case-insensitively, accepts the host, and
-  reads the index belonging to the node's own `X402_FACILITATOR_URL` rather
-  than a compiled-in default. **Re-check before assuming anything:**
-  `curl -s https://x402.dexter.cash/discovery/resources | grep -ci 'hubvibe-io.com\|0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd'`
-  A non-zero count means we are listed and only the old check was wrong.
+- **First paid call: ATTEMPTED 2026-09-08, and it did NOT settle.** Revenue
+  is still zero. The owner funded the payer and ran the script. Verify
+  passed, the audit ran and was delivered — and the node's own response body
+  carried
+  `billing_warning: payment settlement failed after the audit ran; this call
+  was not charged`. So everything up to settle is proven for the first time
+  (signature, facilitator verify, route, audit) and **settle is the one step
+  still unexercised.** The node delivers an unpaid audit on purpose (the
+  lesser evil versus charging for undelivered work) and flags it; that flag
+  is the authority on whether money moved.
+  **Next, on the box — the reason is in the node's log:**
+  `cd /root/HubVibe/deploy/vps && docker compose logs --since 2h 2>&1 | grep "settle REFUSED" | tail -5`
+  That line names the facilitator and the error, which is the only thing
+  separating a facilitator problem from the payer's balance moving between
+  verify and settle. The wallet still holds the money.
+  Two of our own tools lied about this run and are fixed: the script
+  announced `settled $0.03` while printing that body (it read the HTTP
+  status, never the body — it now exits 1 and says the node was not paid),
+  and it blamed the missing PAYMENT-RESPONSE receipt on a stale deployment
+  when a settle that never happened simply has no hash (that would have sent
+  the owner rebuilding a healthy node).
+- **Bazaar indexing is downstream of that**, so its zero is expected for
+  now. The index CHECK was independently wrong and is fixed: it matched the
+  pay-to address case-sensitively and looked for nothing else, so a
+  facilitator storing the address lowercased, or keying its record by
+  resource URL, reads as "not indexed" indistinguishably from never being
+  listed. It now matches case-insensitively, accepts the host, and reads the
+  index belonging to the node's own `X402_FACILITATOR_URL` instead of a
+  compiled-in default.
 - **The payer wallet.** The throwaway `0x5bce…5d06` is retired (owner's
   instruction). The payer
   is now `0x104feA79F30b4fB4Da86B6D65951217F914bdd35`, created on the box by
@@ -63,8 +74,9 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   `~/.hubvibe-wallet-key` (`HUBVIBE_WALLET_FILE` overrides). To prove the
   box controls it:
   `~/.hubvibe-venv/bin/python -c "from eth_account import Account; print(Account.from_key(open('/root/.hubvibe-wallet-key').read().strip()).address)"`.
-  It is funded and it has paid once. Top it up with ~$0.25 USDC **on Base**
-  before each further call. The payer needs no ETH — it
+  It is funded and its money is still there — the 2026-09-08 attempt was
+  refused at settle, so nothing left the wallet. Keep ~$0.25 USDC **on
+  Base** in it per attempt. The payer needs no ETH — it
   signs off-chain and the facilitator pays the gas — but the transfer that
   funds it is an ordinary send out of the owner's own wallet, which covers
   its own gas like any other transfer; that distinction is the one the
