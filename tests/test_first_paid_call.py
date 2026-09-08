@@ -825,8 +825,11 @@ def test_a_refused_settle_is_never_reported_as_settled():
     assert r.returncode == 1, "a call that was not paid for must not exit 0"
     assert "OK settled" not in r.stdout, "it still claims a settlement that did not happen"
     assert "NOT paid" in r.stdout
-    # And it must hand over the one line that explains why.
-    assert "settle REFUSED" in r.stdout, "the log line that names the reason is not offered"
+    # And it must hand over the command that finds the reason. The pattern
+    # itself is pinned against the module's log lines by
+    # test_the_settle_diagnostic_matches_every_failure_log; here it only has
+    # to be offered at all.
+    assert "x402 settle" in r.stdout, "the log query that names the reason is not offered"
 
 
 def test_a_refused_settle_does_not_blame_the_deployed_revision():
@@ -865,3 +868,59 @@ def test_a_clean_body_still_reports_a_settlement():
     assert r.returncode == 0
     assert "OK settled $0.0300" in r.stdout
     assert "basescan.org/tx/0xfeed" in r.stdout
+
+
+def test_the_settle_diagnostic_matches_every_failure_log():
+    """A grep is only as good as the string the code actually prints.
+
+    settle_sync fails three ways and logs three different sentences:
+    "x402 settle REFUSED after delivery", "x402 settle TIMED OUT after
+    delivery", and -- via _log_rejection on the generic except -- "x402
+    settle FAILED before the facilitator could answer". On 2026-09-08 the
+    owner was handed `grep "settle REFUSED"` for a run whose body said
+    settlement FAILED. It printed nothing, which reads as "the node logged
+    no failure" rather than "you asked for the wrong sentence", and the box
+    looked broken when it was working exactly as written.
+
+    So: whatever this script tells the owner to grep must match ALL THREE
+    lines as the code emits them. Both sides are read off their files.
+    """
+    script = SCRIPT.read_text()
+    module = (REPO_ROOT / "wcag-audit-engine" / "app" / "x402_payments.py").read_text()
+
+    # The pattern the script hands over, taken out of the command it prints.
+    printed = re.search(r'grep -i "([^"]+)" \| tail', script)
+    assert printed, "the script no longer prints a greppable settle diagnostic"
+    pattern = printed.group(1).lower()
+
+    # Every settle-failure sentence, taken out of the module. The stage is a
+    # %s at the logging call, so reconstruct it the way logging would.
+    sentences = [
+        line.strip().strip('"').replace("x402 %s ", "x402 settle ")
+        for line in module.splitlines()
+        if '"x402 %s ' in line or '"x402 settle ' in line
+    ]
+    failures = [s for s in sentences if any(
+        w in s for w in ("REFUSED", "TIMED OUT", "FAILED", "REJECTED"))]
+    assert len(failures) >= 3, (
+        f"expected at least three settle/verify failure log lines, found {failures}"
+    )
+
+    missed = [s for s in failures if pattern not in s.lower()]
+    assert not missed, (
+        f"the script tells the owner to grep {pattern!r}, which does not match: "
+        f"{missed} -- an unmatched failure logs silence and reads as no failure"
+    )
+
+
+def test_the_diagnostic_does_not_depend_on_the_compose_project_name():
+    """`docker compose logs` run from a directory whose project name does not
+    match the running stack prints nothing and exits 0 -- the same silence as
+    a real absence of matching lines. Offer a fallback that asks the daemon
+    directly, so an empty first answer can be told apart from a wrong one."""
+    script = SCRIPT.read_text()
+    block = script[script.index("settlement failed after the audit ran"):]
+    block = block[:block.index("exit 1")]
+    assert "docker ps -qf" in block and "docker logs" in block, (
+        "no compose-independent fallback is offered for reading the node's log"
+    )

@@ -702,16 +702,30 @@ case "$RESULT" in
   *"settlement failed after the audit ran"*)
     printf '  \033[31mSTOP\033[0m  the audit ran and was delivered, but the node was NOT paid:\n'
     printf '%s\n' "$RESULT" | sed 's/^/        /'
-    printf '\n  \033[1mVerify passed and settle was refused.\033[0m The signature, the\n'
-    printf '  rail, the route and the audit all work -- the facilitator declined\n'
-    printf '  the transfer AFTER the work was done, so nothing moved and nothing\n'
-    printf '  can be indexed. The node logged the reason; it is the only thing\n'
-    printf '  that separates a facilitator outage from a wallet drained between\n'
-    printf '  verify and settle:\n\n'
-    printf '    cd %s/../deploy/vps && docker compose logs --since 1h 2>&1 \\\n' "$SCRIPT_DIR"
-    printf '      | grep "settle REFUSED" | tail -5\n\n'
-    printf '  That line names the facilitator and the error. Fix that, then run\n'
-    printf '  this again -- the wallet still holds the money, so nothing is lost.\n'
+    printf '\n  \033[1mVerify passed; the settle did not complete.\033[0m The signature,\n'
+    printf '  the rail, the route and the audit all work. Nothing moved after the\n'
+    printf '  work was delivered, so nothing can be indexed either. The node\n'
+    printf '  logged WHICH of three ways it failed, and they are different\n'
+    printf '  problems with different fixes:\n\n'
+    # `x402 settle` is the only token common to all three failure lines --
+    # REFUSED (the facilitator said no), TIMED OUT (it never answered), and
+    # FAILED before the facilitator could answer (an exception on this side,
+    # logged through _log_rejection). Grep the wording of one and the other
+    # two return nothing, and empty output reads as "no failure was logged"
+    # rather than "wrong question asked". That happened on 2026-09-08: the
+    # owner was handed `grep "settle REFUSED"` for a run whose body said
+    # settlement FAILED, got silence, and the box looked broken.
+    # test_the_settle_diagnostic_matches_every_failure_log pins this string
+    # against x402_payments.py so the two cannot drift.
+    printf '    cd %s/../deploy/vps && docker compose logs --since 3h 2>&1 | grep -i "x402 settle" | tail -20\n\n' "$SCRIPT_DIR"
+    printf '  REFUSED  the facilitator declined the transfer.\n'
+    printf '  FAILED   the call never got an answer out of it -- our side.\n'
+    printf '  TIMED OUT  unknown; the money may yet move. Do NOT re-run on that\n'
+    printf '           one until you have checked the wallet.\n\n'
+    printf '  If compose finds no containers, ask docker directly:\n\n'
+    printf '    docker logs --since 3h $(docker ps -qf name=hubvibe | head -1) 2>&1 | grep -i x402 | tail -30\n\n'
+    printf '  On REFUSED or FAILED the wallet still holds the money; nothing is\n'
+    printf '  lost and re-running after the fix is safe.\n'
     exit 1
     ;;
   *"settlement is pending on-chain"*)
