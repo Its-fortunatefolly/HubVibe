@@ -41,8 +41,7 @@ inputs:
   api-key:
     description: >-
       HubVibe API key, passed as X-API-Key. Optional: without it the run stops on
-      the service's HTTP 402 payment challenge and prints how to pay. Get a key at
-      https://hubvibe-io.com/billing/checkout
+      the service's HTTP 402 payment challenge and prints how to pay.
     required: false
     default: ""
   wallet-key:

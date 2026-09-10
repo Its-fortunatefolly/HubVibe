@@ -130,9 +130,8 @@ def test_activation_is_idempotent_across_webhook_retries(monkeypatch, tmp_path):
     assert billing.lookup_key(first)["plan"] == "agency"
 
 
-def test_leads_and_reports_survive_the_round_trip(monkeypatch, tmp_path):
+def test_reports_survive_the_round_trip(monkeypatch, tmp_path):
     billing = _load_billing(monkeypatch, tmp_path)
-    billing.save_lead("https://example.com", "a@example.com", 4)
     billing.save_report("sess_1", "https://example.com", {"pass": True})
     report = billing.load_report("sess_1")
     assert report["url"] == "https://example.com"

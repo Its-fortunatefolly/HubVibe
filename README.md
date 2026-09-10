@@ -51,8 +51,9 @@ Gate a promotion on it:
   run: ./deploy-production.sh
 ```
 
-Keys come from [`/billing/checkout`](https://hubvibe-io.com/billing/checkout).
-Or skip the key entirely — see the second way in.
+A key is prepaid, not a subscription: it is bought with the MPP top-up rail
+where that rail is live, and spent per call at the same rates. Or skip the key
+entirely — see the second way in.
 
 ## 2 — Point your agent at it: no key, no signup, pay per call
 
@@ -100,9 +101,11 @@ with a null recipient, so a paying agent never builds a payment that cannot
 land.
 
 **How machines find this node without being told the URL:** every 402
-carries x402 Bazaar discovery data, so facilitators index it by capability
-and price; the MCP endpoint at [`/mcp`](https://hubvibe-io.com/mcp)
-is listed in the official registry as `io.github.Its-fortunatefolly/hubvibe`;
+carries x402 Bazaar discovery data, so the facilitator catalogs this node by
+capability and price on the payment that settles through it — the spec has no
+other ingestion path; the [`/mcp`](https://hubvibe-io.com/mcp) endpoint is
+published in the official MCP registry as
+`io.github.Its-fortunatefolly/hubvibe`;
 and [`/.well-known/agent.json`](https://hubvibe-io.com/.well-known/agent.json)
 is generated from the same catalog the routes charge from, so the advertised
 price is the charged price by construction.
@@ -123,7 +126,7 @@ Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
 
 Three rails, all fail-closed — no valid credential means no audit runs:
 
-- **`X-API-Key`** — subscription key from `/billing/checkout`
+- **`X-API-Key`** — prepaid key, bought with the MPP top-up rail where it is live
 - **`X-PAYMENT`** — x402
 - **`Authorization: Payment ...`** — MPP (Stripe Shared Payment Tokens for
   fiat, or Tempo for crypto)

@@ -189,7 +189,7 @@ def human_plans_live() -> list:
 _db = None
 
 # Which store holds the api_key -> record mapping (and prepaid balances,
-# quotas, leads, reports). "firestore" is the Cloud Run deployment's store
+# quotas, reports). "firestore" is the Cloud Run deployment's store
 # and the default; "sqlite" backs the same operations with one local file
 # (KEY_STORE_SQLITE_PATH), which is what makes this service deployable on a
 # host that is not Google -- the per-call rails never needed Google, but the
@@ -418,27 +418,6 @@ def lookup_key(api_key: str) -> Optional[dict]:
     if not doc.exists or not doc.to_dict().get("active"):
         return None
     return doc.to_dict()
-
-
-def save_lead(url: str, email: Optional[str], violation_count: int) -> None:
-    """Record a free-scan lead for manual follow-up.
-
-    Best-effort: callers should catch failures rather than let a storage
-    hiccup break the free scan response for the visitor. This only stores
-    what the visitor themself submitted through the scan form -- it's not
-    used to look up or contact anyone who didn't submit their own site/email.
-    """
-    import time
-
-    db = _firestore()
-    db.collection("leads").add(
-        {
-            "url": url,
-            "email": email,
-            "violation_count": violation_count,
-            "created_at": time.time(),
-        }
-    )
 
 
 def record_usage(customer_id: str, price_cents: int) -> None:

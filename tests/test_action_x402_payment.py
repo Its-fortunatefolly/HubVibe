@@ -29,9 +29,13 @@ ACTION = REPO_ROOT / "action.yml"
 _FAKE_KEY = "0x" + "11" * 32
 
 
-def _run(tmp_path, stub, **env_overrides):
-    """Run the payer with x402 stubbed out, in a scratch cwd."""
-    (tmp_path / "x402_stub.py").write_text(stub)
+def _run(tmp_path, **env_overrides):
+    """Run the payer with x402 stubbed out, in a scratch cwd.
+
+    The stubbing itself is `_with_sitecustomize`: CPython imports a
+    `sitecustomize` off PYTHONPATH before anything else, which is what gets
+    the fake x402 in place before the payer imports the real one.
+    """
     env = dict(os.environ)
     env.update(
         {
@@ -120,13 +124,6 @@ def _stub(status=200, text='{"pass": true}', post_body="pass"):
     return body + "\n"
 
 
-@pytest.fixture(autouse=True)
-def _install_stub(monkeypatch):
-    """The payer imports x402 at module scope inside main(); the stub has to be
-    on sys.path AND imported first, which a sitecustomize does for free."""
-    yield
-
-
 def _with_sitecustomize(tmp_path, stub):
     (tmp_path / "sitecustomize.py").write_text(stub)
     return tmp_path
@@ -134,7 +131,7 @@ def _with_sitecustomize(tmp_path, stub):
 
 def test_a_successful_payment_reports_the_status_and_writes_the_body(tmp_path):
     _with_sitecustomize(tmp_path, _stub(status=200, text='{"pass": true}'))
-    result = _run(tmp_path, _stub())
+    result = _run(tmp_path)
     assert result.stdout.strip().endswith("200"), result.stderr
     assert json.loads((tmp_path / "response.json").read_text())["pass"] is True
 
@@ -143,7 +140,7 @@ def test_the_per_call_cap_reaches_the_signer_as_a_spend_policy(tmp_path):
     """The cap has to bind BEFORE a signature exists. Checking the price after
     the fact is not a cap, it is a receipt."""
     _with_sitecustomize(tmp_path, _stub())
-    result = _run(tmp_path, _stub(), MAX_PRICE_USD="0.15")
+    result = _run(tmp_path, MAX_PRICE_USD="0.15")
     assert result.returncode == 0, result.stderr
     recorded = json.loads((tmp_path / "recorded.json").read_text())
     # USDC is 6 decimals: $0.15 -> 150000 atomic units.
@@ -153,7 +150,7 @@ def test_the_per_call_cap_reaches_the_signer_as_a_spend_policy(tmp_path):
 
 def test_a_different_cap_is_converted_not_hardcoded(tmp_path):
     _with_sitecustomize(tmp_path, _stub())
-    _run(tmp_path, _stub(), MAX_PRICE_USD="0.03")
+    _run(tmp_path, MAX_PRICE_USD="0.03")
     recorded = json.loads((tmp_path / "recorded.json").read_text())
     assert recorded["cap_atomic"] == 30000
 
@@ -162,7 +159,7 @@ def test_a_zero_or_negative_cap_refuses_to_pay(tmp_path):
     """An unbounded cap in someone else's CI is the one setting that can empty
     a wallet, so it fails closed rather than defaulting."""
     _with_sitecustomize(tmp_path, _stub())
-    result = _run(tmp_path, _stub(), MAX_PRICE_USD="0")
+    result = _run(tmp_path, MAX_PRICE_USD="0")
     assert result.stdout.strip() == "402"
     assert "greater than zero" in result.stderr
 
@@ -172,7 +169,7 @@ def test_a_bad_wallet_key_never_appears_in_the_log(tmp_path):
     private key -- or its length -- recoverable."""
     secret = "0xdeadbeef"
     _with_sitecustomize(tmp_path, _stub())
-    result = _run(tmp_path, _stub(), HUBVIBE_WALLET_KEY=secret)
+    result = _run(tmp_path, HUBVIBE_WALLET_KEY=secret)
     assert result.stdout.strip() == "402"
     assert "not a valid EVM private key" in result.stderr
     assert secret not in result.stderr
@@ -184,7 +181,7 @@ def test_a_payment_failure_reports_an_unpaid_call_not_a_crash(tmp_path):
     """A traceback would read as a broken action; it is an unpaid call, and the
     action already has a branch that says so usefully."""
     _with_sitecustomize(tmp_path, _stub(post_body="raise RuntimeError('facilitator said no')"))
-    result = _run(tmp_path, _stub())
+    result = _run(tmp_path)
     assert result.stdout.strip() == "402"
     assert "x402 payment failed" in result.stderr
     assert "Traceback" not in result.stderr
