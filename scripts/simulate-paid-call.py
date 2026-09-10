@@ -510,7 +510,6 @@ def main() -> int:
             # One worker thread: the thread the API-key audit poisons IS the
             # thread the paid call lands on. This is the #83 reproduction.
             "MAX_CONCURRENT_AUDITS": "1",
-            "PORT": str(node_port),
             "PYTHONUNBUFFERED": "1",
         }
     )
@@ -712,7 +711,7 @@ def main() -> int:
         node2_port = _free_port()
         env2 = dict(env)
         env2.pop("ALLOW_PRIVATE_TARGETS", None)
-        env2.update({"X402_FACILITATOR_URL": dead, "PUBLIC_BASE_URL": f"http://127.0.0.1:{node2_port}", "PORT": str(node2_port)})
+        env2.update({"X402_FACILITATOR_URL": dead, "PUBLIC_BASE_URL": f"http://127.0.0.1:{node2_port}"})
         node2_log = work / "node2.log"
         node2 = start_node(node2_port, env2, node2_log)
         try:

@@ -421,7 +421,15 @@ def test_the_listing_ships_a_complete_workflow_not_only_a_step(tmp_path):
     )
     assert "jobs:" in readme and "runs-on:" in readme
     assert ".github/workflows/" in readme, "say where the file goes"
-    assert "secrets.HUBVIBE_API_KEY" in readme
+
+    # The listing must lead with a payment path the reader can actually
+    # complete. A key cannot be bought on an x402-only deployment, so a
+    # quickstart built on `api-key` sends every Marketplace visitor to a
+    # doorway that answers 501 -- the wallet pays the 402 itself and needs
+    # no account, which is the whole premise of a machine-payable API.
+    assert "secrets.HUBVIBE_WALLET_KEY" in readme
+    assert "USDC on Base" in readme, "say how to fund the wallet the quickstart needs"
+    assert "api-key" in readme, "the prepaid-key alternative must still be documented"
 
 
 def test_the_shipped_workflow_calls_the_action_rather_than_curl():

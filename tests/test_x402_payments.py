@@ -176,20 +176,14 @@ def test_server_is_not_cached_when_initialize_fails(monkeypatch):
     assert module._server is None, "a server that failed to initialize was cached"
 
 
-def test_payment_required_body_is_empty_when_unconfigured(monkeypatch):
+def test_no_x402_is_offered_when_unconfigured(monkeypatch):
     module = _load_x402(monkeypatch, facilitator=None, pay_to=None)
-    assert module.payment_required_body(price="$0.03") == {}
     assert module.accepts_entry(price="$0.03") is None
 
 
-def test_payment_required_body_advertises_real_address_when_configured(monkeypatch):
+def test_accepts_entry_advertises_the_real_address_when_configured(monkeypatch):
     module = _load_x402(monkeypatch, pay_to=VALID_PAY_TO)
     _install_fake_server(monkeypatch, module)
-    body = module.payment_required_body(price="$0.03")
-
-    assert body["payTo"] == VALID_PAY_TO
-    assert body["accepted_payment_header"] == "X-PAYMENT"
-    assert body["price"] == "$0.03"
 
     entry = module.accepts_entry(price="$0.03")
     assert entry["scheme"] == "exact"
@@ -228,7 +222,6 @@ def test_a_malformed_pay_to_address_never_advertises_x402(monkeypatch, bad_addre
     module = _load_x402(monkeypatch, pay_to=bad_address)
 
     assert module.is_configured() is False
-    assert module.payment_required_body(price="$0.03") == {}
     assert module.accepts_entry(price="$0.03") is None
 
 
@@ -341,8 +334,12 @@ def _settlement(tx="0xtxhash", success=True, amount="30000"):
     return result, requirements
 
 
-def _capture_payment_intents(monkeypatch, module, *, boom=False):
-    """Intercept stripe.PaymentIntent.create inside the module under test."""
+def _capture_payment_intents(monkeypatch, *, boom=False):
+    """Intercept stripe.PaymentIntent.create.
+
+    Patches the shared `stripe` library object, not the module under test, so
+    it binds for whichever x402 module the caller loaded.
+    """
     import stripe
 
     calls = []
@@ -363,7 +360,7 @@ def test_a_settled_payment_is_recorded_as_a_stripe_payment_intent(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
     monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
+    calls = _capture_payment_intents(monkeypatch)
 
     result, requirements = _settlement(amount="30000")  # $0.03
     module.record_settlement_in_stripe(result, requirements)
@@ -384,7 +381,7 @@ def test_recording_is_idempotent_by_transaction_hash(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
     monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
+    calls = _capture_payment_intents(monkeypatch)
 
     result, requirements = _settlement(tx="0xsame")
     module.record_settlement_in_stripe(result, requirements)
@@ -399,7 +396,7 @@ def test_recording_failure_never_fails_the_settlement(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
     monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
-    _capture_payment_intents(monkeypatch, module, boom=True)
+    _capture_payment_intents(monkeypatch, boom=True)
     _install_fake_server(monkeypatch, module)
 
     pending = module.verify_only_sync("signed-payment", price="$0.03")
@@ -412,7 +409,7 @@ def test_settlement_still_succeeds_without_a_stripe_key(monkeypatch):
     into, and its payments must still settle."""
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
+    calls = _capture_payment_intents(monkeypatch)
     _install_fake_server(monkeypatch, module)
 
     pending = module.verify_only_sync("signed-payment", price="$0.03")
@@ -426,7 +423,7 @@ def test_a_failed_settlement_is_never_recorded(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
     monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
+    calls = _capture_payment_intents(monkeypatch)
 
     result, requirements = _settlement(success=False)
     module.record_settlement_in_stripe(result, requirements)
@@ -444,7 +441,7 @@ def test_an_unmapped_network_skips_recording_rather_than_guessing(monkeypatch):
     monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     monkeypatch.setenv("X402_NETWORK", "eip155:1")  # Ethereum mainnet, unmapped
     module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
+    calls = _capture_payment_intents(monkeypatch)
 
     result, requirements = _settlement()
     module.record_settlement_in_stripe(result, requirements)
@@ -458,7 +455,7 @@ def test_sub_cent_settlements_are_not_recorded(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
     monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
+    calls = _capture_payment_intents(monkeypatch)
 
     result, requirements = _settlement(amount="4000")  # $0.004
     module.record_settlement_in_stripe(result, requirements)
@@ -472,7 +469,7 @@ def test_settle_sync_records_after_a_successful_settle(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
     monkeypatch.setenv("X402_STRIPE_MIRROR", "1")
     module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
+    calls = _capture_payment_intents(monkeypatch)
     _install_fake_server(monkeypatch, module)
 
     pending = module.verify_only_sync("signed-payment", price="$0.03")
@@ -668,7 +665,7 @@ def test_the_stripe_mirror_is_off_unless_asked_for(monkeypatch, caplog):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_x")
     monkeypatch.delenv("X402_STRIPE_MIRROR", raising=False)
     module = _load_x402(monkeypatch)
-    calls = _capture_payment_intents(monkeypatch, module)
+    calls = _capture_payment_intents(monkeypatch)
     _install_fake_server(monkeypatch, module)
 
     with caplog.at_level(logging.INFO):

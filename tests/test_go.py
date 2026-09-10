@@ -31,7 +31,7 @@ def _address():
     return Account.from_key(KEY).address
 
 
-def _fake_rpc(tmp_path, balances):
+def _fake_rpc(balances):
     """A file:// 'RPC' is not possible -- urlopen POSTs. So run a real one.
 
     balances: list of USDC amounts served in order, last value repeating. The
@@ -97,7 +97,7 @@ def _stub_first_paid_call(tmp_path):
 
 def test_it_pays_immediately_when_the_wallet_is_already_funded(tmp_path):
     """No waiting when there is nothing to wait for."""
-    server, rpc = _fake_rpc(tmp_path, [1.0])
+    server, rpc = _fake_rpc([1.0])
     try:
         script, marker = _stub_first_paid_call(tmp_path)
         result = subprocess.run(
@@ -114,7 +114,7 @@ def test_it_pays_immediately_when_the_wallet_is_already_funded(tmp_path):
 def test_it_waits_then_pays_when_the_money_lands(tmp_path):
     """The whole point: the owner sends the money whenever, and the box
     notices and makes the call without them present."""
-    server, rpc = _fake_rpc(tmp_path, [0.0, 0.0, 0.25])
+    server, rpc = _fake_rpc([0.0, 0.0, 0.25])
     try:
         script, marker = _stub_first_paid_call(tmp_path)
         result = subprocess.run(
@@ -149,7 +149,7 @@ def test_an_unreadable_chain_never_reads_as_funded(tmp_path):
 def test_it_gives_up_without_spending_when_no_money_arrives(tmp_path):
     """A timeout is not a failure to report darkly -- say nothing was spent
     and how to resume."""
-    server, rpc = _fake_rpc(tmp_path, [0.0])
+    server, rpc = _fake_rpc([0.0])
     try:
         script, marker = _stub_first_paid_call(tmp_path)
         result = subprocess.run(
@@ -167,7 +167,7 @@ def test_it_gives_up_without_spending_when_no_money_arrives(tmp_path):
 def test_a_balance_under_the_price_does_not_trigger_a_call(tmp_path):
     """$0.02 cannot pay for a $0.03 call. Trying anyway burns the run and
     hands back a facilitator refusal instead of an answer."""
-    server, rpc = _fake_rpc(tmp_path, [0.02])
+    server, rpc = _fake_rpc([0.02])
     try:
         script, marker = _stub_first_paid_call(tmp_path)
         result = subprocess.run(
@@ -203,7 +203,7 @@ def test_google_cloud_shell_is_refused_before_a_wallet_can_be_made(tmp_path, mar
 
 def test_it_never_generates_a_second_wallet_over_an_existing_one(tmp_path):
     """The existing key may hold funds. Overwriting it destroys them."""
-    server, rpc = _fake_rpc(tmp_path, [1.0])
+    server, rpc = _fake_rpc([1.0])
     try:
         script, _ = _stub_first_paid_call(tmp_path)
         env = _env(tmp_path, rpc)
