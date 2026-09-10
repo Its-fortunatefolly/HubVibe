@@ -1967,6 +1967,12 @@ class _FakePage:
         fake_response = type("R", (), {"headers": {"content-length": "100"}})()
         handler(fake_response)
 
+    def route(self, pattern, handler):
+        # The real Page has this, and every navigation now installs a request
+        # guard through it. A double without it would make the guard look
+        # optional here while being mandatory in production.
+        self.routed = (pattern, handler)
+
     def goto(self, url, **kwargs):
         return None
 

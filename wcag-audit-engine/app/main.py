@@ -1079,40 +1079,13 @@ _BLOCKED_TARGET_HOSTS = {"localhost", "metadata", "metadata.google.internal"}
 
 
 def _target_url_problem(url: Optional[str]) -> Optional[str]:
-    """Why `url` must not be fetched, or None when it may be."""
-    import ipaddress
-    import socket
-    from urllib.parse import urlparse
+    """Why `url` must not be fetched, or None when it may be.
 
-    if not url:
-        return None
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return "is not a valid URL"
-    if parsed.scheme not in ("http", "https"):
-        return "must start with http:// or https://"
-    host = (parsed.hostname or "").lower().rstrip(".")
-    if not host:
-        return "has no host"
-    if _ALLOW_PRIVATE_TARGETS:
-        return None
-    if host in _BLOCKED_TARGET_HOSTS or host.endswith(".internal") or host.endswith(".localhost"):
-        return "points at an internal host, which this service will not fetch"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, UnicodeError, OverflowError):
-        return "does not resolve to any address"
-    for info in infos:
-        raw = str(info[4][0]).split("%")[0]
-        try:
-            address = ipaddress.ip_address(raw)
-        except ValueError:
-            return "resolves to an unparseable address"
-        if not address.is_global:
-            return "resolves to a private, loopback, link-local or reserved address, which this service will not fetch"
-    return None
+    Delegates to audits.blocked_target_reason, which is also what every
+    redirect hop is checked against. Two copies of this rule would drift, and
+    the copy that drifts is the one guarding the fetch.
+    """
+    return audits.blocked_target_reason(url)
 
 
 def _reject_unfetchable_target(url: Optional[str]) -> Optional[JSONResponse]:
@@ -1178,7 +1151,7 @@ def _rate_limited_response() -> JSONResponse:
 def _run_axe(html: Optional[str], url: Optional[str]) -> dict:
     def _audit(page) -> dict:
         if url:
-            page.goto(url, wait_until="networkidle", timeout=15000)
+            audits.goto_guarded(page, url, wait_until="networkidle", timeout=15000)
         else:
             page.set_content(html, wait_until="networkidle", timeout=15000)
         return _axe.run(page, options=AXE_OPTIONS).response
@@ -1211,7 +1184,7 @@ def _run_axe_and_performance(url: str):
 
     def _both(page):
         page.on("response", _on_response)
-        page.goto(url, wait_until="networkidle", timeout=30000)
+        audits.goto_guarded(page, url, wait_until="networkidle", timeout=30000)
         dom_node_count = page.evaluate("document.querySelectorAll('*').length")
         # axe runs against the already-loaded page rather than reloading it.
         return _axe.run(page, options=AXE_OPTIONS).response, dom_node_count

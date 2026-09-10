@@ -96,6 +96,61 @@ class _SEOParser(HTMLParser):
             self.title += data
 
 
+class TargetNotFetchable(Exception):
+    """A hop in this fetch pointed somewhere this service will not go."""
+
+
+_BLOCKED_TARGET_HOSTS = {"localhost", "metadata", "metadata.google.internal"}
+_MAX_REDIRECTS = 5
+
+
+def blocked_target_reason(url: Optional[str]) -> Optional[str]:
+    """Why `url` must not be fetched, or None when it may be.
+
+    The single implementation behind both the pre-payment gate in main.py and
+    the per-hop checks below, so the two can never disagree about what is
+    reachable. Reads ALLOW_PRIVATE_TARGETS per call rather than at import, so a
+    reloaded module and a patched environment both see the truth.
+    """
+    import ipaddress
+    import os
+    import socket
+    from urllib.parse import urlparse
+
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "is not a valid URL"
+    if parsed.scheme not in ("http", "https"):
+        return "must start with http:// or https://"
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        return "has no host"
+    if os.environ.get("ALLOW_PRIVATE_TARGETS") == "1":
+        return None
+    if host in _BLOCKED_TARGET_HOSTS or host.endswith(".internal") or host.endswith(".localhost"):
+        return "points at an internal host, which this service will not fetch"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, OverflowError):
+        return "does not resolve to any address"
+    for info in infos:
+        raw = str(info[4][0]).split("%")[0]
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            return "resolves to an unparseable address"
+        if not address.is_global:
+            return (
+                "resolves to a private, loopback, link-local or reserved address, "
+                "which this service will not fetch"
+            )
+    return None
+
+
 def fetch_once(url: str):
     """One HTTP GET whose response can serve several audits.
 
@@ -104,10 +159,80 @@ def fetch_once(url: str):
     URL. Fetching separately doubles the load we put on the site being
     audited for no new information, and a bundle that hits a stranger's
     origin four times per call is how an audit bot earns itself a block.
+
+    Redirects are followed BY HAND, re-checking every hop. httpx's own
+    follow_redirects=True made the caller's URL the only address this service
+    ever validated: a public host answering `302 Location:
+    http://169.254.169.254/...` walked the fetch straight past the gate and
+    into the deployment, which is the proxy the gate exists to refuse. The
+    destination is what decides, and it is known only one hop at a time.
     """
-    return httpx.get(
-        url, timeout=_HTTP_TIMEOUT, follow_redirects=True, headers={"User-Agent": USER_AGENT}
-    )
+    seen = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        problem = blocked_target_reason(seen)
+        if problem is not None:
+            raise TargetNotFetchable(f"redirected to a URL that {problem}")
+        response = httpx.get(
+            seen,
+            timeout=_HTTP_TIMEOUT,
+            follow_redirects=False,
+            headers={"User-Agent": USER_AGENT},
+        )
+        # Read the status rather than httpx's is_redirect: this must decide
+        # correctly for a stubbed response too, and an attribute that is
+        # merely present would read as "redirect" on any mock.
+        if getattr(response, "status_code", None) not in (301, 302, 303, 307, 308):
+            return response
+        try:
+            location = response.headers.get("location")
+        except Exception:
+            location = None
+        if not location:
+            return response
+        seen = str(httpx.URL(seen).join(location))
+    raise TargetNotFetchable(f"followed more than {_MAX_REDIRECTS} redirects")
+
+
+def goto_guarded(page, url: str, **goto_kwargs):
+    """Navigate `page` to `url` with every request checked, not just the first.
+
+    Chromium follows redirects itself, so a gate on the caller's URL stopped at
+    hop one exactly as httpx did. A route handler is the only place the browser
+    lets us see each destination before it is fetched, so it decides per
+    request and aborts anything this service will not reach. Subresources go
+    through the same check: a page that cannot navigate to the metadata
+    endpoint can still ask for it with an <img> or a fetch().
+
+    Hosts are resolved once per page and remembered, so a page with a hundred
+    images costs one lookup per distinct host rather than a hundred.
+    """
+    problem = blocked_target_reason(url)
+    if problem is not None:
+        raise TargetNotFetchable(f"target {problem}")
+
+    verdicts = {}
+
+    def _route(route):
+        try:
+            from urllib.parse import urlparse
+
+            request_url = route.request.url
+            host = (urlparse(request_url).hostname or "").lower()
+            if host not in verdicts:
+                verdicts[host] = blocked_target_reason(request_url)
+            if verdicts[host] is not None:
+                route.abort()
+                return
+            route.continue_()
+        except Exception:
+            # A guard that errors must not become a guard that allows.
+            try:
+                route.abort()
+            except Exception:
+                pass
+
+    page.route("**/*", _route)
+    return page.goto(url, **goto_kwargs)
 
 
 def run_seo_audit(html: Optional[str], url: Optional[str], response=None) -> dict:
@@ -350,7 +475,7 @@ def run_performance_audit(url: Optional[str]) -> dict:
 
     def _measure(page) -> int:
         page.on("response", _on_response)
-        page.goto(url, wait_until="networkidle", timeout=30000)
+        goto_guarded(page, url, wait_until="networkidle", timeout=30000)
         return page.evaluate("document.querySelectorAll('*').length")
 
     # Pooled browser, fresh isolated context per call -- see browser_pool.

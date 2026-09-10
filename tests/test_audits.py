@@ -171,3 +171,103 @@ def test_performance_audit_gets_an_isolated_context_not_a_shared_cache():
     # A per-call context is what provides isolation; assert we asked for one
     # with our own user agent rather than reusing a default shared page.
     assert seen.get("user_agent") == audits._USER_AGENT
+
+
+# --- redirect safety -----------------------------------------------------
+
+
+def _redirector(location):
+    """A server whose only job is to hand back one 302 to `location`."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("content-length", "0")
+            self.end_headers()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, "http://127.0.0.1:%d/" % server.server_address[1]
+
+
+def _ok_server(body=b"<html><title>t</title></html>"):
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("content-type", "text/html")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, "http://127.0.0.1:%d/" % server.server_address[1]
+
+
+def test_fetch_once_rechecks_every_redirect_hop(monkeypatch):
+    """The target gate validated the caller's URL and nothing after it, while
+    httpx followed redirects itself. A public host answering `302 Location:
+    http://169.254.169.254/...` therefore walked the fetch past the gate and
+    into the deployment -- the exact proxy the gate exists to refuse.
+
+    Here hop 1 is allowed and hop 2 is not, so the only way to pass is to
+    check the destination rather than the request.
+    """
+    secret, secret_url = _ok_server(b"<html><title>internal</title></html>")
+    redirector, entry = _redirector(secret_url)
+    try:
+        seen = []
+
+        def _fake_reason(url):
+            seen.append(url)
+            if url and url.startswith(secret_url):
+                return "resolves to a private, loopback, link-local or reserved address"
+            return None
+
+        monkeypatch.setattr(audits, "blocked_target_reason", _fake_reason)
+
+        with pytest.raises(audits.TargetNotFetchable):
+            audits.fetch_once(entry)
+
+        assert any(u.startswith(secret_url) for u in seen), (
+            "the redirect destination was never checked"
+        )
+    finally:
+        redirector.shutdown()
+        redirector.server_close()
+        secret.shutdown()
+        secret.server_close()
+
+
+def test_fetch_once_still_follows_an_allowed_redirect():
+    """The guard must not break ordinary sites: a plain 302 between two
+    permitted addresses still lands on the final response."""
+    target, target_url = _ok_server(b"<html><title>landed</title></html>")
+    redirector, entry = _redirector(target_url)
+    try:
+        import os
+
+        os.environ["ALLOW_PRIVATE_TARGETS"] = "1"
+        try:
+            response = audits.fetch_once(entry)
+        finally:
+            os.environ.pop("ALLOW_PRIVATE_TARGETS", None)
+        assert response.status_code == 200
+        assert b"landed" in response.content
+    finally:
+        redirector.shutdown()
+        redirector.server_close()
+        target.shutdown()
+        target.server_close()
