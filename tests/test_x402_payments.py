@@ -1765,3 +1765,110 @@ def test_the_reason_is_one_bounded_line(monkeypatch):
     reason = pending.settle_error or ""
     assert "\n" not in reason and len(reason) <= 180, f"unbounded reason: {len(reason)}"
     assert "ValueError" in reason
+
+
+def test_the_node_only_calls_methods_the_real_x402_server_has_and_awaits_them_right():
+    """Every test in this file replaces the resource server with a stub that
+    defines whatever this module happens to call. A call to a method the real
+    library does NOT have therefore passes here and fails only when real money
+    is on the line -- which is exactly what shipped on the payer side (#110:
+    `http.post(...)` on a class that has never had `post`, so every wallet-paid
+    Action run died with AttributeError before a byte left the process).
+
+    That guard covered scripts/x402_pay.py. This is the same guard for the
+    money-critical half: the node's own verify and settle.
+
+    It also checks something the payer's guard does not, because it is the
+    other way to call a real method wrongly: `await`-ing a sync method raises
+    TypeError, and calling an async one without await returns a coroutine that
+    reads as truthy and silently never runs. In settle_sync either lands in
+    `except Exception`, is recorded "refused", and tells the payer their call
+    was not charged -- a settle failure indistinguishable from the facilitator
+    saying no. Imported hard, never skipped: x402 is pinned in requirements.txt
+    and a skip here restores the blind spot.
+    """
+    import ast
+    import inspect
+
+    from x402 import x402ResourceServer
+
+    module_path = REPO_ROOT / "wcag-audit-engine" / "app" / "x402_payments.py"
+    tree = ast.parse(module_path.read_text())
+
+    # Names bound to the resource server, so a rename does not blind this.
+    server_names = {
+        t.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for t in node.targets
+        if isinstance(t, ast.Name)
+        and isinstance(node.value, ast.Call)
+        and getattr(node.value.func, "id", None) == "_get_server"
+    }
+    assert server_names, "no _get_server() assignment found; this guard sees nothing"
+
+    def server_calls(node):
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in server_names
+        )
+
+    called = {n.func.attr for n in ast.walk(tree) if server_calls(n)}
+    assert called, "this module calls nothing on the resource server; guard sees nothing"
+
+    missing = sorted(m for m in called if not hasattr(x402ResourceServer, m))
+    assert not missing, (
+        "x402_payments.py calls %s on x402ResourceServer, which has no such "
+        "method -- every payment would die before reaching the facilitator. "
+        "Available: %s"
+        % (missing, sorted(m for m in dir(x402ResourceServer) if not m.startswith("_")))
+    )
+
+    awaited = {
+        n.value.func.attr
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Await) and server_calls(n.value)
+    }
+    wrong = []
+    for name in sorted(called):
+        is_async = inspect.iscoroutinefunction(getattr(x402ResourceServer, name))
+        if is_async and name not in awaited:
+            wrong.append(f"{name} is async and is called without await somewhere")
+        if not is_async and name in awaited:
+            wrong.append(f"{name} is sync and is awaited")
+    assert not wrong, (
+        "await mismatch against the real library: %s. Awaiting a sync method "
+        "raises TypeError; not awaiting an async one silently never runs it. "
+        "Inside settle_sync either is recorded 'refused' and tells the payer "
+        "they were not charged." % wrong
+    )
+
+    # Existence and await-ness are two of the three ways to call a real method
+    # wrongly. The third is arity: the stubs here accept whatever they are
+    # handed, so a library that grows a required argument, or loses one, binds
+    # fine in tests and raises TypeError in front of a paying agent.
+    unbindable = []
+    for node in ast.walk(tree):
+        if not server_calls(node):
+            continue
+        try:
+            sig = inspect.signature(getattr(x402ResourceServer, node.func.attr))
+        except (TypeError, ValueError):
+            continue
+        positional = [object()] * (len(node.args) + 1)  # +1 for self
+        keywords = {kw.arg: object() for kw in node.keywords if kw.arg}
+        if any(kw.arg is None for kw in node.keywords):
+            continue  # **kwargs splat: arity is not statically knowable
+        if any(isinstance(a, ast.Starred) for a in node.args):
+            continue
+        try:
+            sig.bind(*positional, **keywords)
+        except TypeError as exc:
+            unbindable.append(f"{node.func.attr} at line {node.lineno}: {exc}")
+    assert not unbindable, (
+        "these calls do not fit the real library's signature: %s -- they raise "
+        "TypeError against the pinned x402, and the stubs in this file accept "
+        "anything, so nothing else here would notice." % unbindable
+    )
