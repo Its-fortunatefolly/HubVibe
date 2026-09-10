@@ -755,11 +755,18 @@ def _authenticate(
             # Internal/testing key: unlimited, unmetered, never billed,
             # never quota-limited.
             return AuthContext(stripe_billable=False, payment_method="internal")
-        if billing.is_configured():
-            record = billing.lookup_key(x_api_key)
+        # Spending a prepaid key is gated on the key store answering, NOT on
+        # billing.is_configured(). That function asks whether Stripe could sell
+        # a SUBSCRIPTION -- it wants a webhook secret and a sellable price ID --
+        # and the MPP top-up that mints prepaid keys needs neither. A box
+        # configured for the top-up and nothing else therefore sold a $0.50 key
+        # and then refused every call made with it. lookup_key already returns
+        # None when the store cannot answer, so it is safe to ask first.
+        record = billing.lookup_key(x_api_key)
+        if record is not None:
             # A prepaid key carries its own money and has no Stripe Customer
             # behind it, so it is spent rather than metered or quota-checked.
-            if record is not None and record.get("prepaid_balance_cents") is not None:
+            if record.get("prepaid_balance_cents") is not None:
                 call_cents = round(price_usd * 100)
                 if billing.spend_prepaid(x_api_key, call_cents):
                     return AuthContext(
@@ -770,7 +777,7 @@ def _authenticate(
                     )
                 # Out of credit: fall through to the 402, which offers a
                 # top-up. Refusing loudly beats serving on an empty balance.
-            elif record is not None and billing.check_and_increment_quota(
+            elif billing.is_configured() and billing.check_and_increment_quota(
                 record["customer_id"], plan=record.get("plan")
             ):
                 return AuthContext(

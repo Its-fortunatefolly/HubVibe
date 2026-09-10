@@ -227,3 +227,39 @@ def test_the_whole_http_path_spends_a_prepaid_key_out_of_sqlite(monkeypatch, tmp
     )
     assert response.status_code == 402
     assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 0
+
+
+def test_a_prepaid_key_spends_without_a_sellable_subscription(monkeypatch, tmp_path):
+    """The MPP top-up mints prepaid keys using STRIPE_SECRET_KEY and a network
+    profile. It needs no webhook secret and no subscription Price, which is
+    exactly what billing.is_configured() demands.
+
+    Gating the SPEND on is_configured() therefore sold a $0.50 key on a
+    top-up-only box and refused every call made with it: the customer paid and
+    got nothing. Spending is a question for the key store, not for whether
+    Stripe could sell a subscription.
+    """
+    from fastapi.testclient import TestClient
+
+    billing = _load_billing(monkeypatch, tmp_path)
+    key = billing.issue_prepaid_key(50)
+    assert billing.is_configured() is False, "fixture must model a top-up-only box"
+    assert billing.lookup_key(key)["prepaid_balance_cents"] == 50
+
+    import test_wcag_audit_engine as engine_tests
+
+    module = engine_tests._load_main(monkeypatch)
+    monkeypatch.setattr(module, "billing", billing)
+    client = TestClient(module.app)
+
+    # /audit/seo with raw html is the one paid route that needs no browser,
+    # so this measures the charge rather than the sandbox's Chromium.
+    response = client.post(
+        "/audit/seo",
+        json={"html": "<html lang='en'><head><title>t</title></head><body><h1>x</h1></body></html>"},
+        headers={"X-API-Key": key},
+    )
+    assert response.status_code != 402, (
+        "a funded prepaid key was refused on a box that cannot sell subscriptions"
+    )
+    assert billing.lookup_key(key)["prepaid_balance_cents"] == 47, "the call was not charged"
