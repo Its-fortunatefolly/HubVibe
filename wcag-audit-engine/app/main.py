@@ -640,14 +640,29 @@ def _payment_required_response(
     # Stripe billing is configured -- /billing/checkout answers 501
     # everywhere else. Naming that URL on an x402-only node sent an agent's
     # operator to a dead end and read as "the service is broken".
-    alternative = {
-        "header": "X-API-Key",
-        "detail": (
-            "A prepaid key: bought with the MPP top-up rail in `other_rails` "
-            "where that rail is live, and spent per call at the same rates. "
-            "There are no subscriptions; pay per call with a rail in `accepts`."
-        ),
-    }
+    # ...and when NOTHING is live, that doorway is a dead end too: pointing a
+    # caller at `other_rails` for a key while `other_rails` is empty is the
+    # same wrong turn one level down. Say the true thing instead.
+    if accepts or other_rails:
+        alternative = {
+            "header": "X-API-Key",
+            "detail": (
+                "A prepaid key: bought with the MPP top-up rail in `other_rails` "
+                "where that rail is live, and spent per call at the same rates. "
+                "There are no subscriptions; pay per call with a rail in `accepts`."
+            ),
+        }
+    else:
+        alternative = {
+            "header": "X-API-Key",
+            "detail": (
+                "No payment rail is live on this deployment right now -- `accepts` "
+                "and `other_rails` are both empty, so this call cannot be bought "
+                "and no retry will change that. A prepaid key issued earlier still "
+                "spends. This is a configuration state on our side, not a "
+                "rejection of your request."
+            ),
+        }
 
     body = {
         "error": error or "payment_required",

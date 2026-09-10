@@ -4154,6 +4154,32 @@ def test_a_key_doorway_is_named_only_where_a_key_can_be_bought(monkeypatch):
     assert "/billing/checkout" not in client.get("/.well-known/agent.json").text
 
 
+def test_a_402_with_no_live_rail_says_so_instead_of_pointing_at_an_empty_list(monkeypatch):
+    """With every rail down, `alternative` used to tell the caller a key is
+    "bought with the MPP top-up rail in `other_rails`" while `other_rails` was
+    []. That is the same dead end the get_one URL was removed for, one level
+    down: a caller is sent to look somewhere that holds nothing, reads it as a
+    broken service, and retries a call no retry can buy.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    body = client.post("/audit", json={"url": "https://example.com"}).json()
+    assert body["accepts"] == [] and body["other_rails"] == [], "fixture is not a no-rail node"
+
+    detail = body["alternative"]["detail"]
+    assert "no payment rail is live" in detail.lower(), detail
+    # Naming the empty lists to explain is fine; sending the caller there to
+    # BUY something is the dead end.
+    assert "bought with" not in detail.lower(), "still offers a purchase down an empty rail"
+    # The caller must learn that retrying is pointless, and that an already
+    # issued key is still good -- both are actionable, unlike "go look there".
+    assert "no retry" in detail.lower()
+    assert "still spends" in detail.lower()
+
+
 def test_openapi_prices_the_x402_rail(monkeypatch, load_main_fresh):
     """On an x402-only deploy every paid route read as free in openapi.json
     while the 402, agent.json, llms.txt and mcp.json all priced it."""
