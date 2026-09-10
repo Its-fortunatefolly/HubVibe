@@ -192,6 +192,7 @@
   .k { color: var(--accent-soft); }
   .s { color: var(--accent); }
   .n { color: #7dd3fc; }
+  .c { color: var(--muted); font-style: italic; }
 
   .copy-btn {
     background: transparent; border: 1px solid var(--line-bright); color: var(--muted);
@@ -322,12 +323,10 @@
   <span class="k">"error"</span>: <span class="s">"payment_required"</span>,
   <span class="k">"price_usd"</span>: <span class="n">0.03</span>,
   <span class="k">"accepts"</span>: [
-    {
-      <span class="k">"protocol"</span>: <span class="s">"mpp"</span>,
-      <span class="k">"method"</span>: <span class="s">"tempo"</span>,
-      <span class="k">"send_via_header"</span>: <span class="s">"Authorization: Payment ..."</span>
-    }
+    <span class="c">// every rail this node can settle,</span>
+    <span class="c">// each in its own protocol's shape</span>
   ],
+  <span class="k">"other_rails"</span>: [],
   <span class="k">"docs"</span>: <span class="s">"/.well-known/agent.json"</span>
 }</pre>
       </div>
@@ -404,8 +403,10 @@
       <div>
         <p class="section-lead">One request. Works from anything that speaks HTTP.</p>
         <p style="color:var(--muted);font-size:15px;max-width:46ch;">
-          Machine callers discover pricing, schemas, and payment rails from the
-          manifests — no documentation scraping required.
+          Start unauthenticated: the call returns the 402 above, carrying the
+          price and the rails this node can settle. Settle one and repeat the
+          same request with the header that rail names — or let a client
+          library do both in one call.
         </p>
         <div class="endpoints" style="margin-top:26px;grid-template-columns:1fr;">
           <a class="endpoint" href="/.well-known/agent.json"><code>/.well-known/agent.json</code><span>Agent manifest</span></a>
@@ -421,8 +422,10 @@
         </div>
 <pre class="code-body" id="curl-example">curl -X POST https://hubvibe-io.com/audit/bundle \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $HUBVIBE_KEY" \
-  -d '{"url":"https://example.com"}'</pre>
+  -d '{"url":"https://example.com"}'
+# -> 402 with the price and the payable rails.
+# Settle one, then repeat this call carrying the
+# payment header that rail's entry names.</pre>
       </div>
     </div>
   </section>
