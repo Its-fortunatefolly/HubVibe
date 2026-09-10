@@ -640,14 +640,29 @@ def _payment_required_response(
     # Stripe billing is configured -- /billing/checkout answers 501
     # everywhere else. Naming that URL on an x402-only node sent an agent's
     # operator to a dead end and read as "the service is broken".
-    alternative = {
-        "header": "X-API-Key",
-        "detail": (
-            "A prepaid key: bought with the MPP top-up rail in `other_rails` "
-            "where that rail is live, and spent per call at the same rates. "
-            "There are no subscriptions; pay per call with a rail in `accepts`."
-        ),
-    }
+    # ...and when NOTHING is live, that doorway is a dead end too: pointing a
+    # caller at `other_rails` for a key while `other_rails` is empty is the
+    # same wrong turn one level down. Say the true thing instead.
+    if accepts or other_rails:
+        alternative = {
+            "header": "X-API-Key",
+            "detail": (
+                "A prepaid key: bought with the MPP top-up rail in `other_rails` "
+                "where that rail is live, and spent per call at the same rates. "
+                "There are no subscriptions; pay per call with a rail in `accepts`."
+            ),
+        }
+    else:
+        alternative = {
+            "header": "X-API-Key",
+            "detail": (
+                "No payment rail is live on this deployment right now -- `accepts` "
+                "and `other_rails` are both empty, so this call cannot be bought "
+                "and no retry will change that. A prepaid key issued earlier still "
+                "spends. This is a configuration state on our side, not a "
+                "rejection of your request."
+            ),
+        }
 
     body = {
         "error": error or "payment_required",
@@ -740,11 +755,18 @@ def _authenticate(
             # Internal/testing key: unlimited, unmetered, never billed,
             # never quota-limited.
             return AuthContext(stripe_billable=False, payment_method="internal")
-        if billing.is_configured():
-            record = billing.lookup_key(x_api_key)
+        # Spending a prepaid key is gated on the key store answering, NOT on
+        # billing.is_configured(). That function asks whether Stripe could sell
+        # a SUBSCRIPTION -- it wants a webhook secret and a sellable price ID --
+        # and the MPP top-up that mints prepaid keys needs neither. A box
+        # configured for the top-up and nothing else therefore sold a $0.50 key
+        # and then refused every call made with it. lookup_key already returns
+        # None when the store cannot answer, so it is safe to ask first.
+        record = billing.lookup_key(x_api_key)
+        if record is not None:
             # A prepaid key carries its own money and has no Stripe Customer
             # behind it, so it is spent rather than metered or quota-checked.
-            if record is not None and record.get("prepaid_balance_cents") is not None:
+            if record.get("prepaid_balance_cents") is not None:
                 call_cents = round(price_usd * 100)
                 if billing.spend_prepaid(x_api_key, call_cents):
                     return AuthContext(
@@ -755,7 +777,7 @@ def _authenticate(
                     )
                 # Out of credit: fall through to the 402, which offers a
                 # top-up. Refusing loudly beats serving on an empty balance.
-            elif record is not None and billing.check_and_increment_quota(
+            elif billing.is_configured() and billing.check_and_increment_quota(
                 record["customer_id"], plan=record.get("plan")
             ):
                 return AuthContext(
@@ -1064,40 +1086,13 @@ _BLOCKED_TARGET_HOSTS = {"localhost", "metadata", "metadata.google.internal"}
 
 
 def _target_url_problem(url: Optional[str]) -> Optional[str]:
-    """Why `url` must not be fetched, or None when it may be."""
-    import ipaddress
-    import socket
-    from urllib.parse import urlparse
+    """Why `url` must not be fetched, or None when it may be.
 
-    if not url:
-        return None
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return "is not a valid URL"
-    if parsed.scheme not in ("http", "https"):
-        return "must start with http:// or https://"
-    host = (parsed.hostname or "").lower().rstrip(".")
-    if not host:
-        return "has no host"
-    if _ALLOW_PRIVATE_TARGETS:
-        return None
-    if host in _BLOCKED_TARGET_HOSTS or host.endswith(".internal") or host.endswith(".localhost"):
-        return "points at an internal host, which this service will not fetch"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, UnicodeError, OverflowError):
-        return "does not resolve to any address"
-    for info in infos:
-        raw = str(info[4][0]).split("%")[0]
-        try:
-            address = ipaddress.ip_address(raw)
-        except ValueError:
-            return "resolves to an unparseable address"
-        if not address.is_global:
-            return "resolves to a private, loopback, link-local or reserved address, which this service will not fetch"
-    return None
+    Delegates to audits.blocked_target_reason, which is also what every
+    redirect hop is checked against. Two copies of this rule would drift, and
+    the copy that drifts is the one guarding the fetch.
+    """
+    return audits.blocked_target_reason(url)
 
 
 def _reject_unfetchable_target(url: Optional[str]) -> Optional[JSONResponse]:
@@ -1163,7 +1158,7 @@ def _rate_limited_response() -> JSONResponse:
 def _run_axe(html: Optional[str], url: Optional[str]) -> dict:
     def _audit(page) -> dict:
         if url:
-            page.goto(url, wait_until="networkidle", timeout=15000)
+            audits.goto_guarded(page, url, wait_until="networkidle", timeout=15000)
         else:
             page.set_content(html, wait_until="networkidle", timeout=15000)
         return _axe.run(page, options=AXE_OPTIONS).response
@@ -1186,17 +1181,21 @@ def _run_axe_and_performance(url: str):
     rendered, once. The response listener must be attached before navigation
     or the measurement misses the requests it is meant to count.
     """
-    stats = {"bytes": 0, "requests": 0}
+    stats = {"bytes": 0, "requests": 0, "unmeasured": 0}
 
     def _on_response(response):
         stats["requests"] += 1
-        length = response.headers.get("content-length")
-        if length and length.isdigit():
-            stats["bytes"] += int(length)
+        if stats["bytes"] > audits.HEAVY_PAGE_BYTES:
+            return
+        measured = audits.response_bytes(response)
+        if measured is None:
+            stats["unmeasured"] += 1
+        else:
+            stats["bytes"] += measured
 
     def _both(page):
         page.on("response", _on_response)
-        page.goto(url, wait_until="networkidle", timeout=30000)
+        audits.goto_guarded(page, url, wait_until="networkidle", timeout=30000)
         dom_node_count = page.evaluate("document.querySelectorAll('*').length")
         # axe runs against the already-loaded page rather than reloading it.
         return _axe.run(page, options=AXE_OPTIONS).response, dom_node_count

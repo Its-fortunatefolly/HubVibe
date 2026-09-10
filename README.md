@@ -20,7 +20,7 @@ There are two ways in. Both take under a minute.
 - uses: Its-fortunatefolly/HubVibe@v1
   with:
     url: https://staging.example.com
-    api-key: ${{ secrets.HUBVIBE_API_KEY }}
+    wallet-key: ${{ secrets.HUBVIBE_WALLET_KEY }}
 ```
 
 That is the entire integration. Every pull request now runs the full
@@ -44,16 +44,22 @@ Gate a promotion on it:
   uses: Its-fortunatefolly/HubVibe@v1
   with:
     url: https://staging.example.com
-    api-key: ${{ secrets.HUBVIBE_API_KEY }}
+    wallet-key: ${{ secrets.HUBVIBE_WALLET_KEY }}
 
 - name: Promote to production
   if: steps.audit.outputs.passed == 'true'
   run: ./deploy-production.sh
 ```
 
-A key is prepaid, not a subscription: it is bought with the MPP top-up rail
-where that rail is live, and spent per call at the same rates. Or skip the key
-entirely — see the second way in.
+`wallet-key` is an EVM private key funded with USDC on Base. The step reads the
+402, signs, and pays for its own run — no account, no checkout, nothing to
+provision first. `max-price-usd` (default `0.15`) is a hard ceiling the client
+refuses to sign above, so fund the address like petty cash rather than a
+treasury. It needs no ETH: x402 signs the transfer off-chain and the
+facilitator pays the gas.
+
+If you already hold a prepaid API key, pass `api-key:` instead of `wallet-key:`
+and the step spends that.
 
 ## 2 — Point your agent at it: no key, no signup, pay per call
 
@@ -228,7 +234,7 @@ as-is, no Marketplace involved:
 - uses: Its-fortunatefolly/HubVibe@v1
   with:
     url: https://your-site.example.com
-    api-key: ${{ secrets.HUBVIBE_API_KEY }}
+    wallet-key: ${{ secrets.HUBVIBE_WALLET_KEY }}
 ```
 
 **A Marketplace listing needs a different repo.** GitHub requires an action
