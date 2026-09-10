@@ -127,7 +127,7 @@ app = FastAPI(
     openapi_tags=[
         {"name": "audit", "description": "Paid, machine-payable audit routes."},
         {"name": "discovery", "description": "Manifests agents use to find and price these tools."},
-        {"name": "billing", "description": "Human subscription checkout and key issuance."},
+        {"name": "billing", "description": "One-off report purchase and retrieval. Audits themselves are paid per call."},
     ],
 )
 

@@ -437,30 +437,6 @@ def discovery_offer(price: Optional[str] = None) -> dict:
     }
 
 
-def payment_required_body(price: Optional[str] = None) -> dict:
-    """The x402 half of a 402 body, or `{}` when x402 can't actually settle.
-
-    Returning the x402 shape unconditionally -- which is what this used to do
-    -- actively misleads a paying agent on a deployment where x402 isn't
-    configured: it advertises X-PAYMENT as an accepted header and then names
-    `payTo: null` as the recipient. A conforming client either hard-errors or
-    builds a payment to a null address, and either way the caller can't buy
-    and we can't sell. If x402 isn't live here, say nothing about x402 rather
-    than something false; the MPP challenges on the same 402 still give the
-    caller a real way to pay.
-    """
-    if not is_configured():
-        return {}
-    return {
-        "x402Version": 1,
-        "scheme": "exact",
-        "network": _NETWORK,
-        "price": price or _PRICE,
-        "payTo": _PAY_TO_ADDRESS,
-        "accepted_payment_header": "X-PAYMENT",
-    }
-
-
 _bazaar_warned = False
 
 

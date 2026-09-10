@@ -2003,16 +2003,21 @@ def test_manifest_advertises_no_unpaid_endpoint(monkeypatch):
     assert unpaid == [], f"manifest advertises unpaid endpoints: {unpaid}"
 
 
-def test_landing_page_offers_no_free_scan(monkeypatch):
+def test_no_served_page_offers_a_free_scan(monkeypatch):
+    """"No free scan" is a settled decision, and it holds on every page this
+    service serves. Checking only `/` leaves the other two unguarded while
+    reading exactly like a guard that covers them all.
+    """
     from fastapi.testclient import TestClient
 
     module = _load_main(monkeypatch)
     client = TestClient(module.app)
-    html = client.get("/").text.lower()
 
-    assert "/scan/free" not in html
-    for phrase in ("free scan", "free demo", "try it free", "scan for free"):
-        assert phrase not in html, f"landing page still offers something free: {phrase!r}"
+    for route in ("/", "/billing/success", "/billing/cancel"):
+        html = client.get(route).text.lower()
+        assert "/scan/free" not in html, f"{route} links a free-scan route"
+        for phrase in ("free scan", "free demo", "try it free", "scan for free"):
+            assert phrase not in html, f"{route} still offers something free: {phrase!r}"
 
 
 def test_landing_page_never_prints_a_per_call_cent_price(monkeypatch):

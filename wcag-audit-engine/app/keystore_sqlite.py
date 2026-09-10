@@ -11,7 +11,7 @@ third party that can suspend it.
 
 Deliberately a Firestore *shim* rather than a second storage interface:
 billing.py keeps one code path, and this module implements exactly the
-calls it makes -- collection().document().get/set, collection().add,
+calls it makes -- collection().document().get/set,
 snapshot .exists/.to_dict()/.get(field), and transactions with
 update / set(merge=True). Nothing more is implemented, so a new Firestore
 call in billing.py fails loudly here instead of silently diverging.
@@ -33,8 +33,6 @@ round-trips them exactly.
 import json
 import os
 import sqlite3
-import threading
-import uuid
 from typing import Optional
 
 
@@ -87,12 +85,6 @@ class CollectionReference:
     def document(self, doc_id: str) -> DocumentReference:
         return DocumentReference(self._store, f"{self._name}/{doc_id}")
 
-    def add(self, data: dict):
-        ref = self.document(uuid.uuid4().hex)
-        ref.set(data)
-        # Firestore returns (update_time, reference); billing.py ignores it.
-        return None, ref
-
 
 class Transaction:
     """Write handle bound to one BEGIN IMMEDIATE connection."""
@@ -113,7 +105,6 @@ class Transaction:
 class SqliteKeyStore:
     def __init__(self, path: str):
         self._path = path
-        self._init_lock = threading.Lock()
         parent = os.path.dirname(os.path.abspath(path))
         if parent:
             os.makedirs(parent, exist_ok=True)

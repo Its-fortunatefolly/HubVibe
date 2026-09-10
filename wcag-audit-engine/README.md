@@ -103,13 +103,13 @@ never billed.
 
 The page exists for humans evaluating the service — buyers, partners, and
 anyone verifying the business is real — but the product itself is the
-machine API, and the page is written that way: it leads with per-call
-pricing and the 402 payment handshake, not with a subscription pitch.
+machine API, and the page is written that way: it leads with the 402 payment
+handshake and defers the rate to the agent manifest, not with a subscription
+pitch.
 
 There is deliberately **no free scan**. An audit costs a real browser page
 load, so giving them away funds strangers' compute at our expense and
-invites abuse. The only human path is `/billing/checkout`, which issues an
-API key; machines pay per call over x402/MPP.
+invites abuse.
 
 ## Getting paid
 
@@ -124,9 +124,9 @@ Two audiences, priced in different units on purpose:
 Every real call also still reports a Stripe Meter Event
 (`billing.record_usage`) regardless of which auth path was used to bill it
 via Stripe, so usage history stays centralized in Stripe either way. Stripe
-owns the balance and the invoicing — this service only stores a thin
-`api_key -> Stripe customer_id` mapping in Firestore, so there's no custom
-balance-tracking code that can drift from what Stripe actually charges.
+owns the invoicing for the subscription rail — this service stores the
+`api_key -> record` mapping (and prepaid balances) in its key store, which is
+Firestore on Cloud Run and SQLite on the box.
 (The $0.10 bundle price is approximated as 3 Meter Events, ~$0.09, against
 the existing flat per-event meter rather than requiring a second Stripe
 Price/meter just for this -- see `record_usage`'s docstring.)
@@ -134,8 +134,8 @@ Price/meter just for this -- see `record_usage`'s docstring.)
 Customer-facing flow (all handled by this service, no external pages
 required to make it work):
 
-1. `POST /billing/checkout {"email": "..."}` -> `{"checkout_url": "..."}`;
-   the landing page redirects the customer there.
+1. `POST /billing/checkout {"email": "..."}` -> `{"checkout_url": "..."}`. No
+   served page calls this; the landing page carries no checkout form.
 2. Stripe redirects back to `/billing/success?session_id=...` (or your own
    `CHECKOUT_SUCCESS_URL`, if you set one to override the default). That
    page polls `GET /billing/api-key` until the webhook lands and displays
