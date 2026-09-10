@@ -260,7 +260,21 @@ def goto_guarded(page, url: str, **goto_kwargs):
                 pass
 
     page.route("**/*", _route)
-    return page.goto(url, **goto_kwargs)
+    response = page.goto(url, **goto_kwargs)
+
+    # Playwright raises only on a transport failure, so a 404 or 500 error page
+    # loads perfectly well and would be audited as if it were the page that was
+    # asked for. A customer with a typo in their URL would be handed a clean
+    # bill of health for their host's error page. There is no page to audit
+    # here, so this fails as an audit that could not run -- which the caller
+    # turns into a 502 that bills nothing -- rather than a passing result about
+    # the wrong document.
+    status = getattr(response, "status", None)
+    if isinstance(status, int) and status >= 400:
+        raise TargetNotFetchable(
+            f"responded HTTP {status}, so there was no page at that URL to audit"
+        )
+    return response
 
 
 def run_seo_audit(html: Optional[str], url: Optional[str], response=None) -> dict:
@@ -375,10 +389,40 @@ def run_security_audit(url: Optional[str], response=None) -> dict:
             {"id": "no-https", "severity": "critical", "detail": f"Final URL is not HTTPS: {final_url}"}
         )
 
-    if "strict-transport-security" not in headers:
+    hsts = headers.get("strict-transport-security")
+    if hsts is None:
         findings.append(
             {"id": "missing-hsts", "severity": "serious", "detail": "No Strict-Transport-Security header"}
         )
+    else:
+        # Presence is not protection. `max-age=0` is the spec's own way to
+        # SWITCH HSTS OFF and tell browsers to forget the pin, and a header
+        # with no readable max-age directs nothing at all -- reporting either
+        # as protected is the false pass this audit exists to avoid.
+        max_age = None
+        for directive in str(hsts).split(";"):
+            name, _, value = directive.strip().partition("=")
+            if name.strip().lower() == "max-age":
+                digits = value.strip().strip('"')
+                if digits.isdigit():
+                    max_age = int(digits)
+                break
+        if max_age is None:
+            findings.append(
+                {
+                    "id": "invalid-hsts",
+                    "severity": "serious",
+                    "detail": f"Strict-Transport-Security has no readable max-age: {hsts!r}",
+                }
+            )
+        elif max_age == 0:
+            findings.append(
+                {
+                    "id": "hsts-disabled",
+                    "severity": "serious",
+                    "detail": "Strict-Transport-Security is max-age=0, which switches HSTS off",
+                }
+            )
 
     if "content-security-policy" not in headers:
         findings.append(
@@ -394,7 +438,11 @@ def run_security_audit(url: Optional[str], response=None) -> dict:
             }
         )
 
-    has_frame_protection = "x-frame-options" in headers or "frame-ancestors" in headers.get(
+    # Again value, not presence: X-Frame-Options only protects when it reads
+    # DENY or SAMEORIGIN. ALLOWALL and any unrecognised token are ignored by
+    # browsers, which is the same as having sent nothing.
+    xfo = str(headers.get("x-frame-options", "")).strip().lower()
+    has_frame_protection = xfo in ("deny", "sameorigin") or "frame-ancestors" in headers.get(
         "content-security-policy", ""
     )
     if not has_frame_protection:

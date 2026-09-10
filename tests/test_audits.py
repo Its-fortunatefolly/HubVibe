@@ -324,3 +324,48 @@ def test_unmeasured_responses_are_reported_in_the_metrics():
         dom_node_count=10, resource_bytes=1000, request_count=5, unmeasured_responses=3
     )
     assert result["metrics"]["unmeasured_responses"] == 3
+
+
+# --- presence is not protection -------------------------------------------
+
+
+def _headers_response(headers, url="https://example.com/"):
+    return type("R", (), {"headers": headers, "url": url, "status_code": 200})()
+
+
+def test_hsts_max_age_zero_is_not_protection():
+    """max-age=0 is the spec's own way to switch HSTS OFF and tell browsers to
+    forget the pin. Testing only for the header name reported it as protected."""
+    resp = _headers_response({"strict-transport-security": "max-age=0"})
+    result = audits.run_security_audit("https://example.com", response=resp)
+    ids = {f["id"] for f in result["findings"]}
+    assert "hsts-disabled" in ids
+    assert result["pass"] is False
+
+
+def test_hsts_without_a_readable_max_age_is_flagged():
+    resp = _headers_response({"strict-transport-security": "includeSubDomains"})
+    result = audits.run_security_audit("https://example.com", response=resp)
+    assert "invalid-hsts" in {f["id"] for f in result["findings"]}
+
+
+def test_a_real_hsts_value_still_passes():
+    resp = _headers_response({"strict-transport-security": "max-age=31536000; includeSubDomains"})
+    result = audits.run_security_audit("https://example.com", response=resp)
+    ids = {f["id"] for f in result["findings"]}
+    assert "missing-hsts" not in ids and "hsts-disabled" not in ids and "invalid-hsts" not in ids
+
+
+def test_x_frame_options_allowall_is_not_frame_protection():
+    """Browsers ignore ALLOWALL and every unrecognised token, so the page is
+    framable -- the same as sending no header at all."""
+    resp = _headers_response({"x-frame-options": "ALLOWALL"})
+    result = audits.run_security_audit("https://example.com", response=resp)
+    assert "missing-frame-protection" in {f["id"] for f in result["findings"]}
+
+
+def test_x_frame_options_deny_and_sameorigin_are_protection():
+    for value in ("DENY", "sameorigin", " SAMEORIGIN "):
+        resp = _headers_response({"x-frame-options": value})
+        result = audits.run_security_audit("https://example.com", response=resp)
+        assert "missing-frame-protection" not in {f["id"] for f in result["findings"]}, value
