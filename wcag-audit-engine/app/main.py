@@ -1174,13 +1174,17 @@ def _run_axe_and_performance(url: str):
     rendered, once. The response listener must be attached before navigation
     or the measurement misses the requests it is meant to count.
     """
-    stats = {"bytes": 0, "requests": 0}
+    stats = {"bytes": 0, "requests": 0, "unmeasured": 0}
 
     def _on_response(response):
         stats["requests"] += 1
-        length = response.headers.get("content-length")
-        if length and length.isdigit():
-            stats["bytes"] += int(length)
+        if stats["bytes"] > audits.HEAVY_PAGE_BYTES:
+            return
+        measured = audits.response_bytes(response)
+        if measured is None:
+            stats["unmeasured"] += 1
+        else:
+            stats["bytes"] += measured
 
     def _both(page):
         page.on("response", _on_response)

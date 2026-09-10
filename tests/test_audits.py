@@ -271,3 +271,56 @@ def test_fetch_once_still_follows_an_allowed_redirect():
         redirector.server_close()
         target.shutdown()
         target.server_close()
+
+
+# --- page weight is actually weighed --------------------------------------
+
+
+class _Resp:
+    """A Playwright-ish response: headers, and a body the browser holds."""
+
+    def __init__(self, headers, body=b"", body_raises=False):
+        self.headers = headers
+        self._body = body
+        self._raises = body_raises
+
+    def body(self):
+        if self._raises:
+            raise RuntimeError("no body available")
+        return self._body
+
+
+def test_a_chunked_response_is_weighed_not_counted_as_zero():
+    """Transferred bytes came only from `content-length`, which HTTP/1.1
+    chunked responses -- the normal shape for compressed or streamed HTML --
+    do not send. Those counted as zero, so a genuinely heavy page stayed under
+    the threshold and was reported clean: a check that never ran, passing."""
+    chunked = _Resp({"transfer-encoding": "chunked"}, body=b"x" * 4_000_000)
+    assert audits.response_bytes(chunked) == 4_000_000
+
+
+def test_content_length_is_preferred_when_present():
+    sized = _Resp({"content-length": "1234"}, body=b"ignored")
+    assert audits.response_bytes(sized) == 1234
+
+
+def test_an_unweighable_response_is_unknown_not_zero():
+    """None, never 0: the caller must be able to tell 'nothing' from
+    'unknown', because only one of those is safe to report as light."""
+    assert audits.response_bytes(_Resp({}, body_raises=True)) is None
+
+
+def test_a_heavy_chunked_page_now_trips_the_weight_finding():
+    result = audits.performance_result_from_metrics(
+        dom_node_count=10, resource_bytes=4_000_000, request_count=5
+    )
+    ids = {f["id"] for f in result["findings"]}
+    assert "heavy-page-weight" in ids
+    assert result["pass"] is False
+
+
+def test_unmeasured_responses_are_reported_in_the_metrics():
+    result = audits.performance_result_from_metrics(
+        dom_node_count=10, resource_bytes=1000, request_count=5, unmeasured_responses=3
+    )
+    assert result["metrics"]["unmeasured_responses"] == 3

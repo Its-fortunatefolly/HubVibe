@@ -193,6 +193,34 @@ def fetch_once(url: str):
     raise TargetNotFetchable(f"followed more than {_MAX_REDIRECTS} redirects")
 
 
+HEAVY_PAGE_BYTES = 3_000_000
+
+
+def response_bytes(response) -> Optional[int]:
+    """Bytes this response transferred, or None when that cannot be measured.
+
+    `content-length` alone undercounts badly: HTTP/1.1 chunked responses omit
+    it entirely, which is the normal shape for compressed or streamed HTML.
+    Those responses were counted as zero, so a genuinely heavy page could stay
+    under the weight threshold and be reported clean -- a check that never ran
+    reported as a pass, which this service exists not to do.
+
+    Falls back to the body the browser already holds. Returns None rather than
+    zero when even that is unavailable (a redirect, a preflight, a body the
+    browser dropped), so the caller can tell "nothing" from "unknown".
+    """
+    try:
+        length = response.headers.get("content-length")
+    except Exception:
+        length = None
+    if length and str(length).isdigit():
+        return int(length)
+    try:
+        return len(response.body())
+    except Exception:
+        return None
+
+
 def goto_guarded(page, url: str, **goto_kwargs):
     """Navigate `page` to `url` with every request checked, not just the first.
 
@@ -402,7 +430,10 @@ def run_security_audit(url: Optional[str], response=None) -> dict:
 
 
 def performance_result_from_metrics(
-    dom_node_count: int, resource_bytes: int, request_count: int
+    dom_node_count: int,
+    resource_bytes: int,
+    request_count: int,
+    unmeasured_responses: int = 0,
 ) -> dict:
     """Score already-measured page metrics.
 
@@ -445,6 +476,11 @@ def performance_result_from_metrics(
             "dom_node_count": dom_node_count,
             "total_bytes_transferred": resource_bytes,
             "request_count": request_count,
+            # Responses whose size could not be established at all. Reported
+            # rather than hidden: it is the difference between "this page is
+            # light" and "we could not weigh part of it", and the buyer is
+            # entitled to tell those apart.
+            "unmeasured_responses": unmeasured_responses,
         },
         "findings": findings,
         "disclosure": "Single-page-load measurement, not a full Lighthouse-style audit.",
@@ -465,13 +501,20 @@ def run_performance_audit(url: Optional[str]) -> dict:
 
     resource_bytes = 0
     request_count = 0
+    unmeasured = 0
 
     def _on_response(response):
-        nonlocal resource_bytes, request_count
+        nonlocal resource_bytes, request_count, unmeasured
         request_count += 1
-        length = response.headers.get("content-length")
-        if length and length.isdigit():
-            resource_bytes += int(length)
+        # Once the page is already over the reporting threshold the exact
+        # total changes no verdict, so stop pulling bodies for it.
+        if resource_bytes > HEAVY_PAGE_BYTES:
+            return
+        measured = response_bytes(response)
+        if measured is None:
+            unmeasured += 1
+        else:
+            resource_bytes += measured
 
     def _measure(page) -> int:
         page.on("response", _on_response)
@@ -484,4 +527,6 @@ def run_performance_audit(url: Optional[str]) -> dict:
     # audit had already warmed, silently reporting a page as lighter than it is.
     dom_node_count = browser_pool.with_page(_measure, user_agent=_USER_AGENT)
 
-    return performance_result_from_metrics(dom_node_count, resource_bytes, request_count)
+    return performance_result_from_metrics(
+        dom_node_count, resource_bytes, request_count, unmeasured_responses=unmeasured
+    )
