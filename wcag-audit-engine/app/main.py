@@ -829,10 +829,31 @@ def _authenticate(
                 # would mean paying twice for one request.
                 call_cents = round(price_usd * 100)
                 remaining = max(bought_cents - call_cents, 0)
-                try:
-                    key = billing.issue_prepaid_key(remaining) if remaining else None
-                except Exception:
-                    key = None
+                key = None
+                if remaining:
+                    # Top up the key the caller already holds, when they sent
+                    # one. Minting a fresh key instead makes every refill a
+                    # re-setup: a CI pipeline has to rotate the secret it
+                    # stored, and whatever was left on the old key is stranded,
+                    # because nothing else can ever spend it.
+                    existing = billing.lookup_key(x_api_key) if x_api_key else None
+                    if existing is not None and existing.get("prepaid_balance_cents") is not None:
+                        if billing.refund_prepaid(x_api_key, remaining):
+                            key = x_api_key
+                    if key is None:
+                        try:
+                            key = billing.issue_prepaid_key(remaining)
+                        except Exception as exc:
+                            # Stripe has already been charged by this point, so
+                            # a silently swallowed failure here is money taken
+                            # for nothing. It must not break the audit the
+                            # caller paid for, but it has to be reconcilable.
+                            logging.getLogger(__name__).error(
+                                "MPP top-up charged %s cents but the key could not be "
+                                "written: %s: %s. The payer holds no credit for it.",
+                                remaining, type(exc).__name__, exc,
+                            )
+                            key = None
                 return AuthContext(
                     stripe_billable=False,
                     payment_method="mpp-topup",

@@ -152,13 +152,26 @@ ok "docker + compose present"
 
 step "Writing deploy/vps/.env"
 ENV_FILE="$VPS_DIR/.env"
-if [ -f "$ENV_FILE" ]; then
-  warn ".env already exists -- keeping it, updating only DOMAIN"
-  if grep -q '^DOMAIN=' "$ENV_FILE"; then
-    sed -i.bak "s|^DOMAIN=.*|DOMAIN=$DOMAIN|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+
+# Set one key in an existing .env, replacing it or appending it.
+upsert_env() {
+  if grep -q "^$1=" "$ENV_FILE"; then
+    sed -i.bak "s|^$1=.*|$1=$2|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
   else
-    printf 'DOMAIN=%s\n' "$DOMAIN" >> "$ENV_FILE"
+    printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"
   fi
+}
+
+if [ -f "$ENV_FILE" ]; then
+  warn ".env already exists -- keeping the keys and balances it holds"
+  upsert_env DOMAIN "$DOMAIN"
+  # A re-run that updated only DOMAIN was a trap: an operator changing the
+  # address they are paid at, or the facilitator, re-ran this, saw it succeed,
+  # and kept being paid at the old address with no warning. Only overwrite
+  # what the operator explicitly set in this shell -- the defaults must never
+  # clobber a deliberately different value.
+  [ -n "${X402_PAY_TO_ADDRESS:-}" ] && upsert_env X402_PAY_TO_ADDRESS "$PAY_TO"
+  [ -n "${X402_FACILITATOR_URL:-}" ] && upsert_env X402_FACILITATOR_URL "$FACILITATOR"
 else
   {
     printf 'DOMAIN=%s\n' "$DOMAIN"
@@ -175,9 +188,18 @@ else
       [ -n "$value" ] && printf '%s=%s\n' "$var" "$value"
     done
   } > "$ENV_FILE"
-  chmod 600 "$ENV_FILE"
-  ok "written (mode 600)"
+  ok "written"
 fi
+
+# Outside the branch on purpose: an .env that already existed -- copied from
+# .env.example as that file itself instructs -- kept whatever mode it arrived
+# with, and it can hold live Stripe keys.
+chmod 600 "$ENV_FILE"
+
+# Always say who gets paid, from the FILE rather than from this shell. This is
+# the one fact an operator must be able to confirm in five seconds, and the
+# only copy of it that the running node will actually read.
+ok "mode 600; paid to $(grep '^X402_PAY_TO_ADDRESS=' "$ENV_FILE" | cut -d= -f2-) via $(grep '^X402_FACILITATOR_URL=' "$ENV_FILE" | cut -d= -f2-)"
 
 # ---------------------------------------------------------------------------
 # 4. Build and start.
