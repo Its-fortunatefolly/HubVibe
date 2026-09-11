@@ -170,17 +170,42 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
 - Point the box at the facilitator that indexes (verifies itself, rolls
   back on a dead rail), on the box:
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
-- First paid call, **on the box and nowhere else** — one command, start it
-  first and send the money whenever:
-  `cd ~/HubVibe && git pull -q origin main && bash scripts/go.sh`
-  It finds or makes the wallet, prints the one address to fund, watches the
-  chain, and fires the paid call the moment the money lands. Send **~$0.25
-  USDC on Base** to `0x104feA79F30b4fB4Da86B6D65951217F914bdd35` (the call
-  spends $0.03; that wallet needs no ETH, though the transfer funding it
-  pays gas out of the sending wallet as usual). Safe to Ctrl-C and re-run.
-  The receipt line and the Basescan link are the proof; it then reads
-  Dexter's index. `scripts/first-paid-call.sh` is still there for a single
-  attempt with no waiting.
+- **Prove the node can take a customer's money — costs nothing, from any
+  machine:** `bash scripts/verify-live.sh`
+  This is the readiness check, and it needs no wallet, no funds, and no
+  address to trust. It calls the live endpoint unpaid, reads the 402, and
+  validates every `accepts[]` entry against the fields
+  `PaymentRequirementsV1` requires — the exact validation a customer's x402
+  client runs before it will sign anything. If this passes, a funded
+  customer can pay. That is the fact that matters; **it does not depend on
+  the owner holding money anywhere.**
+
+  Why it does not: `x402_payments.is_configured()` gates the rail on a
+  facilitator URL and a well-formed pay-to address, and nothing else
+  (`wcag-audit-engine/app/x402_payments.py:152`). The pay-to address only
+  ever *receives*. An empty wallet does not close the till.
+
+- **Optional — the owner's own self-test.** `scripts/go.sh` buys one audit
+  from the node so there is a receipt on Basescan with the owner's name on
+  it. This is a demonstration, not a prerequisite: skip it and customers can
+  still pay.
+
+  Read this before funding anything. `go.sh` calls
+  `first-paid-call.sh --new-wallet`, which **generates a fresh random
+  private key** into a file on the box and derives an address from it. That
+  address (`0x104feA…dd35` on the current box) is not anyone's known wallet
+  and there is no reason to recognise it — it did not exist until a script
+  minted it. Do not send funds to an address on anyone's say-so, this
+  document included. Print it from the key file on the box first:
+  `bash scripts/go.sh` shows it on the `payer` line before it asks for
+  anything. Fund only an address the box shows you.
+
+  Two other routes exist and cost the owner no new trust: pay from
+  `0x837C…77dd` itself with `HUBVIBE_ALLOW_SELF_PAYMENT=1` (round-trips the
+  money back to the same wallet, but puts that wallet's key on the server —
+  do not do this with a wallet holding real balance), or import the box
+  key into a wallet app so the address stops being a stranger. Either way,
+  `verify-live.sh` above already proves the rail; this only adds a receipt.
 - Finish the Base app registration. The live page already carries the id
   (confirmed 2026-09-08), so nothing needs deploying first: enter
   `hubvibe-io.com` in the dashboard's Add Domain box and press Register. If

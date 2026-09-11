@@ -263,3 +263,62 @@ def test_a_prepaid_key_spends_without_a_sellable_subscription(monkeypatch, tmp_p
         "a funded prepaid key was refused on a box that cannot sell subscriptions"
     )
     assert billing.lookup_key(key)["prepaid_balance_cents"] == 47, "the call was not charged"
+
+
+def test_a_topup_credits_the_key_you_already_have(monkeypatch, tmp_path):
+    """Setting up payment should happen once. A top-up that mints a NEW key
+    turns every refill into a re-setup: the CI pipeline has to rotate the
+    secret it stored, and whatever was left on the old key is stranded because
+    nothing else can ever spend it. Presenting a key tops that key up."""
+    from fastapi.testclient import TestClient
+
+    billing = _load_billing(monkeypatch, tmp_path)
+    # 1 cent left: too little for a $0.03 call, so the key path falls through
+    # to the top-up. That is the refill moment, and the moment the residual
+    # used to be stranded on a key nothing could spend again.
+    key = billing.issue_prepaid_key(1)
+
+    import test_wcag_audit_engine as engine_tests
+
+    module = engine_tests._load_main(monkeypatch)
+    monkeypatch.setattr(module, "billing", billing)
+    # A $0.50 top-up settles; the call it pays for is $0.03.
+    monkeypatch.setattr(module.mpp_payments, "settle_topup_sync", lambda cred, realm=None: 50)
+
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit/seo",
+        json={"html": "<html lang='en'><head><title>t</title></head><body><h1>x</h1></body></html>"},
+        headers={"X-API-Key": key, "Authorization": "Payment stub-credential"},
+    )
+    assert response.status_code == 200, response.text
+
+    # Same key, and it carries the 4 cents it already had plus the 47 the
+    # top-up bought after the call it paid for.
+    assert response.json().get("api_key", key) == key, "the top-up rotated the caller's key"
+    # The 1 cent it still held, plus the 47 the top-up bought after the call.
+    assert billing.lookup_key(key)["prepaid_balance_cents"] == 48
+
+
+def test_a_topup_without_a_key_still_mints_one(monkeypatch, tmp_path):
+    """The no-key case is the whole point of the rail: a machine arrives with
+    no account, pays, and leaves holding something it can spend."""
+    from fastapi.testclient import TestClient
+
+    billing = _load_billing(monkeypatch, tmp_path)
+    import test_wcag_audit_engine as engine_tests
+
+    module = engine_tests._load_main(monkeypatch)
+    monkeypatch.setattr(module, "billing", billing)
+    monkeypatch.setattr(module.mpp_payments, "settle_topup_sync", lambda cred, realm=None: 50)
+
+    client = TestClient(module.app)
+    response = client.post(
+        "/audit/seo",
+        json={"html": "<html lang='en'><head><title>t</title></head><body><h1>x</h1></body></html>"},
+        headers={"Authorization": "Payment stub-credential"},
+    )
+    assert response.status_code == 200, response.text
+    minted = response.json().get("api_key")
+    assert minted, "a payer with no key must leave holding one"
+    assert billing.lookup_key(minted)["prepaid_balance_cents"] == 47
