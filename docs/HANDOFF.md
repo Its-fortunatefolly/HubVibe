@@ -43,7 +43,11 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   (`hubvibe.base.eth`). x402 revenue lands on-chain there and never appears
   in Stripe. The wallet is the counter; `x402 SETTLED` log lines are the
   per-call ledger. It holds 2 USDC the owner sent on 2026-09-06.
-- **Rails live on the node:** x402 only. Stripe/MPP are unset on the box, so
+- **Rails live on the node:** x402 on Base, plus x402 USDC on Solana once
+  `X402_SOLANA_PAY_TO_ADDRESS` (the Base app's Solana address for
+  `hubvibe.base.eth`) is in the box's `.env` and the stack is rebuilt --
+  the v2 header then carries both rails, gated on the facilitator listing
+  Solana with a fee payer. Stripe/MPP are unset on the box, so
   `other_rails` is `[]` and no key can be bought; the code keeps those rails
   fail-closed until their variables are exported.
 - **First paid call: ATTEMPTED 2026-09-08, and it did NOT settle.** Revenue
