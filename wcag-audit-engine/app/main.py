@@ -1063,15 +1063,29 @@ def _bill(auth, price_usd: float) -> Optional[str]:
                     f"(transaction {transaction}); this call is being charged "
                     "and the receipt header carries the transaction"
                 )
+            # WHY it failed goes on the body, not only into our log.
+            #
+            # The node is the only party that knows: the payer sees a 200
+            # with an audit in it, and the operator has to be logged into the
+            # box to read the reason. On 2026-09-08 that cost the owner a
+            # night of grepping for a one-line answer the node already had in
+            # hand and threw away. The reason is about the payer's own
+            # payment, and a settle that failed is exactly when a machine
+            # client needs to know whether retrying is safe.
+            reason = getattr(auth.pending_payment, "settle_error", None)
+            because = f" -- {reason}" if reason else ""
             if state == "unknown":
                 return (
-                    "payment settlement status is unknown: the facilitator did "
-                    "not answer in time. The transfer may still complete on-chain; "
-                    "do not re-pay for this call"
+                    "payment settlement status is unknown: this node did not "
+                    f"get an answer{because}. The transfer may still complete "
+                    "on-chain; do not re-pay for this call"
                 )
             # We delivered without collecting. Deliberately the lesser evil
             # versus charging for undelivered work, but it must be visible.
-            return "payment settlement failed after the audit ran; this call was not charged"
+            return (
+                "payment settlement failed after the audit ran; this call was "
+                f"not charged{because}"
+            )
         return None
 
     if not auth.stripe_billable:

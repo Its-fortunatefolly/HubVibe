@@ -1617,3 +1617,258 @@ def test_the_openapi_offer_prices_the_x402_rail_or_says_nothing(monkeypatch):
 
     unconfigured = _load_x402(monkeypatch, facilitator=None)
     assert unconfigured.discovery_offer("$0.03") == {}
+
+
+# --- httpx timeouts are not builtin TimeoutError ----------------------------
+#
+# The `except TimeoutError` branch was written to catch a settle whose outcome
+# this node cannot know, and it caught only the 45s guard in _run_coro_sync.
+# httpx's own timeouts inherit from Exception, not TimeoutError, and the
+# client's default read timeout (30s) fires BEFORE that guard -- so every
+# mid-flight settle timeout landed in the generic handler, was recorded
+# "refused", and told the payer "this call was not charged" about a transfer
+# that may have completed. That wording invites a second payment for one
+# audit. Found while diagnosing the owner's 2026-09-08 failed settle.
+
+
+def _raise_on_settle(monkeypatch, module, exc):
+    """Make the next facilitator call raise. Patched AFTER verify, so the
+    pending payment under test is a real one."""
+    def _always(coro, timeout=None):
+        coro.close()
+        raise exc
+
+    monkeypatch.setattr(module, "_run_coro_sync", _always)
+
+
+@pytest.mark.parametrize("exc_name", ["ReadTimeout", "WriteTimeout", "RemoteProtocolError"])
+def test_a_settle_that_may_have_reached_the_facilitator_is_unknown(monkeypatch, caplog, exc_name):
+    """These fire after the request went out. The transfer may have landed."""
+    import httpx
+
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    exc_cls = getattr(httpx, exc_name)
+    assert not issubclass(exc_cls, TimeoutError), (
+        f"{exc_name} is now a builtin TimeoutError; this test's premise is stale"
+    )
+    _raise_on_settle(monkeypatch, module, exc_cls("boom"))
+
+    with caplog.at_level(logging.WARNING):
+        assert module.settle_sync(pending) is False
+    assert pending.settle_state == "unknown", (
+        "a settle that may have completed is being reported as not charged"
+    )
+    assert "UNKNOWN" in caplog.text
+    assert "reconcile" in caplog.text
+    # The owner greps one token for every settle failure.
+    assert "x402 settle" in caplog.text
+
+
+@pytest.mark.parametrize("exc_name", ["ConnectTimeout", "ConnectError", "PoolTimeout"])
+def test_a_settle_that_never_left_this_node_is_refused_not_unknown(monkeypatch, exc_name):
+    """The request was never sent, so the money certainly did not move.
+
+    Calling these "unknown" would be the mirror-image lie: it sends the owner
+    hunting the chain for a transfer that cannot exist, and blocks a re-run
+    that is perfectly safe. ConnectTimeout is an httpx TimeoutException by
+    inheritance, so the leaf class has to win the classification.
+    """
+    import httpx
+
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    _raise_on_settle(monkeypatch, module, getattr(httpx, exc_name)("boom"))
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "refused", (
+        "a request that never left is being reported as possibly-charged"
+    )
+
+
+def test_a_facilitator_that_answered_non_200_is_still_refused(monkeypatch):
+    """The library raises ValueError on a non-200 from /settle, before any
+    SettleResponse is parsed. The facilitator answered; it did not settle."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    _raise_on_settle(monkeypatch, module, ValueError("Facilitator settle failed (503): busy"))
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "refused"
+
+
+def test_the_45s_guard_is_still_unknown(monkeypatch):
+    """The original case must not regress while widening the net."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    _raise_on_settle(monkeypatch, module, TimeoutError("facilitator call exceeded 45s"))
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "unknown"
+
+
+# --- the reason belongs on the response, not only in our log ----------------
+
+
+def test_a_refusal_records_the_facilitators_reason_for_the_payer(monkeypatch):
+    """The node is the only party that knows why a settle failed: the payer
+    sees a 200 with an audit in it, and the operator must be logged into the
+    box to read the log. On 2026-09-08 that cost the owner a night of
+    grepping for an answer the node had in hand and discarded."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(
+        monkeypatch, module, settled=False,
+        settle_response=_settle_response(errorReason="insufficient_funds"),
+    )
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "refused"
+    assert "insufficient_funds" in (pending.settle_error or ""), (
+        "the facilitator's reason is being discarded again"
+    )
+
+
+def test_an_exception_records_its_type_for_the_payer(monkeypatch):
+    """"ValueError: Facilitator settle failed (503)" and "ReadTimeout" call
+    for different actions. One generic sentence for both is the bug."""
+    import httpx
+
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    _raise_on_settle(monkeypatch, module, httpx.ReadTimeout("timed out"))
+
+    assert module.settle_sync(pending) is False
+    assert pending.settle_state == "unknown"
+    assert "ReadTimeout" in (pending.settle_error or "")
+
+
+def test_the_reason_is_one_bounded_line(monkeypatch):
+    """A facilitator's error text is someone else's string -- it can be a
+    page of HTML. It goes on a JSON body and into a log line, so flatten it
+    and cap it rather than letting a remote service size our response."""
+    module = _load_x402(monkeypatch)
+    _install_fake_server(monkeypatch, module)
+    pending = module.verify_only_sync("signed-payment", price="$0.03")
+    _raise_on_settle(monkeypatch, module, ValueError("x\ny\n" + "z" * 5000))
+
+    assert module.settle_sync(pending) is False
+    reason = pending.settle_error or ""
+    assert "\n" not in reason and len(reason) <= 180, f"unbounded reason: {len(reason)}"
+    assert "ValueError" in reason
+
+
+def test_the_node_only_calls_methods_the_real_x402_server_has_and_awaits_them_right():
+    """Every test in this file replaces the resource server with a stub that
+    defines whatever this module happens to call. A call to a method the real
+    library does NOT have therefore passes here and fails only when real money
+    is on the line -- which is exactly what shipped on the payer side (#110:
+    `http.post(...)` on a class that has never had `post`, so every wallet-paid
+    Action run died with AttributeError before a byte left the process).
+
+    That guard covered scripts/x402_pay.py. This is the same guard for the
+    money-critical half: the node's own verify and settle.
+
+    It also checks something the payer's guard does not, because it is the
+    other way to call a real method wrongly: `await`-ing a sync method raises
+    TypeError, and calling an async one without await returns a coroutine that
+    reads as truthy and silently never runs. In settle_sync either lands in
+    `except Exception`, is recorded "refused", and tells the payer their call
+    was not charged -- a settle failure indistinguishable from the facilitator
+    saying no. Imported hard, never skipped: x402 is pinned in requirements.txt
+    and a skip here restores the blind spot.
+    """
+    import ast
+    import inspect
+
+    from x402 import x402ResourceServer
+
+    module_path = REPO_ROOT / "wcag-audit-engine" / "app" / "x402_payments.py"
+    tree = ast.parse(module_path.read_text())
+
+    # Names bound to the resource server, so a rename does not blind this.
+    server_names = {
+        t.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for t in node.targets
+        if isinstance(t, ast.Name)
+        and isinstance(node.value, ast.Call)
+        and getattr(node.value.func, "id", None) == "_get_server"
+    }
+    assert server_names, "no _get_server() assignment found; this guard sees nothing"
+
+    def server_calls(node):
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in server_names
+        )
+
+    called = {n.func.attr for n in ast.walk(tree) if server_calls(n)}
+    assert called, "this module calls nothing on the resource server; guard sees nothing"
+
+    missing = sorted(m for m in called if not hasattr(x402ResourceServer, m))
+    assert not missing, (
+        "x402_payments.py calls %s on x402ResourceServer, which has no such "
+        "method -- every payment would die before reaching the facilitator. "
+        "Available: %s"
+        % (missing, sorted(m for m in dir(x402ResourceServer) if not m.startswith("_")))
+    )
+
+    awaited = {
+        n.value.func.attr
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Await) and server_calls(n.value)
+    }
+    wrong = []
+    for name in sorted(called):
+        is_async = inspect.iscoroutinefunction(getattr(x402ResourceServer, name))
+        if is_async and name not in awaited:
+            wrong.append(f"{name} is async and is called without await somewhere")
+        if not is_async and name in awaited:
+            wrong.append(f"{name} is sync and is awaited")
+    assert not wrong, (
+        "await mismatch against the real library: %s. Awaiting a sync method "
+        "raises TypeError; not awaiting an async one silently never runs it. "
+        "Inside settle_sync either is recorded 'refused' and tells the payer "
+        "they were not charged." % wrong
+    )
+
+    # Existence and await-ness are two of the three ways to call a real method
+    # wrongly. The third is arity: the stubs here accept whatever they are
+    # handed, so a library that grows a required argument, or loses one, binds
+    # fine in tests and raises TypeError in front of a paying agent.
+    unbindable = []
+    for node in ast.walk(tree):
+        if not server_calls(node):
+            continue
+        try:
+            sig = inspect.signature(getattr(x402ResourceServer, node.func.attr))
+        except (TypeError, ValueError):
+            continue
+        positional = [object()] * (len(node.args) + 1)  # +1 for self
+        keywords = {kw.arg: object() for kw in node.keywords if kw.arg}
+        if any(kw.arg is None for kw in node.keywords):
+            continue  # **kwargs splat: arity is not statically knowable
+        if any(isinstance(a, ast.Starred) for a in node.args):
+            continue
+        try:
+            sig.bind(*positional, **keywords)
+        except TypeError as exc:
+            unbindable.append(f"{node.func.attr} at line {node.lineno}: {exc}")
+    assert not unbindable, (
+        "these calls do not fit the real library's signature: %s -- they raise "
+        "TypeError against the pinned x402, and the stubs in this file accept "
+        "anything, so nothing else here would notice." % unbindable
+    )

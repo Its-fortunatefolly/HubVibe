@@ -111,6 +111,38 @@ export PAYER
 step "Checking what the payer holds"
 BALANCE=$(read_balance) || BALANCE=""
 
+# `--check` answers the two questions a person actually has about an address
+# their server made: is it mine, and where is my money. Both were unanswerable
+# from a phone on 2026-09-08 -- the owner scanned the address, saw an empty
+# page, and could not tell whether the wallet was theirs or the funds were
+# gone. Neither was wrong: a wallet holding only USDC and no ETH has NO normal
+# transactions, so an explorer's default tab is empty and the money sits one
+# tab over under ERC-20 transfers. Reading the balance on-chain answers it
+# without a browser, and without spending anything.
+if [ "${1:-}" = "--check" ]; then
+  printf '\n  \033[1mAddress:\033[0m %s\n' "$PAYER"
+  printf '  \033[1mUSDC on Base:\033[0m $%s\n\n' "${BALANCE:-unreadable}"
+  printf '  This address is derived from the private key in %s\n' "$WALLET_FILE"
+  printf '  on THIS box. That file is the only thing that controls it -- it is\n'
+  printf '  not in any wallet app and there is no recovery phrase, which is why\n'
+  printf '  it looks unfamiliar. Keep only what one call costs in it.\n\n'
+  printf '  In a browser the USDC is under the ERC-20 tab, not Transactions:\n'
+  printf '    https://basescan.org/token/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913?a=%s\n\n' "$PAYER"
+  # This reads ONE token on ONE chain. A zero here is not proof of a missing
+  # transfer -- USDC on Ethereum, bridged USDbC, or plain ETH all read $0.00
+  # and look identical to "never arrived". Hand that question to the tool
+  # that actually answers it rather than leaving a scary number alone.
+  if python3 -c "import sys; sys.exit(0 if float('${BALANCE:-0}') > 0 else 1)"; then
+    printf '  Enough to pay: drop --check and this makes the call.\n\n'
+  else
+    printf '  \033[1mThis reads only native USDC on Base.\033[0m A zero here does NOT mean\n'
+    printf '  the money is gone: USDC on another chain, bridged USDbC, or ETH all\n'
+    printf '  read $0.00. Look across every chain:\n\n'
+    printf '      bash %s/scripts/find-my-money.sh\n\n' "$REPO_ROOT"
+  fi
+  exit 0
+fi
+
 if [ -z "$BALANCE" ]; then
   warn "the chain is unreadable from this box right now -- will keep trying"
   BALANCE="0"

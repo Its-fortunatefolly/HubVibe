@@ -1347,7 +1347,12 @@ def test_no_shipped_surface_still_quotes_the_retired_plan():
 
     retired = re.compile(
         r"\$49\b|1,?500 scans|1,?500 included|included_calls_per_month"
-        r"|\$29\.99|\$79\b|\$249\b|\"human_plans\"|plan-btn|per site watched"
+        r"|\$29\.99|\$79\b|\$249\b|\"human_plans\"|plan-btn"
+        # Word order is not the point, the OFFER is. The sweep looked for
+        # "per site watched" while the landing page's meta description --
+        # the one string every crawler and link preview shows -- said
+        # "watched per site on a plan" and sailed through for a day.
+        r"|per site watched|watched per site"
     )
 
     surfaces = []
@@ -4280,7 +4285,8 @@ def test_no_human_tier_is_advertised_on_any_served_surface(monkeypatch):
 
     for path in ("/", "/llms.txt"):
         text = client.get(path).text
-        for price in ("$29.99", "$79", "$249", "per site watched", "plan-btn", "human plan"):
+        for price in ("$29.99", "$79", "$249", "per site watched", "watched per site",
+                      "plan-btn", "human plan"):
             assert price not in text, f"{path} still shows {price!r}"
 
     challenge = client.post("/audit/wcag", json={"url": "https://example.com"}).json()
@@ -4310,3 +4316,71 @@ def test_checkout_refuses_a_plan_now_that_the_tiers_are_retired(monkeypatch, loa
     assert "retired" in response.json()["detail"]
     response = client.post("/billing/report", json={"email": "b@example.com", "url": "https://example.com"})
     assert response.status_code == 501
+
+
+def test_the_settlement_failure_says_WHY_on_the_response(monkeypatch):
+    """The node is the only party that knows why a settle failed.
+
+    The payer sees a 200 with an audit in it; the operator has to be logged
+    into the box to read the log. On 2026-09-08 that cost the owner a night
+    of grepping for a one-line answer the node already had in hand. "The
+    facilitator refused it: insufficient_funds" and "ReadTimeout" call for
+    completely different next moves, and one generic sentence for both is
+    the defect -- a machine client cannot tell whether retrying is safe.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    calls = _x402_caller(monkeypatch, module, settle_ok=False)
+    real_settle = module.x402_payments.settle_sync
+
+    def _settle_with_reason(pending):
+        result = real_settle(pending)
+        pending.settle_state = "refused"
+        pending.settle_error = "the facilitator refused it: insufficient_funds"
+        return result
+
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _settle_with_reason)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    body = TestClient(module.app).post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "signed-payment"},
+    ).json()
+
+    assert calls["settled"] == 1
+    warning = body["billing_warning"]
+    assert "not charged" in warning
+    assert "insufficient_funds" in warning, (
+        "the reason is still only in the log, where the payer cannot see it"
+    )
+
+
+def test_an_unknown_settlement_says_WHY_too(monkeypatch):
+    """Unknown is the one a payer must not guess about: re-running can pay
+    twice. Whatever the node knows about why goes on the body."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    _x402_caller(monkeypatch, module, settle_ok=False)
+    real_settle = module.x402_payments.settle_sync
+
+    def _settle_unknown(pending):
+        result = real_settle(pending)
+        pending.settle_state = "unknown"
+        pending.settle_error = "ReadTimeout: timed out"
+        return result
+
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _settle_unknown)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    warning = TestClient(module.app).post(
+        "/audit/wcag",
+        json={"url": "https://example.com"},
+        headers={"X-PAYMENT": "signed-payment"},
+    ).json()["billing_warning"]
+
+    assert "unknown" in warning
+    assert "do not re-pay" in warning
+    assert "ReadTimeout" in warning

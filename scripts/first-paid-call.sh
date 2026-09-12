@@ -64,16 +64,58 @@ set -uo pipefail
 BASE="${BASE:-https://hubvibe-io.com}"
 ROUTE="${ROUTE:-/audit/wcag}"
 TARGET_URL="${TARGET_URL:-https://example.com}"
-# Dexter has a live discovery index at /discovery/resources; xpay.sh does not.
-# For the index check here to match the facilitator the server actually uses,
-# this must equal X402_FACILITATOR_URL on the live service -- pinned to
-# vps-install.sh's default by test_the_deploy_default_facilitator_matches_the_scripts_that_pay.
-FACILITATOR="${FACILITATOR:-https://x402.dexter.cash}"
+# Which facilitator sees this payment is the NODE's decision, not this
+# script's: in x402 the resource server calls its own facilitator to verify
+# and settle, and the payer is never told which one. A Bazaar entry appears
+# only where the PaymentPayload actually landed. So reading Dexter's index
+# after paying a node configured for xpay.sh answers a question about someone
+# else's facilitator, and reports "indexing may lag" when the truth is "your
+# payment never went near this index." The box was installed on xpay.sh
+# before the defaults moved to Dexter, so this is not hypothetical.
+#
+# This script runs on the box, so the node's own `.env` is right here and is
+# the only authority. Read it. An explicitly exported FACILITATOR still wins
+# -- that is someone deliberately asking a different question.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NODE_ENV_FILE="${HUBVIBE_NODE_ENV_FILE:-$SCRIPT_DIR/../deploy/vps/.env}"
+NODE_FACILITATOR=""
+if [ -r "$NODE_ENV_FILE" ]; then
+  NODE_FACILITATOR=$(sed -n 's/^[[:space:]]*X402_FACILITATOR_URL[[:space:]]*=[[:space:]]*//p' \
+    "$NODE_ENV_FILE" | tail -n 1 | tr -d '"'"'"'' | tr -d '\r' | sed 's:/*$::')
+fi
+if [ -n "${FACILITATOR:-}" ]; then
+  FACILITATOR_SOURCE="the FACILITATOR variable you exported"
+elif [ -n "$NODE_FACILITATOR" ]; then
+  FACILITATOR="$NODE_FACILITATOR"
+  FACILITATOR_SOURCE="the node's $NODE_ENV_FILE"
+else
+  FACILITATOR="https://x402.dexter.cash"
+  FACILITATOR_SOURCE="the default -- the node's own .env was not readable from here, so which facilitator settles is UNCONFIRMED"
+fi
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$1"; }
 warn() { printf '  \033[33mNOTE\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31mSTOP\033[0m  %s\n' "$1"; exit 1; }
+
+# How we recognise ourselves in someone else's index.
+#
+# The Bazaar record is serialised by the facilitator, not by us, so match it
+# the way THEIR serialiser might have written it. An EIP-55 checksummed
+# address and a lowercased one are the same address, and `grep` without -i
+# calls them different -- so a node that IS listed reads as "not indexed",
+# forever, indistinguishably from never having been listed. An index keyed by
+# resource URL names our host and no address at all, so accept that too.
+# This repo has shipped three green checks that asked whether a field was
+# present in OUR shape rather than whether the consumer's shape matched.
+index_hits() {
+  local host
+  host=$(printf '%s' "$BASE" | sed -e 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##' \
+                                   -e 's#[/?].*$##' -e 's/:[0-9]*$//')
+  printf '%s' "$1" \
+    | grep -oiE "$(printf '%s|%s' "$PAY_TO" "$host" | sed 's/\./\\./g')" \
+    | wc -l | tr -d ' '
+}
 
 # ---------------------------------------------------------------------------
 # Preflight. Every check below is here to avoid spending money on a call that
@@ -139,6 +181,9 @@ print("%s\t%s" % (key if key.startswith("0x") else "0x" + key, a.address))
   printf '%s' "${generated##*$'\t'}"
 }
 
+# Said before a cent moves, because it decides what the last step can mean.
+warn "Bazaar index will be read from $FACILITATOR -- from $FACILITATOR_SOURCE"
+
 step "Checking the client dependencies are installed"
 if ! python3 -c 'import x402, eth_account, httpx' 2>/dev/null; then
   # A fresh Ubuntu box (the VPS) ships python3 with no pip and no venv
@@ -196,7 +241,9 @@ except Exception as exc:
         ;;
       *)
         printf '      address: \033[1m%s\033[0m\n\n' "$EXISTING"
-        printf '  Send it USDC on Base -- $1 is plenty. NO ETH NEEDED.\n'
+        printf '  Send it USDC on Base -- $1 is plenty. This wallet needs NO ETH:\n'
+        printf '  it never broadcasts anything. (The send itself is an ordinary\n'
+        printf '  transfer out of your own wallet, which pays gas as it always does.)\n'
         printf '  Then just run:  bash scripts/first-paid-call.sh\n\n'
         printf '  (Only if you are certain it holds nothing and want a fresh one:\n'
         printf '   HUBVIBE_FORCE_NEW_WALLET=1 bash scripts/first-paid-call.sh --new-wallet)\n\n'
@@ -207,8 +254,11 @@ except Exception as exc:
   ADDRESS=$(new_wallet)
   printf '\n  \033[1mNew Base wallet created.\033[0m Key saved to %s (mode 600).\n\n' "$WALLET_FILE"
   printf '      address: \033[1m%s\033[0m\n\n' "$ADDRESS"
-  printf '  Send it USDC on Base -- $1 is plenty for a $0.03 call. NO ETH NEEDED:\n'
-  printf '  x402 signs the transfer off-chain and the facilitator pays the gas.\n\n'
+  printf '  Send it USDC on Base -- $1 is plenty for a $0.03 call. THIS wallet\n'
+  printf '  needs NO ETH: x402 signs off-chain and the facilitator pays the gas,\n'
+  printf '  so it never broadcasts and never spends gas. (Sending it the dollar\n'
+  printf '  is an ordinary transfer out of YOUR wallet, which pays gas as usual --\n'
+  printf '  that is the one place on this path where gas is yours to cover.)\n\n'
   printf '  Then re-run:  bash scripts/first-paid-call.sh\n\n'
   exit 0
 fi
@@ -555,10 +605,12 @@ if printf '%s' "$BEFORE" | grep -qi 'not found'; then
   warn "$FACILITATOR serves no /discovery/resources -- it settles payments and"
   warn "runs no index. This payment will prove settlement but cannot register"
   warn "the node anywhere. To get indexed, settle through a facilitator that"
-  warn "runs a Bazaar."
+  warn "runs a Bazaar:"
+  warn "  cd $SCRIPT_DIR/.. && bash scripts/switch-facilitator.sh https://x402.dexter.cash"
+  warn "then run this script once more."
 else
-  BEFORE_COUNT=$(printf '%s' "$BEFORE" | grep -o "$PAY_TO" | wc -l | tr -d ' ')
-  ok "index reachable; entries already naming our pay-to address: $BEFORE_COUNT"
+  BEFORE_COUNT=$(index_hits "$BEFORE")
+  ok "index reachable; entries already naming this node: $BEFORE_COUNT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -632,18 +684,79 @@ esac
 
 SPENT=$(printf '%s' "$PAID" | cut -f2)
 TX=$(printf '%s' "$PAID" | cut -f3)
-ok "settled \$$SPENT and the audit returned a result"
-printf '%s\n' "$PAID" | cut -f4- | sed 's/^/        /'
+RESULT=$(printf '%s' "$PAID" | cut -f4-)
+
+# A 200 with an audit in it is NOT the same as having been charged for it.
+#
+# The node finishes and delivers an audit whose settlement failed -- on
+# purpose, as the lesser evil versus charging for undelivered work -- and
+# admits it in `billing_warning` on the body it returns. Reading only the
+# HTTP status and announcing "settled" converts that admission into a
+# success report. On 2026-09-08 this script printed `settled $0.03 and the
+# audit returned a result` directly above a body reading "payment settlement
+# failed after the audit ran; this call was not charged", and the owner was
+# told revenue had started when no money had moved at all.
+#
+# The body is the authority on whether we were paid. Read it first.
+case "$RESULT" in
+  *"settlement failed after the audit ran"*)
+    printf '  \033[31mSTOP\033[0m  the audit ran and was delivered, but the node was NOT paid:\n'
+    printf '%s\n' "$RESULT" | sed 's/^/        /'
+    printf '\n  \033[1mVerify passed; the settle did not complete.\033[0m The signature,\n'
+    printf '  the rail, the route and the audit all work. Nothing moved after the\n'
+    printf '  work was delivered, so nothing can be indexed either. The node\n'
+    printf '  logged WHICH of three ways it failed, and they are different\n'
+    printf '  problems with different fixes:\n\n'
+    # `x402 settle` is the only token common to all three failure lines --
+    # REFUSED (the facilitator said no), TIMED OUT (it never answered), and
+    # FAILED before the facilitator could answer (an exception on this side,
+    # logged through _log_rejection). Grep the wording of one and the other
+    # two return nothing, and empty output reads as "no failure was logged"
+    # rather than "wrong question asked". That happened on 2026-09-08: the
+    # owner was handed `grep "settle REFUSED"` for a run whose body said
+    # settlement FAILED, got silence, and the box looked broken.
+    # test_the_settle_diagnostic_matches_every_failure_log pins this string
+    # against x402_payments.py so the two cannot drift.
+    printf '    cd %s/../deploy/vps && docker compose logs --since 3h 2>&1 | grep -i "x402 settle" | tail -20\n\n' "$SCRIPT_DIR"
+    printf '  REFUSED  the facilitator declined the transfer.\n'
+    printf '  FAILED   the call never got an answer out of it -- our side.\n'
+    printf '  TIMED OUT  unknown; the money may yet move. Do NOT re-run on that\n'
+    printf '           one until you have checked the wallet.\n\n'
+    printf '  If compose finds no containers, ask docker directly:\n\n'
+    printf '    docker logs --since 3h $(docker ps -qf name=hubvibe | head -1) 2>&1 | grep -i x402 | tail -30\n\n'
+    printf '  On REFUSED or FAILED the wallet still holds the money; nothing is\n'
+    printf '  lost and re-running after the fix is safe.\n'
+    exit 1
+    ;;
+  *"settlement is pending on-chain"*)
+    warn "settled, but the transfer is not confirmed yet -- this call IS charged."
+    warn "the receipt header carries the hash; do not pay again."
+    ;;
+  *"settlement status is unknown"*)
+    warn "the facilitator did not answer the settle in time. The transfer may"
+    warn "still complete on-chain -- do NOT re-run this until you know, or you"
+    warn "may pay twice for one call. Check the wallet first."
+    ;;
+  *)
+    ok "settled \$$SPENT and the audit returned a result"
+    ;;
+esac
+printf '%s\n' "$RESULT" | sed 's/^/        /'
 
 # The receipt is the proof. A settled payment has a transaction hash, and
 # the node hands it back in the PAYMENT-RESPONSE header (x402 spec step 10).
 # Print the explorer link for it, so "did the money move" is one tap and not
-# a wallet-app hunt. A node whose deployed revision predates the receipt
-# sends no header; say so rather than printing an empty link.
+# a wallet-app hunt.
 if [ -n "$TX" ]; then
   ok "on-chain: https://basescan.org/tx/$TX"
 else
-  warn "the node sent no PAYMENT-RESPONSE receipt (deployed revision predates it)."
+  # There are two reasons for no header, and they are not close: a settle
+  # that never happened has no hash to report, and blaming the deployed
+  # revision for that sends the reader to rebuild a node that is fine. Only
+  # say "old revision" once the body has confirmed we WERE paid.
+  warn "no PAYMENT-RESPONSE receipt came back. If the body above reports no"
+  warn "billing problem, the deployed revision predates the receipt header"
+  warn "(rebuild: cd deploy/vps && docker compose up -d --build)."
   warn "look for the transfer at https://basescan.org/address/$PAY_TO"
 fi
 
@@ -663,13 +776,27 @@ fi
 
 sleep 5
 AFTER=$(curl -sS -m 30 "$FACILITATOR/discovery/resources" 2>/dev/null)
-AFTER_COUNT=$(printf '%s' "$AFTER" | grep -o "$PAY_TO" | wc -l | tr -d ' ')
+AFTER_COUNT=$(index_hits "$AFTER")
 
 if [ "$AFTER_COUNT" -gt "${BEFORE_COUNT:-0}" ]; then
-  printf '\n  \033[1;32mINDEXED.\033[0m %s entries now name our pay-to address (was %s).\n' \
+  printf '\n  \033[1;32mINDEXED.\033[0m %s entries now name this node (was %s).\n' \
     "$AFTER_COUNT" "${BEFORE_COUNT:-0}"
   printf '  An agent shopping the Bazaar by capability can now find this node.\n'
+elif [ -n "$NODE_FACILITATOR" ] && [ "$FACILITATOR" = "$NODE_FACILITATOR" ]; then
+  # This index belongs to the facilitator that actually settled, so a missing
+  # entry really can be lag, and waiting is a reasonable thing to do.
+  warn "no new entry yet (still $AFTER_COUNT). This IS the facilitator the node"
+  warn "settles through, so indexing may simply lag; re-check with:"
+  warn "  curl -s $FACILITATOR/discovery/resources | grep -ci $PAY_TO"
 else
-  warn "no new entry yet (still $AFTER_COUNT). Indexing may lag; re-check with:"
-  warn "  curl -s $FACILITATOR/discovery/resources | grep -c $PAY_TO"
+  # It is not. Telling someone to wait for an index their payment never
+  # reached costs them the days it takes to stop believing it.
+  warn "no new entry (still $AFTER_COUNT) -- and this index may not be the one"
+  warn "that could ever have it. The payment settled through whichever"
+  warn "facilitator the NODE is configured for; this index was read from"
+  warn "$FACILITATOR_SOURCE. Confirm which one settled:"
+  warn "  grep X402_FACILITATOR_URL $NODE_ENV_FILE"
+  warn "If that is not $FACILITATOR, waiting will never help. Point the node at"
+  warn "a facilitator that runs a Bazaar and pay once more:"
+  warn "  cd $SCRIPT_DIR/.. && bash scripts/switch-facilitator.sh https://x402.dexter.cash"
 fi

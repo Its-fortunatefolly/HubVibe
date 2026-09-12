@@ -272,12 +272,22 @@ def test_the_deploy_default_facilitator_matches_the_scripts_that_pay():
     """A node installed against one facilitator while first-paid-call.sh
     checks another indexes nothing and reports it as failure. The live box
     was installed on xpay.sh after #66 moved everything else to Dexter;
-    pinning them together is what stops that recurring."""
+    pinning them together is what stops that recurring.
+
+    first-paid-call.sh now prefers the live node's own X402_FACILITATOR_URL
+    over any default, which is the real fix. This pin still matters for the
+    case that produced it: a box whose `.env` cannot be read from where the
+    script runs falls back to this default, and a fallback that disagrees
+    with the installer is the same bug one step further along."""
     import re
 
     def default(path, var):
         text = (REPO_ROOT / path).read_text()
-        m = re.search(rf'^{var}="\$\{{[A-Z0-9_]+:-(https://[^}}"]+)\}}"', text, re.M)
+        # Either `X="${X:-https://...}"` or a plain `X="https://..."` used as
+        # the last resort inside a resolution branch.
+        m = re.search(
+            rf'^\s*{var}="(?:\$\{{[A-Z0-9_]+:-)?(https://[^}}"]+)\}}?"', text, re.M
+        )
         assert m, f"no default facilitator found in {path}"
         return m.group(1)
 

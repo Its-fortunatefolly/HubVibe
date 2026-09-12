@@ -86,6 +86,91 @@ def _block(start_marker, end_marker):
     return text[start : text.index(end_marker, start)]
 
 
+def _deployed_image_block():
+    """The 'is the box running this checkout' section, on its own."""
+    return _block('LOCAL_INDEX="${REPO_DIR:-}', 'echo "Discovery surface')
+
+
+def _run_deployed_image_block(tmp_path, *, local_html, live_html):
+    """Drive that block against a fake checkout and a stubbed live page."""
+    index = tmp_path / "wcag-audit-engine" / "app" / "static" / "index.html"
+    index.parent.mkdir(parents=True)
+    index.write_text(local_html)
+
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    (stub_dir / "curl").write_text('#!/usr/bin/env bash\nprintf "%s" "$STUB_HTML"\n')
+    (stub_dir / "curl").chmod(0o755)
+
+    harness = tmp_path / "block.sh"
+    harness.write_text(
+        _HARNESS_PREAMBLE + f'REPO_DIR="{tmp_path}"\n' + _deployed_image_block()
+    )
+    env = dict(os.environ)
+    env["PATH"] = f"{stub_dir}:{env['PATH']}"
+    env["STUB_HTML"] = live_html
+    return subprocess.run(
+        ["bash", str(harness)], capture_output=True, text=True, env=env, timeout=60
+    )
+
+
+def _page(app_id):
+    return f'<head><meta name="base:app_id" content="{app_id}" /></head>'
+
+
+# --- Is the deployed node running THIS checkout? ----------------------------
+#
+# Every other check here passes against a stale image: an old container
+# answers 200 on every route and serves a perfectly good 402. On 2026-09-07
+# main carried a new Base app_id for hours while the live page served the
+# old one, and the only symptom anywhere was a domain verification that
+# silently never completed.
+
+
+def test_a_node_running_this_checkout_passes(tmp_path):
+    result = _run_deployed_image_block(
+        tmp_path, local_html=_page("6a83832901463168d7e651ca"),
+        live_html=_page("6a83832901463168d7e651ca"),
+    )
+    assert "PASS|" in result.stdout, result.stdout
+    assert "FAIL|" not in result.stdout
+
+
+def test_a_node_running_an_older_image_is_caught_and_named(tmp_path):
+    """THE test. The failure must name both ids and the command that fixes
+    it -- 'git pull' on the box is the thing people do instead, and it
+    changes nothing the world can see."""
+    result = _run_deployed_image_block(
+        tmp_path, local_html=_page("6a83832901463168d7e651ca"),
+        live_html=_page("6a8383066ea1f57fed333625"),
+    )
+    assert "FAIL|" in result.stdout, result.stdout
+    assert "6a8383066ea1f57fed333625" in result.stdout, "the live value is not named"
+    assert "6a83832901463168d7e651ca" in result.stdout, "the expected value is not named"
+    assert "--build" in result.stdout, "the fix command is missing"
+
+
+def test_a_live_page_with_no_tag_at_all_is_a_failure(tmp_path):
+    result = _run_deployed_image_block(
+        tmp_path, local_html=_page("6a83832901463168d7e651ca"),
+        live_html="<head><title>old</title></head>",
+    )
+    assert "FAIL|" in result.stdout
+    assert "none" in result.stdout
+
+
+def test_a_checkout_with_no_tag_says_so_rather_than_passing_silently(tmp_path):
+    """A check that silently skips converts 'unverified' into 'verified' in
+    the reader's head -- this repo has paid for that twice."""
+    result = _run_deployed_image_block(
+        tmp_path, local_html="<head><title>no tag</title></head>",
+        live_html=_page("6a83832901463168d7e651ca"),
+    )
+    assert "PASS|" not in result.stdout
+    assert "FAIL|" not in result.stdout
+    assert "NOTE" in result.stdout
+
+
 def _challenge_block():
     """The x402 challenge section, on its own."""
     return _block('echo "402 challenge is machine-actionable"', 'echo "MCP endpoint')
