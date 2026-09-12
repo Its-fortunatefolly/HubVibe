@@ -75,6 +75,7 @@ def test_settlement_lines_name_their_facilitator_when_the_log_carries_it():
 def test_an_empty_window_says_the_access_log_may_be_missing():
     out = _run(["hubvibe-1  | INFO:     172.18.0.3:1 - \"GET /health HTTP/1.1\" 200 OK"])
     assert "no access-log lines seen" in out
+    assert "restart the caddy container" in out, "a rebuild does not re-read the bind-mounted Caddyfile"
     assert "settlements: none" in out
 
 

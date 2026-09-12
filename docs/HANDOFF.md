@@ -276,6 +276,8 @@ Shell included. Each line below says which it is.
   code and a changed homepage in front of the world; `git pull` alone does
   nothing, the image has to be rebuilt:
   `cd /root/HubVibe && git pull -q origin main && cd deploy/vps && docker compose up -d --build`
+  A change to `deploy/vps/Caddyfile` needs one more line -- it is bind-mounted
+  and read only when Caddy starts: `docker compose restart caddy` in `deploy/vps`.
 - [ON THE BOX] Point the node at the facilitator that indexes (verifies
   itself against the live 402, rolls back on a dead rail):
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://facilitator.payai.network`
