@@ -59,16 +59,18 @@ Run stopgap is project `resolver-time`, service `hubvibe`, region
 everywhere (keyless, Base mainnet, settles AND indexes on the first
 payment); `facilitator.xpay.sh` settles but indexes nothing, and
 `x402.dexter.cash` indexes but ran out of settlement gas. The box is moved
-only with `scripts/switch-facilitator.sh`. Coinbase CDP is **abandoned, not
-pending** — its review wants proof of a DBA that does not exist, and its
-code is gone. Do not suggest Coinbase.
+only with `scripts/switch-facilitator.sh`. Coinbase CDP is back as of
+2026-09-12 (new account after the DBA review blocked the first): its
+facilitator is what lists a resource in the x402 Bazaar, and the node signs
+CDP's per-request JWTs when `CDP_API_KEY_ID`/`CDP_API_KEY_SECRET` are set
+and the facilitator is a Coinbase host.
 
 ## Things already settled — do not re-litigate
 
 - **The pay-to address exists and is well-formed.** Two sessions burned days on
   a "missing 40-hex address." It was minted for the deployment, not held in a
   wallet app. Both halves of that contradiction were true.
-- **Coinbase is out of the path entirely.**
+- **Coinbase CDP is the Bazaar path** (from 2026-09-12); its credentials never leave a Coinbase host.
 - **Bazaar indexing needs a payment, not a better facilitator.** The spec has
   one ingestion path: a facilitator catalogs a resource when a `PaymentPayload`
   carrying the discovery extension reaches it. No registration endpoint, no

@@ -96,16 +96,14 @@ On audit failure (browser crash, invalid input, timeout): HTTP 502,
 `{"status": "error", "pass": null, "detail": "..."}`. Failed audits are
 never billed.
 
-## Growth surface
+## The landing page is not a product surface
 
-`/` serves a landing page (`app/static/index.html`), not the health check
-(that lives at `/health`; Cloud Run's frontend reserves `/healthz`).
-
-The page exists for humans evaluating the service — buyers, partners, and
-anyone verifying the business is real — but the product itself is the
-machine API, and the page is written that way: it leads with the 402 payment
-handshake and defers the rate to the agent manifest, not with a subscription
-pitch.
+`/` serves an about-page (`app/static/index.html`), not the health check
+(that lives at `/health`; Cloud Run's frontend reserves `/healthz`). It
+says what HubVibe is and points at the machine surfaces; it sells nothing,
+carries no form, and never prints the per-call rate. HubVibe is software
+to software: the buyer is an agent or a pipeline, the product is the HTTP
+402 path and the discovery surfaces that lead machines to it.
 
 There is deliberately **no free scan**. An audit costs a real browser page
 load, so giving them away funds strangers' compute at our expense and
@@ -113,71 +111,37 @@ invites abuse.
 
 ## Getting paid
 
-Two audiences, priced in different units on purpose:
+Per call is the only price ($0.03 per audit, $0.10 for the bundle), paid
+by the calling software on the request itself. No account, no signup, no
+subscription, no human step:
 
-- **Machines, per call** ($0.03 individual, $0.10 bundle): x402 or MPP, no
-  subscription, no signup — see the two sections below. This is the product.
-- **Humans**: there are no subscriptions or plans (retired 2026-09-06 —
-  per call is the only price). Card payers buy a $0.50 prepaid block
-  through the MPP top-up rail and spend it at the same per-call rates.
+- **x402** (`X-PAYMENT`): USDC on Base, settled by the facilitator into
+  the self-custody pay-to wallet. The primary rail; see below.
+- **MPP** (`Authorization: Payment ...`): a machine credential verified
+  against Stripe or the Tempo network, where those are configured. The
+  MPP top-up variant sells a small prepaid block to the calling machine on
+  that same request and returns an `api_key` holding the remainder, which
+  the machine spends per call as `X-API-Key`. Nothing is bought on a page.
 
-Every real call also still reports a Stripe Meter Event
-(`billing.record_usage`) regardless of which auth path was used to bill it
-via Stripe, so usage history stays centralized in Stripe either way. Stripe
-owns the invoicing for the subscription rail — this service stores the
-`api_key -> record` mapping (and prepaid balances) in its key store, which is
-Firestore on Cloud Run and SQLite on the box.
-(The $0.10 bundle price is approximated as 3 Meter Events, ~$0.09, against
-the existing flat per-event meter rather than requiring a second Stripe
-Price/meter just for this -- see `record_usage`'s docstring.)
+Every call that Stripe bills still reports a Stripe Meter Event
+(`billing.record_usage`), priced in meter units: a $0.03 audit is 3 units
+of a $0.01 Price, a $0.10 bundle is 10, so `STRIPE_METERED_PRICE_ID`,
+`STRIPE_METER_UNIT_CENTS` (default `1`) and `STRIPE_METER_AGGREGATION`
+(`count` or `sum`, default `count`) must describe the same Price or every
+invoice is wrong uniformly and invisibly. The key store (Firestore on
+Cloud Run, SQLite on the box) holds the `api_key -> record` mapping and
+prepaid balances.
 
-Customer-facing flow (all handled by this service, no external pages
-required to make it work):
+Legacy, kept only so keys issued before 2026-09-06 keep working: the
+human plan tiers are retired, `/billing/checkout` refuses a plan,
+`STRIPE_PRICE_PRO` / `STRIPE_PRICE_AGENCY` / `STRIPE_PRICE_ONEOFF_REPORT`
+are ignored, and `QUOTA_PRO`, `QUOTA_AGENCY` and `SAAS_MONTHLY_QUOTA`
+only govern those old keys. The Stripe webhook at `/billing/webhook`
+(`checkout.session.completed`) exists for the same reason. Do not build
+on any of it.
 
-1. `POST /billing/checkout {"email": "..."}` -> `{"checkout_url": "..."}`. No
-   served page calls this; the landing page carries no checkout form.
-2. Stripe redirects back to `/billing/success?session_id=...` (or your own
-   `CHECKOUT_SUCCESS_URL`, if you set one to override the default). That
-   page polls `GET /billing/api-key` until the webhook lands and displays
-   the customer's key with a ready-to-run `curl` example.
-3. The customer uses that key as `X-API-Key` on any `/audit*` route. Every
-   successful audit reports usage to Stripe; Stripe bills them on its
-   normal cycle.
-
-One-time setup in the Stripe Dashboard (not something this code can do for
-you — it needs your Stripe account):
-
-1. **Product catalog**: no subscription Prices are needed — the human
-   plans are retired (`STRIPE_PRICE_PRO` / `STRIPE_PRICE_AGENCY` /
-   `STRIPE_PRICE_ONEOFF_REPORT` are ignored; `/billing/checkout` refuses a
-   plan). Only the metered Price below and the MPP profile matter.
-2. **Billing > Meters**: create a meter (e.g. event name `wcag_audit_call`).
-   Note its aggregation -> `STRIPE_METER_AGGREGATION` (`count` or `sum`,
-   default `count`). It cannot be changed after the meter is created.
-3. **Product catalog**: create a recurring Price with `usage_type: metered`
-   attached to that meter. Note the Price ID -> `STRIPE_METERED_PRICE_ID`,
-   **and what one unit costs** -> `STRIPE_METER_UNIT_CENTS` (default `1`,
-   i.e. $0.01/unit).
-
-   These two are not bookkeeping. Usage is reported as **the price of the
-   call in meter units** — a $0.03 audit is 3 units of a $0.01 Price, a
-   $0.10 bundle is 10 — so a Price or an aggregation that disagrees with
-   these variables invoices the wrong amount on every call, uniformly and
-   invisibly. Reconcile the Price BEFORE attaching it to a subscription;
-   an unattached metered Price charges nobody, which is exactly why a
-   mismatch here can sit unnoticed indefinitely.
-4. **Developers > Webhooks**: add an endpoint at
-   `https://<your-service>/billing/webhook` subscribed to
-   `checkout.session.completed`. Note the signing secret.
-
-Call caps: `QUOTA_PRO` (default `2000`) and `QUOTA_AGENCY` (default
-`10000`). `SAAS_MONTHLY_QUOTA` (default `1500`) is only the fallback for a
-key activated before the plan was recorded at checkout.
-
-Then provision the secrets and deploy (see below). `AUDIT_API_KEY` remains
-available as an internal/testing key that bypasses Stripe entirely — leave
-it unset once real customers exist, or keep it only for your own smoke
-tests.
+`AUDIT_API_KEY` is an internal smoke-test key that bypasses billing
+entirely; leave it unset in production.
 
 ### Getting paid without Stripe: x402
 
@@ -216,7 +180,11 @@ the first settled payment, which is the only path into capability-based
 discovery. `facilitator.xpay.sh` also settles on Base mainnet but keeps no
 index; `x402.dexter.cash` indexes but its settlement signer can run dry,
 and a facilitator that cannot settle sells nothing — read the signer's gas
-before trusting one.
+before trusting one. Coinbase's facilitator
+(`https://api.cdp.coinbase.com/platform/v2/x402`) is the one behind the
+x402 Bazaar that the official SDKs' discovery reads by default; set
+`CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` and the server signs CDP's
+per-request JWTs itself, and only ever sends them to a Coinbase host.
 `scripts/probe-facilitators.sh` checks any candidate for the two things
 this server library needs: the CAIP-2 network name in `/supported`, and
 whether it serves a Bazaar index; `scripts/switch-facilitator.sh` changes
