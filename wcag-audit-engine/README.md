@@ -209,11 +209,14 @@ either way:
 
 #### Choosing a facilitator
 
-The default is `https://x402.dexter.cash`: keyless, Base mainnet, and it
-indexes a resource in its marketplace on the first settled payment, which
-is the only path into capability-based discovery. `facilitator.xpay.sh`
-also settles on Base mainnet (x402 v1 and v2; its `/supported` lists both
-`eip155:8453` and the legacy name `base`) but keeps no index.
+The default is `https://facilitator.payai.network`: keyless, Base mainnet
+(x402 v1 and v2; its `/supported` lists both `eip155:8453` and the legacy
+name `base`), and it indexes a resource in its `/discovery/resources` on
+the first settled payment, which is the only path into capability-based
+discovery. `facilitator.xpay.sh` also settles on Base mainnet but keeps no
+index; `x402.dexter.cash` indexes but its settlement signer can run dry,
+and a facilitator that cannot settle sells nothing — read the signer's gas
+before trusting one.
 `scripts/probe-facilitators.sh` checks any candidate for the two things
 this server library needs: the CAIP-2 network name in `/supported`, and
 whether it serves a Bazaar index; `scripts/switch-facilitator.sh` changes

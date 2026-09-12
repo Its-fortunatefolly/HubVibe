@@ -96,6 +96,8 @@ async def _lifespan(_app: "FastAPI"):
         import anyio.to_thread
 
         anyio.to_thread.current_default_thread_limiter().total_tokens = MAX_CONCURRENT_AUDITS
+        # Off the loop: Playwright's sync driver raises inside a running one.
+        await anyio.to_thread.run_sync(_resolve_browser_path)
     except Exception:
         # Not fatal: worst case we run on anyio's default thread count.
         pass
@@ -459,6 +461,14 @@ class AuthContext:
         "prepaid_key",
         "prepaid_cents",
         "mpp_credential",
+        # Set when a top-up was CHARGED but its key could not be minted, so the
+        # response can tell the payer that credit is owed instead of going quiet.
+        "credit_owed",
+        # The host and route the x402 challenge was issued for, so a
+        # settlement the facilitator refuses is answered with the same payable
+        # 402 the caller started from (see _settlement_refused).
+        "challenge_host",
+        "challenge_path",
     )
 
     def __init__(
@@ -468,9 +478,12 @@ class AuthContext:
         payment_method: str = "api_key",
         pending_payment=None,
         issued_key: Optional[str] = None,
+        credit_owed: Optional[str] = None,
         prepaid_key: Optional[str] = None,
         prepaid_cents: int = 0,
         mpp_credential: Optional[str] = None,
+        challenge_host: Optional[str] = None,
+        challenge_path: Optional[str] = None,
     ):
         self.stripe_billable = stripe_billable
         self.customer_id = customer_id
@@ -479,9 +492,12 @@ class AuthContext:
         # see _bill. None for every other payment method.
         self.pending_payment = pending_payment
         self.issued_key = issued_key
+        self.credit_owed = credit_owed
         self.prepaid_key = prepaid_key
         self.prepaid_cents = prepaid_cents
         self.mpp_credential = mpp_credential
+        self.challenge_host = challenge_host
+        self.challenge_path = challenge_path
 
 
 def _bazaar_extension_for_path(path: Optional[str]) -> dict:
@@ -812,7 +828,8 @@ def _authenticate(
         )
         if pending is not None:
             return AuthContext(
-                stripe_billable=False, payment_method="x402", pending_payment=pending
+                stripe_billable=False, payment_method="x402", pending_payment=pending,
+                challenge_host=host, challenge_path=path,
             )
         refusal = x402_payments.last_rejection()
 
@@ -830,6 +847,7 @@ def _authenticate(
                 call_cents = round(price_usd * 100)
                 remaining = max(bought_cents - call_cents, 0)
                 key = None
+                mint_error = None
                 if remaining:
                     # Top up the key the caller already holds, when they sent
                     # one. Minting a fresh key instead makes every refill a
@@ -844,20 +862,27 @@ def _authenticate(
                         try:
                             key = billing.issue_prepaid_key(remaining)
                         except Exception as exc:
-                            # Stripe has already been charged by this point, so
-                            # a silently swallowed failure here is money taken
-                            # for nothing. It must not break the audit the
-                            # caller paid for, but it has to be reconcilable.
-                            logging.getLogger(__name__).error(
-                                "MPP top-up charged %s cents but the key could not be "
-                                "written: %s: %s. The payer holds no credit for it.",
-                                remaining, type(exc).__name__, exc,
-                            )
+                            # Stripe has ALREADY taken the money: settle_topup_sync
+                            # only returns cents after the PaymentIntent confirmed.
+                            # It must not break the audit the caller paid for, but
+                            # the payer is owed credit and this response is the
+                            # only channel they have -- so it is said on the body
+                            # and logged at ERROR for the operator to make good.
                             key = None
+                            mint_error = (
+                                "paid %d cents but the prepaid key could not be issued; "
+                                "%d cents of credit is owed" % (bought_cents, remaining)
+                            )
+                            logging.getLogger(__name__).error(
+                                "MPP top-up CHARGED %d cents and FAILED to issue the key "
+                                "(%d cents owed to the payer): %s: %s",
+                                bought_cents, remaining, type(exc).__name__, exc,
+                            )
                 return AuthContext(
                     stripe_billable=False,
                     payment_method="mpp-topup",
                     issued_key=key,
+                    credit_owed=mint_error,
                     # If this first audit fails, the call it paid for goes
                     # back on the key, so the payer leaves holding everything
                     # it bought.
@@ -953,6 +978,14 @@ def _attach_issued_key(result: dict, auth) -> None:
     prose beside it because an agent reading this once should not have to
     guess whether the value is a receipt or a credential.
     """
+    owed = getattr(auth, "credit_owed", None)
+    if owed:
+        # The charge went through and the credit did not. Saying so is the
+        # minimum: the payer is owed money and this response is the only
+        # channel they have.
+        result["billing_warning"] = owed
+        result["billed"] = True
+
     key = getattr(auth, "issued_key", None)
     if not key:
         return
@@ -985,7 +1018,14 @@ def _with_receipt(content, auth):
 def _deliver(result: dict, auth):
     """The last line of every paid route: attach what the payer is owed
     besides the audit -- a prepaid key it just bought, the settlement
-    receipt -- and return."""
+    receipt -- and return.
+
+    Unless the facilitator REFUSED to settle: then the audit is withheld and
+    the caller gets the payable 402 back with the reason. See
+    _settlement_refused."""
+    refused = _settlement_refused(auth)
+    if refused is not None:
+        return refused
     _attach_issued_key(result, auth)
     return _with_receipt(result, auth)
 
@@ -1043,9 +1083,12 @@ def _bill(auth, price_usd: float) -> Optional[str]:
     subscribers -- x402 callers were settled during authentication, so they
     paid for failed audits too. Settling here closes that gap.
 
-    Never raises: the caller already has a real, correct audit result in hand,
-    and a billing hiccup must not withhold or corrupt it. Returns a warning
-    string to surface on the response instead, or None on success/no-op.
+    Never raises. Returns a warning string to surface on the response, or
+    None on success/no-op. One outcome does withhold the result: a settle the
+    facilitator definitely REFUSED leaves `settle_state == "refused"` on the
+    pending payment, and _deliver answers that with the payable 402 instead
+    of the audit (see _settlement_refused). Every other billing hiccup is
+    surfaced beside the result, never by corrupting or withholding it.
     """
     if auth.pending_payment is not None:
         if not x402_payments.settle_sync(auth.pending_payment):
@@ -1082,6 +1125,9 @@ def _bill(auth, price_usd: float) -> Optional[str]:
                 )
             # We delivered without collecting. Deliberately the lesser evil
             # versus charging for undelivered work, but it must be visible.
+            # A False with no state is a refusal by settle_sync's contract;
+            # say so on the handle, so _deliver withholds on exactly one flag.
+            auth.pending_payment.settle_state = "refused"
             return (
                 "payment settlement failed after the audit ran; this call was "
                 f"not charged{because}"
@@ -1095,6 +1141,51 @@ def _bill(auth, price_usd: float) -> Optional[str]:
         return None
     except Exception as exc:
         return f"usage recording failed: {exc}"
+
+
+def _settlement_refused(auth) -> Optional[JSONResponse]:
+    """The 402 that answers a payment the facilitator refused to SETTLE.
+
+    Settlement runs after the audit has produced a result (_bill), so a
+    refusal there used to be answered with the audit anyway, plus a warning
+    that nothing was charged. That gave the work away on every refusal -- a
+    payer whose balance moved between verify and settle, a facilitator whose
+    settlement signer had run out of gas (2026-09-11: every call through it
+    was delivered free) -- and made "not charged" a feature from the payer's
+    side. The reference x402 server discards the handler's response on a
+    failed settle and re-issues the 402; this does the same.
+
+    Only a definite refusal withholds. "pending" (the facilitator broadcast
+    a transfer it has not seen confirm) and "unknown" (it did not answer in
+    time) may have moved the money, and withholding a result the payer may
+    have paid for is the worse failure; those still deliver, with the state
+    and the hash on the body. Nothing is charged on a refusal: settle is the
+    only step that moves funds, and the admitted nonce expires on its own,
+    so the payer signs a fresh authorization and retries.
+    """
+    pending = getattr(auth, "pending_payment", None)
+    if pending is None or getattr(pending, "settle_state", None) != "refused":
+        return None
+    reason = getattr(pending, "settle_error", None) or "the facilitator refused to settle it"
+    try:
+        price_usd = float(str(getattr(pending, "price", "") or "").lstrip("$"))
+    except ValueError:
+        price_usd = 0.03
+    logging.getLogger(__name__).warning(
+        "x402 audit WITHHELD: settle refused after the audit ran (%s); "
+        "nothing charged, result not delivered", reason,
+    )
+    return _payment_required_response(
+        host=getattr(auth, "challenge_host", None),
+        price_usd=price_usd,
+        path=getattr(auth, "challenge_path", None),
+        error="settlement_refused",
+        error_detail=(
+            "the payment verified but the facilitator refused to settle it "
+            f"after the audit ran: {reason}. Nothing was charged and the result "
+            "was not delivered. Sign a fresh authorization and retry."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1190,13 +1281,81 @@ def _rate_limited_response() -> JSONResponse:
     return response
 
 
+_BROWSER_PATH: Optional[str] = None
+_BROWSER_PATH_RESOLVED = False
+
+
+def _resolve_browser_path() -> None:
+    """Ask Playwright once, at startup, where its Chromium lives.
+
+    Blocking and sync (Playwright's driver raises inside a running loop), so it
+    is called from the lifespan through a worker thread, never from a request.
+    """
+    global _BROWSER_PATH, _BROWSER_PATH_RESOLVED
+    if _BROWSER_PATH_RESOLVED:
+        return
+    _BROWSER_PATH_RESOLVED = True
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            _BROWSER_PATH = p.chromium.executable_path
+    except Exception:
+        _BROWSER_PATH = None
+
+
+def _browser_status() -> dict:
+    """Whether the Chromium this Playwright expects is on disk.
+
+    One stat() against a path resolved at startup, so /health stays on the
+    event loop: a sync route would take one of the MAX_CONCURRENT_AUDITS
+    threadpool tokens and queue the probe behind a stranger's page load, which
+    marks the instance unhealthy exactly when it is busiest earning.
+    """
+    if not _BROWSER_PATH:
+        return {"ok": True, "detail": "undetermined"}
+    if os.path.exists(_BROWSER_PATH):
+        return {"ok": True, "detail": "chromium present"}
+    return {"ok": False, "detail": "chromium missing at %s" % _BROWSER_PATH}
+
+
+def _run_axe_all_frames(page) -> dict:
+    """Run axe with the harness present in every frame, and disclose any gaps.
+
+    axe-playwright-python injects its bundle with a single page.evaluate, which
+    reaches the main frame only. axe's cross-frame protocol needs the bundle
+    present in EVERY frame it is asked to reach, so violations inside an iframe
+    -- a cookie banner, an embedded booking widget, a payment form, all of them
+    common and all of them in scope for WCAG -- were simply absent from the
+    result. Absent, not reported: the page came back cleaner than it is, which
+    is the one thing this service promises never to do.
+
+    Injecting into each frame first lets axe reach them. Any frame that refuses
+    the injection (cross-origin without CORS, about:blank, torn down mid-run)
+    is counted and disclosed on the result rather than passed over in silence.
+    """
+    unreachable = 0
+    frames = list(getattr(page, "frames", []) or [])
+    for frame in frames[1:]:  # frames[0] is the main frame, which run() handles
+        try:
+            frame.evaluate(_axe.axe_script)
+        except Exception:
+            unreachable += 1
+
+    result = _axe.run(page, options=AXE_OPTIONS).response
+    if isinstance(result, dict):
+        result["frames_audited"] = max(len(frames) - unreachable, 1)
+        result["frames_unreachable"] = unreachable
+    return result
+
+
 def _run_axe(html: Optional[str], url: Optional[str]) -> dict:
     def _audit(page) -> dict:
         if url:
             audits.goto_guarded(page, url, wait_until="networkidle", timeout=15000)
         else:
             page.set_content(html, wait_until="networkidle", timeout=15000)
-        return _axe.run(page, options=AXE_OPTIONS).response
+        return _run_axe_all_frames(page)
 
     # Pooled browser, fresh isolated context per call -- see browser_pool.
     return browser_pool.with_page(_audit)
@@ -1233,7 +1392,7 @@ def _run_axe_and_performance(url: str):
         audits.goto_guarded(page, url, wait_until="networkidle", timeout=30000)
         dom_node_count = page.evaluate("document.querySelectorAll('*').length")
         # axe runs against the already-loaded page rather than reloading it.
-        return _axe.run(page, options=AXE_OPTIONS).response, dom_node_count
+        return _run_axe_all_frames(page), dom_node_count
 
     axe_raw, dom_node_count = browser_pool.with_page(_both, user_agent=audits.USER_AGENT)
     performance = audits.performance_result_from_metrics(
@@ -1396,7 +1555,32 @@ async def sitemap_xml():
 @app.get("/health", tags=["discovery"])
 @app.get("/healthz", tags=["discovery"])
 async def health_check():
-    return {"status": "ok", "service": "wcag-audit-engine"}
+    """Liveness AND the one dependency every paid route needs: a browser.
+
+    This returned a constant, so it could only distinguish "uvicorn is
+    listening" from "the box is down". The failure that actually costs money
+    sits between those: Chromium absent, or at a revision this Playwright does
+    not expect. Every audit then 502s, nothing is billed, no customer is
+    served -- and the container reports itself healthy throughout, so nothing
+    restarts and nobody is paged.
+
+    Stays `async`: a sync route would take one of the MAX_CONCURRENT_AUDITS
+    threadpool tokens and queue this probe behind a stranger's page load, which
+    is how a busy, earning instance gets marked unhealthy. The path Playwright
+    expects is resolved once in the lifespan, off the loop, so the probe itself
+    is a single stat().
+
+    Fails OPEN when the answer is unknown: a probe that cannot tell reports ok,
+    because a false 503 restart-loops a node that is serving fine. Only a
+    definite "the executable is not there" degrades.
+    """
+    browser = _browser_status()
+    body = {
+        "status": "ok" if browser["ok"] else "degraded",
+        "service": "wcag-audit-engine",
+        "browser": browser,
+    }
+    return JSONResponse(status_code=200 if browser["ok"] else 503, content=body)
 
 
 _AUTH_DESCRIPTION = (
@@ -1667,9 +1851,10 @@ async def agent_manifest(request: Request):
             "You are charged only for an audit that produced a result. A check "
             "that could not run returns HTTP 502, is never settled, and is "
             "never reported as a pass -- an x402 payment is verified to grant "
-            "access but only settled after the audit has actually delivered, a "
-            "prepaid key debited for it is refunded, and an MPP credential it "
-            "consumed is accepted again on the retry.",
+            "access and settled only once the audit has actually produced a "
+            "result (a settlement the facilitator refuses withholds the result "
+            "and charges nothing), a prepaid key debited for it is refunded, "
+            "and an MPP credential it consumed is accepted again on the retry.",
             "Rate-limited requests are rejected before any payment is settled, "
             "so a 429 never costs you anything.",
             "Results are deterministic rule-based checks against the live page, "
@@ -2366,6 +2551,11 @@ def _mcp_tools_call(
         )
 
     warning = _bill(auth, price_usd=price)
+    refused = _settlement_refused(auth)
+    if refused is not None:
+        # Same rule as the REST routes: a refused settle withholds the audit
+        # and re-issues the paywall, here in the shape the MCP client pays.
+        return _mcp_payment_required(request_id, name, price, refused)
     if warning:
         result["billing_warning"] = warning
     _attach_issued_key(result, auth)

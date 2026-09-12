@@ -55,9 +55,10 @@ wording here -- never quote it, or this file becomes the offender.)
 
 Fixed facts: the node runs from `deploy/vps` on the owner's box; the Cloud
 Run stopgap is project `resolver-time`, service `hubvibe`, region
-`us-south1`. Facilitator: `x402.dexter.cash` is the default everywhere
-(keyless, Base mainnet, indexes on the first payment); the box was installed
-on `facilitator.xpay.sh`, which settles but indexes nothing, and is moved
+`us-south1`. Facilitator: `facilitator.payai.network` is the default
+everywhere (keyless, Base mainnet, settles AND indexes on the first
+payment); `facilitator.xpay.sh` settles but indexes nothing, and
+`x402.dexter.cash` indexes but ran out of settlement gas. The box is moved
 only with `scripts/switch-facilitator.sh`. Coinbase CDP is **abandoned, not
 pending** — its review wants proof of a DBA that does not exist, and its
 code is gone. Do not suggest Coinbase.

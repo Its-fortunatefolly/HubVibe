@@ -401,3 +401,18 @@ def test_a_facilitator_with_an_index_says_the_paid_call_will_register(tmp_path):
     result = _run_with_facilitator(tmp_path, _BASE_V2, index_code="200")
     assert "runs a Bazaar index" in result.stdout
     assert "Checking Docker" in result.stdout
+
+
+def test_compose_gives_inflight_audits_room_to_finish():
+    """A page load is allowed 30s and a settle waits on chain inclusion, but
+    Docker's default stop grace is 10s. `docker compose up -d --build` on a
+    busy node therefore SIGKILLed calls a customer had already paid for."""
+    import yaml
+
+    compose = yaml.safe_load(
+        (REPO_ROOT / "deploy" / "vps" / "docker-compose.yml").read_text()
+    )
+    grace = compose["services"]["hubvibe"].get("stop_grace_period")
+    assert grace is not None, "no stop_grace_period: in-flight paid audits die on redeploy"
+    seconds = int(str(grace).rstrip("s"))
+    assert seconds >= 35, f"{grace} is under the 30s a page load may take"

@@ -78,7 +78,10 @@ for base in "${CANDIDATES[@]}"; do
   settles="no"
   case "$code" in
     200)
-      if printf '%s' "$body" | grep -q "$WANT_CAIP"; then
+      # Delimited on purpose: "eip155:84532" (Base Sepolia) contains
+      # "eip155:8453", and a bare substring match reported a testnet-only
+      # facilitator as a mainnet settler (x402.org/facilitator, 2026-09-12).
+      if printf '%s' "$body" | grep -qE "\"network\"[: ]*\"$WANT_CAIP\""; then
         settles="yes"
         printf '  /supported            %s  Base mainnet listed as %s\n' "$(green PASS)" "$WANT_CAIP"
       elif printf '%s' "$body" | grep -qE "\"network\"[: ]*\"$WANT_LEGACY\""; then

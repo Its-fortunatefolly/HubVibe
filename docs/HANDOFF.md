@@ -19,16 +19,26 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   (`2.25.172.160`, repo at `/root/HubVibe`, `deploy/vps` compose stack:
   Caddy TLS in front of uvicorn, SQLite key store). `@` and `www` A records
   point at it. 25/25 live probes from Cloud Shell on go-live day.
-- **Facilitator on the box:** `https://x402.dexter.cash` — confirmed from
-  the box on 2026-09-07: `switch-facilitator.sh` reported "already on"
-  and made no change, and `payment-status.sh` read a live 402 advertising
-  the Base rail through it. Dexter is keyless, settles on Base mainnet (v2
-  `eip155:8453`, v1 `base`) and keeps a Bazaar index (`/discovery/resources`
-  is reachable; 0 entries for this pay-to until the first settled payment).
-  `https://facilitator.xpay.sh` — the earlier default — settles but indexes
-  nothing, so a payment through it registers the node nowhere. The repo
-  defaults everywhere (`vps-install.sh`, `.env.example`,
-  `first-paid-call.sh`, `go-live.sh`) are Dexter since #66/#101.
+- **Facilitator: `https://facilitator.payai.network`** — keyless, lists
+  both rails the node advertises (v1 `base`, v2 `eip155:8453`), declares
+  the `bazaar` extension, keeps a `/discovery/resources` index that
+  x402scan aggregates, and its settlement signers held 0.014–0.027 ETH when
+  read on 2026-09-12. The repo defaults (`vps-install.sh`, `.env.example`,
+  `first-paid-call.sh`, `go-live.sh`) are PayAI as of this change. The box
+  was read on 2026-09-12 as still on `https://facilitator.xpay.sh` — the
+  facilitator that took the first real paid call on 2026-09-11 (`x402
+  SETTLED` in the box log, tx `0xc03e7d…634a58`, pay-to 4.25 → 4.28 USDC)
+  but keeps no index — and is moved with the runbook line below; confirm
+  with `grep X402_FACILITATOR_URL /root/HubVibe/deploy/vps/.env` on the box.
+  `https://x402.dexter.cash` indexes but **its settlement signer
+  `0x402Feee072D655B85e08f1751AF9ddbCd249521f` is out of gas** (0.00000013
+  ETH on Base, read 2026-09-12): every settle through it fails, and until
+  this change a failed settle delivered the audit free. Before trusting any
+  facilitator, `probe-facilitators.sh` says who settles and indexes, and one
+  read of its signer says whether it can:
+  `curl -s -X POST https://mainnet.base.org -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["<signer from /supported>","latest"]}'`
+  `x402.org/facilitator` is Sepolia-only (the probe script's substring
+  match used to call it a mainnet settler; fixed).
 - **Pay-to:** `0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd`
   (`hubvibe.base.eth`). x402 revenue lands on-chain there and never appears
   in Stripe. The wallet is the counter; `x402 SETTLED` log lines are the
@@ -163,8 +173,10 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   the client that matches the browser instead (1194 ⇒ `playwright==1.56.0`)
   in the throwaway venv; leave the pin alone, since the box installs its own
   matching pair. Cost an hour on 2026-09-08.
-- A failed audit costs nothing on every rail: x402 is settled only after
-  delivery; a prepaid debit is refunded; the key an MPP top-up bought is
+- A failed audit costs nothing on every rail, and a refused settlement
+  delivers nothing: x402 is settled only once the audit has run, and a
+  settle the facilitator refuses answers with the 402 (reason on the body)
+  instead of the audit; a prepaid debit is refunded; the key an MPP top-up bought is
   returned on the 502 holding everything it bought; an MPP credential a
   failed audit consumed is accepted again on the retry
   (`tests/test_failed_audit_is_not_charged.py`).
@@ -207,9 +219,11 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   receive. Both are refused by name in every gate. Shape is not payability.
 - **Coinbase CDP is abandoned, not pending** (its review wants a business
   entity that does not exist). Its code is gone. Do not suggest it.
-- **Dexter is the facilitator, because it indexes.** xpay.sh settles and
-  indexes nothing; a facilitator's index is the only path into the Bazaar,
-  so the default moved to Dexter (#66, #101). Change it on a running box
+- **PayAI is the facilitator, because it settles AND indexes.** A
+  facilitator's index is the only path into a Bazaar, and a facilitator
+  that cannot settle sells nothing: Dexter's signer ran out of gas (read
+  2026-09-12), xpay.sh keeps no index, PayAI does both keylessly. The
+  default was Dexter from #66/#101 until this change. Change it on a running box
   only with `scripts/switch-facilitator.sh`: the node refuses to advertise
   a rail its facilitator cannot verify, so a bad URL leaves `/health` at
   200 while nothing can be sold.
@@ -227,7 +241,7 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   and omits what is not configured. This is the core discipline.
 - **Bazaar indexing needs a payment, not a registration.** A facilitator
   catalogs a resource when a paid `PaymentPayload` carrying the discovery
-  record reaches it. The first paid call through Dexter is what indexes
+  record reaches it. The first paid call through PayAI is what indexes
   this node.
 - **Payable is not discoverable, and demand is not plumbing.** Until #61
   no conforming client could pay the 402 at all; that was fixed. Do not
@@ -254,7 +268,7 @@ Shell included. Each line below says which it is.
   `cd /root/HubVibe && git pull -q origin main && cd deploy/vps && docker compose up -d --build`
 - [ON THE BOX] Point the node at the facilitator that indexes (verifies
   itself against the live 402, rolls back on a dead rail):
-  `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://x402.dexter.cash`
+  `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://facilitator.payai.network`
 - **Prove the node can take a customer's money — costs nothing, from any
   machine:** `bash scripts/verify-live.sh`
   This is the readiness check, and it needs no wallet, no funds, and no
