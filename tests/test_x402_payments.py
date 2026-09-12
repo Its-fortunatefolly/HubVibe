@@ -2045,3 +2045,163 @@ def test_lookalike_hosts_never_receive_cdp_credentials(monkeypatch, host):
     module = _load_cdp(monkeypatch, url=host)
     assert module._host_is_coinbase(host) is False
     assert module._auth_provider() is None
+
+
+# --- Solana: the second rail ---------------------------------------------
+#
+# Both facilitators this node has used list Solana first among their networks
+# and their indexes are full of Solana-paid resources. A Base-only challenge
+# sends every Solana-wallet agent away unpaid. The rail is gated three ways:
+# a valid Solana address the owner holds, the facilitator listing `exact` on
+# Solana mainnet, and a fee payer declared for it. Nothing else advertises it.
+
+SOLANA_NET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+USDC_SOLANA = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+FEE_PAYER = "CjNFTjvBhbJJd2B5ePPMHRLx1ELZpa8dwQgGL727eKww"
+
+
+def _solana_address():
+    from solders.keypair import Keypair
+
+    return str(Keypair().pubkey())
+
+
+def _load_solana(monkeypatch, address, **kw):
+    if address is None:
+        monkeypatch.delenv("X402_SOLANA_PAY_TO_ADDRESS", raising=False)
+    else:
+        monkeypatch.setenv("X402_SOLANA_PAY_TO_ADDRESS", address)
+    return _load_x402(monkeypatch, **kw)
+
+
+class _Kind:
+    def __init__(self, extra=None):
+        self.extra = extra or {}
+
+
+def _facilitator_with_solana(server, fee_payer=FEE_PAYER):
+    def kind(version, network, scheme):
+        if network == SOLANA_NET:
+            return _Kind({"feePayer": fee_payer} if fee_payer else {}) if version == 2 else None
+        return object()
+
+    server.get_supported_kind = kind
+
+
+def _v2_networks(module):
+    challenge = module.payment_required_v2(price="$0.03", resource_url="https://hubvibe-io.com/audit/wcag")
+    assert challenge is not None, "the v2 challenge could not be built at all"
+    return {a.network: a for a in challenge.accepts}
+
+
+def test_no_solana_address_means_no_solana_rail(monkeypatch):
+    module = _load_solana(monkeypatch, None)
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_with_solana(server)
+    assert SOLANA_NET not in _v2_networks(module)
+
+
+def test_the_solana_rail_is_offered_with_the_facilitators_fee_payer(monkeypatch):
+    address = _solana_address()
+    module = _load_solana(monkeypatch, address)
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_with_solana(server)
+
+    rails = _v2_networks(module)
+    assert "eip155:8453" in rails, "Base must stay first and live"
+    sol = rails[SOLANA_NET]
+    assert sol.pay_to == address
+    assert sol.asset == USDC_SOLANA, "the asset must be the USDC mint the facilitator settles"
+    assert sol.amount == "30000", "$0.03 in USDC's six decimals"
+    assert sol.extra["feePayer"] == FEE_PAYER, "a client cannot build the transfer without it"
+    assert list(rails)[0] == "eip155:8453"
+
+
+def test_the_solana_rail_is_withheld_when_the_facilitator_does_not_list_solana(monkeypatch):
+    module = _load_solana(monkeypatch, _solana_address())
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_that_supports(server, 1, 2)  # every network answered, but no feePayer
+    assert SOLANA_NET not in _v2_networks(module)
+
+
+def test_the_solana_rail_is_withheld_without_a_fee_payer(monkeypatch, caplog):
+    module = _load_solana(monkeypatch, _solana_address())
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_with_solana(server, fee_payer=None)
+    with caplog.at_level(logging.WARNING):
+        assert SOLANA_NET not in _v2_networks(module)
+    assert "no feePayer" in caplog.text
+
+
+@pytest.mark.parametrize("bad", ["not-base58", "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd",
+                                 "11111111111111111111111111111111", "   "])
+def test_a_malformed_or_unownable_solana_address_turns_the_rail_off_loudly(monkeypatch, bad, caplog):
+    """An EVM address, a typo, or the all-zero system key: none can receive
+    USDC on Solana. Advertising any of them is advertising a recipient that
+    cannot receive -- the one fault this file exists to prevent."""
+    module = _load_solana(monkeypatch, bad)
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_with_solana(server)
+    with caplog.at_level(logging.WARNING):
+        assert module.solana_configured() is False
+        assert SOLANA_NET not in _v2_networks(module)
+    assert "Solana rail OFF" in caplog.text
+    assert module.is_configured(), "Base must be untouched by a bad Solana address"
+
+
+def test_a_solana_payer_is_verified_and_settled_against_the_solana_requirement(monkeypatch):
+    """With two rails advertised, the payload names which one it paid. Verify
+    and settle must use THAT requirement: a Solana payload checked against
+    the Base requirement is refused by every facilitator."""
+    module = _load_solana(monkeypatch, _solana_address())
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_with_solana(server)
+
+    base_req = MagicMock(network="eip155:8453", amount="30000")
+    sol_req = MagicMock(network=SOLANA_NET, amount="30000")
+    server.build_payment_requirements = MagicMock(side_effect=[[base_req], [sol_req]])
+
+    payload = MagicMock(x402_version=2)
+    payload.accepted.network = SOLANA_NET
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: payload)
+    seen = {}
+
+    async def _verify(p, req):
+        seen["verify"] = req
+        return MagicMock(is_valid=True)
+
+    async def _settle(p, req):
+        seen["settle"] = req
+        return MagicMock(success=True, transaction="sig", network=SOLANA_NET, payer="p")
+
+    server.verify_payment = _verify
+    server.settle_payment = _settle
+
+    pending = module.verify_only_sync("signed-solana", price="$0.03")
+    assert pending is not None, module.last_rejection()
+    assert seen["verify"] is sol_req
+    assert pending.requirements == [sol_req]
+    assert module.settle_sync(pending) is True
+    assert seen["settle"] is sol_req
+
+
+def test_a_base_payer_still_gets_the_base_requirement_when_both_rails_exist(monkeypatch):
+    module = _load_solana(monkeypatch, _solana_address())
+    server = _install_fake_server(monkeypatch, module)
+    _facilitator_with_solana(server)
+    base_req = MagicMock(network="eip155:8453", amount="30000")
+    sol_req = MagicMock(network=SOLANA_NET, amount="30000")
+    server.build_payment_requirements = MagicMock(side_effect=[[base_req], [sol_req]])
+    payload = MagicMock(x402_version=2)
+    payload.accepted.network = "eip155:8453"
+    monkeypatch.setattr(module, "decode_payment_signature_header", lambda h: payload)
+    seen = {}
+
+    async def _verify(p, req):
+        seen["verify"] = req
+        return MagicMock(is_valid=True)
+
+    server.verify_payment = _verify
+    pending = module.verify_only_sync("signed-base", price="$0.03")
+    assert pending is not None, module.last_rejection()
+    assert seen["verify"] is base_req

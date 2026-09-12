@@ -185,6 +185,11 @@ before trusting one. Coinbase's facilitator
 x402 Bazaar that the official SDKs' discovery reads by default; set
 `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` and the server signs CDP's
 per-request JWTs itself, and only ever sends them to a Coinbase host.
+
+A second rail, USDC on Solana mainnet, is advertised in the v2 challenge
+when `X402_SOLANA_PAY_TO_ADDRESS` is a Solana public key you hold and the
+facilitator lists Solana with a fee payer; a payer's payload is verified
+and settled against the rail it chose.
 `scripts/probe-facilitators.sh` checks any candidate for the two things
 this server library needs: the CAIP-2 network name in `/supported`, and
 whether it serves a Bazaar index; `scripts/switch-facilitator.sh` changes

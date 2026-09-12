@@ -54,9 +54,20 @@ from x402.http.utils import decode_payment_signature_header
 from x402.mechanisms.evm.exact import ExactEvmServerScheme
 from x402.schemas import ResourceConfig
 
+try:  # the Solana (SVM) mechanism ships in the x402[svm] extra
+    from x402.mechanisms.svm.exact.server import ExactSvmScheme as ExactSvmServerScheme
+except ImportError:  # pragma: no cover - the extra is pinned in requirements.txt
+    ExactSvmServerScheme = None
+
 _FACILITATOR_URL = os.environ.get("X402_FACILITATOR_URL")
 _PAY_TO_ADDRESS = os.environ.get("X402_PAY_TO_ADDRESS")
 _NETWORK = os.environ.get("X402_NETWORK", "eip155:8453")
+# Optional second rail: USDC on Solana mainnet, into a Solana address the
+# owner holds. Advertised only when the address parses as a Solana public key
+# AND the facilitator lists `exact` on this network with a fee payer (the
+# facilitator's own key signs the transfer, so a client can build one).
+_SOLANA_PAY_TO_ADDRESS = os.environ.get("X402_SOLANA_PAY_TO_ADDRESS")
+_SOLANA_NETWORK = os.environ.get("X402_SOLANA_NETWORK", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")
 _PRICE = os.environ.get("X402_PRICE", "$0.03")
 
 # Headers sent with every facilitator call, as a JSON object, e.g.
@@ -158,6 +169,45 @@ def _pay_to_is_usable() -> bool:
 
 def is_configured() -> bool:
     return bool(_FACILITATOR_URL and _pay_to_is_usable())
+
+
+_solana_warned = False
+
+
+def _warn_solana_off(why: str) -> None:
+    global _solana_warned
+    if _solana_warned:
+        return
+    _solana_warned = True
+    logging.getLogger(__name__).warning(
+        "Solana rail OFF: %s (X402_SOLANA_PAY_TO_ADDRESS=%r). Base stays live.",
+        why, _SOLANA_PAY_TO_ADDRESS,
+    )
+
+
+def solana_configured() -> bool:
+    """A Solana pay-to this node can actually advertise: set, parses as a
+    32-byte public key, and is not the all-zero system key. Shape is not
+    ownership, same as the EVM address -- only an address the owner holds
+    belongs here. Off, with one warning, on anything else; Base is
+    unaffected either way.
+    """
+    if not _SOLANA_PAY_TO_ADDRESS:
+        return False
+    if ExactSvmServerScheme is None:
+        _warn_solana_off("the x402[svm] extra is not installed")
+        return False
+    try:
+        from solders.pubkey import Pubkey
+
+        key = Pubkey.from_string(_SOLANA_PAY_TO_ADDRESS.strip())
+    except Exception as exc:
+        _warn_solana_off(f"not a Solana public key ({type(exc).__name__})")
+        return False
+    if key == Pubkey.default():
+        _warn_solana_off("the all-zero system key cannot receive USDC")
+        return False
+    return True
 
 
 class _StaticAuthProvider:
@@ -395,6 +445,8 @@ def _get_server() -> x402ResourceServer:
             )
             server = x402ResourceServer(facilitator)
             server.register(_NETWORK, ExactEvmServerScheme())
+            if solana_configured():
+                server.register(_SOLANA_NETWORK, ExactSvmServerScheme())
             try:
                 server.initialize()
             except Exception as exc:
@@ -420,7 +472,24 @@ def _get_requirements(price: str):
                 pay_to=_PAY_TO_ADDRESS,
                 price=price,
             )
-            _requirements_cache[price] = server.build_payment_requirements(config)
+            requirements = list(server.build_payment_requirements(config))
+            if solana_configured():
+                try:
+                    requirements.extend(server.build_payment_requirements(ResourceConfig(
+                        scheme="exact",
+                        network=_SOLANA_NETWORK,
+                        pay_to=_SOLANA_PAY_TO_ADDRESS.strip(),
+                        price=price,
+                    )))
+                except Exception as exc:
+                    # The facilitator does not list Solana. The rail is not
+                    # advertised either (_solana_accepts gates on the same
+                    # fact), so no payer is ever sent here for it.
+                    _warn_solana_off(
+                        f"the facilitator cannot build Solana requirements "
+                        f"({type(exc).__name__}: {exc})"
+                    )
+            _requirements_cache[price] = requirements
         return _requirements_cache[price]
 
 
@@ -451,6 +520,28 @@ def _get_requirements_v1(price: str, resource_url: Optional[str]):
             "list the legacy network name), so a v1 payment cannot be verified"
         )
     return PaymentRequirementsV1.model_validate(entry)
+
+
+def _requirement_for(payload, requirements):
+    """The advertised requirement the payer actually signed for, by network.
+
+    With more than one rail in `accepts`, a Solana payer's payload has to be
+    compared, verified and settled against the Solana requirement, not
+    whichever entry came first. Falls back to the first entry (the primary
+    rail) when the payload names no network this node advertised; the
+    mismatch check that follows then says so.
+    """
+    try:
+        if getattr(payload, "x402_version", 2) == 1:
+            network = payload.get_network()
+        else:
+            network = payload.accepted.network
+    except Exception:
+        return requirements[0]
+    for requirement in requirements:
+        if getattr(requirement, "network", None) == network:
+            return requirement
+    return requirements[0]
 
 
 def _payload_mismatch(payload, requirement, server) -> Optional[str]:
@@ -875,7 +966,45 @@ def _facilitator_transfer_method(version: int, network: str) -> Optional[str]:
     return (getattr(kind, "extra", None) or {}).get("assetTransferMethod")
 
 
-def _v2_accepts(priced):
+def _solana_accepts(price: str) -> list:
+    """The Solana USDC rail, when it can actually be paid: the owner set a
+    valid Solana address, the facilitator lists `exact` on Solana mainnet,
+    and it declares the fee payer a client needs to build the transfer.
+
+    Both facilitators this node has used list Solana first among their
+    networks and their indexes are full of Solana-paid resources. A
+    Base-only challenge sends every Solana-wallet agent away unpaid, which
+    from this side is indistinguishable from nobody buying. Same discipline
+    as every other rail: not advertised unless it can settle.
+    """
+    if not solana_configured() or not _facilitator_supports(2, _SOLANA_NETWORK):
+        return []
+    try:
+        from x402.schemas import PaymentRequirements
+
+        kind = _get_server().get_supported_kind(2, _SOLANA_NETWORK, "exact")
+        fee_payer = (getattr(kind, "extra", None) or {}).get("feePayer")
+        if not fee_payer:
+            _warn_solana_off("the facilitator lists Solana but declares no feePayer")
+            return []
+        parsed = ExactSvmServerScheme().parse_price(price, _SOLANA_NETWORK)
+        return [
+            PaymentRequirements(
+                scheme="exact",
+                network=_SOLANA_NETWORK,
+                asset=parsed.asset,
+                amount=parsed.amount,
+                payTo=_SOLANA_PAY_TO_ADDRESS.strip(),
+                maxTimeoutSeconds=_MAX_TIMEOUT_SECONDS,
+                extra={**(parsed.extra or {}), "feePayer": fee_payer},
+            )
+        ]
+    except Exception as exc:
+        _warn_solana_off(f"could not build the Solana rail ({type(exc).__name__}: {exc})")
+        return []
+
+
+def _v2_accepts(priced, price: Optional[str] = None):
     """Every `exact` rail on this network the facilitator will actually settle.
 
     The default rail is whatever the scheme's own asset table picks. For Base
@@ -916,6 +1045,8 @@ def _v2_accepts(priced):
     declared = _facilitator_transfer_method(2, _NETWORK)
     if declared and declared != offered:
         accepts.append(rail({**default_extra, "assetTransferMethod": declared}))
+    if price:
+        accepts.extend(_solana_accepts(price))
     return accepts
 
 
@@ -967,7 +1098,7 @@ def payment_required_v2(
                 serviceName=_SERVICE_NAME,
                 tags=list(_SERVICE_TAGS),
             ),
-            accepts=_v2_accepts(priced),
+            accepts=_v2_accepts(priced, resolved),
             extensions=extensions or None,
         )
     except Exception as exc:
@@ -1454,7 +1585,8 @@ def verify_only_sync(
         else:
             requirements = _get_requirements(resolved_price)
 
-        mismatch = _payload_mismatch(payload, requirements[0], server)
+        requirement = _requirement_for(payload, requirements)
+        mismatch = _payload_mismatch(payload, requirement, server)
         if mismatch is not None:
             logging.getLogger(__name__).warning(
                 "x402 verify REFUSED before the facilitator: %s (price=%s, "
@@ -1466,7 +1598,7 @@ def verify_only_sync(
             return None
 
         async def _run():
-            return await server.verify_payment(payload, requirements[0])
+            return await server.verify_payment(payload, requirement)
 
         result = _run_coro_sync(_run())
         if not result.is_valid:
@@ -1478,7 +1610,8 @@ def verify_only_sync(
             _release_nonce(nonce)
             return None
         _note_rejection(None)
-        return PendingPayment(payload, requirements, resolved_price)
+        # Only the requirement the payer chose travels to settle.
+        return PendingPayment(payload, [requirement], resolved_price)
     except Exception as exc:
         _log_rejection("verify", resolved_price, exc=exc)
         if last_rejection() is None:
