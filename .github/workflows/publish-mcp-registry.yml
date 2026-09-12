@@ -37,13 +37,24 @@ jobs:
       - name: Login with GitHub OIDC
         run: ./mcp-publisher login github-oidc
 
-      - name: Publish server.json
-        run: ./mcp-publisher publish
-
-      - name: Verify the registry serves this version
+      # The registry rejects a version it already serves, so a re-run after a
+      # successful publish must not publish again: read the LATEST entry first
+      # (the search lists every version, oldest first) and skip when it
+      # already matches. Then the same read is the proof.
+      - name: Publish server.json unless the registry already serves this version
         run: |
+          latest() {
+            curl -fsSL "https://registry.modelcontextprotocol.io/v0/servers/io.github.Its-fortunatefolly%2Fhubvibe/versions" \
+              | python3 -c 'import sys, json; s=[x for x in json.load(sys.stdin)["servers"] if x.get("_meta", {}).get("io.modelcontextprotocol.registry/official", {}).get("isLatest")]; print(s[0]["server"]["version"] if s else "absent")'
+          }
           want=$(python3 -c 'import json; print(json.load(open("server.json"))["version"])')
-          got=$(curl -fsSL "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.Its-fortunatefolly/hubvibe" \
-            | python3 -c 'import sys, json; s=[x for x in json.load(sys.stdin)["servers"] if x["server"]["name"]=="io.github.Its-fortunatefolly/hubvibe"]; print(s[0]["server"]["version"] if s else "absent")')
-          echo "server.json=$want registry=$got"
+          got=$(latest)
+          echo "server.json=$want registry latest=$got"
+          if [ "$want" = "$got" ]; then
+            echo "registry already serves $want -- nothing to publish"
+          else
+            ./mcp-publisher publish
+            got=$(latest)
+            echo "registry latest now=$got"
+          fi
           [ "$want" = "$got" ] || { echo "::error::registry serves $got, not $want"; exit 1; }
