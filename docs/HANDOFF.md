@@ -217,8 +217,14 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   never recipients.** The first is an unidentified address that was once
   deployed for weeks; the second satisfies every shape gate and can never
   receive. Both are refused by name in every gate. Shape is not payability.
-- **Coinbase CDP is abandoned, not pending** (its review wants a business
-  entity that does not exist). Its code is gone. Do not suggest it.
+- **Coinbase CDP is back (2026-09-12).** The first account was blocked on a
+  DBA review; the owner opened a new one. CDP's facilitator
+  (`https://api.cdp.coinbase.com/platform/v2/x402`) is the one behind the
+  x402 Bazaar -- the index the official x402 SDKs' discovery reads by
+  default -- and it needs a CDP API key: `CDP_API_KEY_ID` and
+  `CDP_API_KEY_SECRET` in the box's `deploy/vps/.env`, then a rebuild, then
+  `switch-facilitator.sh` to the CDP URL. The node signs one JWT per
+  endpoint with `cdp-sdk` and sends the pair only to a Coinbase host.
 - **PayAI is the facilitator, because it settles AND indexes.** A
   facilitator's index is the only path into a Bazaar, and a facilitator
   that cannot settle sells nothing: Dexter's signer ran out of gas (read
@@ -269,6 +275,10 @@ Shell included. Each line below says which it is.
 - [ON THE BOX] Point the node at the facilitator that indexes (verifies
   itself against the live 402, rolls back on a dead rail):
   `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://facilitator.payai.network`
+- [ON THE BOX] Move to Coinbase's facilitator for the x402 Bazaar, once
+  `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` are in `deploy/vps/.env` and
+  the stack has been rebuilt:
+  `cd /root/HubVibe && bash scripts/switch-facilitator.sh https://api.cdp.coinbase.com/platform/v2/x402`
 - **Prove the node can take a customer's money — costs nothing, from any
   machine:** `bash scripts/verify-live.sh`
   This is the readiness check, and it needs no wallet, no funds, and no

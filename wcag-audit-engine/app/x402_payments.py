@@ -69,6 +69,13 @@ _PRICE = os.environ.get("X402_PRICE", "$0.03")
 # so x402 could only ever have been switched on against a facilitator that
 # wanted no credentials at all.
 _FACILITATOR_AUTH_HEADERS = os.environ.get("X402_FACILITATOR_AUTH_HEADERS")
+# Coinbase CDP credentials. CDP takes precedence over the static headers
+# above when both are set, because it is the more specific configuration --
+# nobody sets a CDP key pair by accident. Used ONLY against a Coinbase host
+# (see _auth_provider). CDP is the facilitator that lists a resource in the
+# x402 Bazaar, the index the official x402 SDKs read by default.
+_CDP_API_KEY_ID = os.environ.get("CDP_API_KEY_ID")
+_CDP_API_KEY_SECRET = os.environ.get("CDP_API_KEY_SECRET")
 
 _server: Optional[x402ResourceServer] = None
 _requirements_cache: dict = {}
@@ -165,7 +172,8 @@ class _StaticAuthProvider:
     the library accepts via CreateHeadersAuthProvider. Faking it with a
     static header would produce a facilitator that rejects every payment,
     which fails closed but silently, and that is the single worst outcome
-    for a payment rail. The default facilitator (Dexter) is keyless.
+    for a payment rail. Coinbase CDP is that case and has its own provider
+    below; the default facilitator (PayAI) is keyless.
     """
 
     __slots__ = ("_headers",)
@@ -184,6 +192,112 @@ class _StaticAuthProvider:
         )
 
 
+# The paths the x402 client actually calls on a facilitator, and the methods
+# it uses, read from the library rather than assumed -- CDP signs each request
+# against its own method and path, so a wrong guess here authenticates nothing.
+_FACILITATOR_ENDPOINTS = {
+    "verify": ("POST", "/verify"),
+    "settle": ("POST", "/settle"),
+    "supported": ("GET", "/supported"),
+    "bazaar": ("GET", "/discovery/resources"),
+}
+
+
+class _CdpAuthProvider:
+    """Coinbase CDP auth: a fresh JWT per endpoint, signed from the API key.
+
+    CDP binds each token to the exact method, host and path being called, so
+    unlike a bearer token these headers cannot be computed once and reused
+    across endpoints. That is precisely why the x402 AuthProvider protocol
+    asks for verify / settle / supported / bazaar separately.
+
+    CDP is the facilitator worth having for discovery: it settles on mainnet,
+    and it is what lists a resource in the x402 Bazaar, which is how agents
+    find a service by capability instead of by URL.
+    """
+
+    __slots__ = ("_key_id", "_key_secret", "_host", "_base_path")
+
+    def __init__(self, key_id: str, key_secret: str, base_url: str):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(base_url)
+        if not parsed.netloc:
+            raise ValueError(f"X402_FACILITATOR_URL is not a valid URL: {base_url!r}")
+        self._key_id = key_id
+        self._key_secret = key_secret
+        self._host = parsed.netloc
+        # CDP's facilitator lives under a path prefix
+        # (/platform/v2/x402), and the JWT covers the FULL path, so the
+        # prefix has to be included or every call is rejected.
+        self._base_path = parsed.path.rstrip("/")
+
+    def _headers_for(self, method: str, path: str) -> dict:
+        from cdp.auth.utils.http import GetAuthHeadersOptions, get_auth_headers
+
+        return get_auth_headers(
+            GetAuthHeadersOptions(
+                api_key_id=self._key_id,
+                api_key_secret=self._key_secret,
+                request_method=method,
+                request_host=self._host,
+                request_path=self._base_path + path,
+            )
+        )
+
+    def get_auth_headers(self):
+        from x402.http.facilitator_client_base import AuthHeaders
+
+        signed = {
+            name: self._headers_for(method, path)
+            for name, (method, path) in _FACILITATOR_ENDPOINTS.items()
+        }
+        return AuthHeaders(**signed)
+
+
+# Hosts a Coinbase CDP key pair can actually sign for. A CDP token is a JWT
+# minted against Coinbase's own key and bound to the request host; it is not a
+# shared secret any other facilitator could validate. Sending one anywhere
+# else is meaningless at best and a 401 at worst.
+_CDP_HOST_SUFFIX = ".coinbase.com"
+
+
+def _host_is_coinbase(url: str) -> bool:
+    """True when `url` names a Coinbase host.
+
+    Raises on a URL with no host at all. That is a different fault from
+    "pointed somewhere else on purpose": there is nothing to bind a JWT to
+    and nothing for the facilitator client to call either, so it stays a
+    loud construction-time failure rather than being downgraded into the
+    quiet fall-through that a deliberate facilitator swap deserves.
+    """
+    from urllib.parse import urlparse
+
+    netloc = urlparse(url).netloc
+    if not netloc:
+        raise ValueError(f"X402_FACILITATOR_URL is not a valid URL: {url!r}")
+    host = netloc.split("@")[-1].split(":")[0].lower()
+    return host == "coinbase.com" or host.endswith(_CDP_HOST_SUFFIX)
+
+
+_cdp_mismatch_warned = False
+
+
+def _warn_cdp_ignored(url: str) -> None:
+    global _cdp_mismatch_warned
+    if _cdp_mismatch_warned:
+        return
+    _cdp_mismatch_warned = True
+    logging.getLogger(__name__).warning(
+        "CDP credentials are set but X402_FACILITATOR_URL points at %s, which "
+        "is not a Coinbase host. A CDP token is bound to Coinbase's own host "
+        "and cannot be validated by anyone else, so it is being ignored. This "
+        "deployment is talking to that facilitator with "
+        "X402_FACILITATOR_AUTH_HEADERS, or keyless if that is unset.",
+        url,
+    )
+
+
 def _auth_provider():
     """The facilitator auth provider for this deployment, or None.
 
@@ -192,6 +306,18 @@ def _auth_provider():
     payment rejected by the facilitator, which looks identical to "nobody is
     buying" and could go unnoticed indefinitely.
     """
+    # CDP credentials are used ONLY against a Coinbase host. Switching to a
+    # keyless facilitator is documented as one env var (X402_FACILITATOR_URL),
+    # and that is only true if a CDP key pair left mounted on the box is
+    # ignored rather than sent to a host Coinbase never issued it for -- a
+    # 401 there means x402 advertised on every 402 and every payment
+    # rejected, indistinguishable from nobody buying. Ignored, and said so.
+    if _CDP_API_KEY_ID and _CDP_API_KEY_SECRET:
+        if _host_is_coinbase(_FACILITATOR_URL or ""):
+            return _CdpAuthProvider(
+                _CDP_API_KEY_ID, _CDP_API_KEY_SECRET, _FACILITATOR_URL or ""
+            )
+        _warn_cdp_ignored(_FACILITATOR_URL or "")
     if not _FACILITATOR_AUTH_HEADERS:
         return None
     headers = json.loads(_FACILITATOR_AUTH_HEADERS)

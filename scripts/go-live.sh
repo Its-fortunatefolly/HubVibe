@@ -46,10 +46,10 @@ RAILS="${RAILS:-both}"
 # review. xpay.sh settles but runs no discovery index, so every caller who
 # would have found this node through capability search never arrived; Dexter
 # indexes but its settlement signer ran out of gas (read 2026-09-12), and a
-# facilitator that cannot settle sells nothing. CDP is unavailable rather
-# than pending -- its review asks for a DBA that does not exist -- and the
-# CDP guard already ignores CDP credentials for non-Coinbase hosts, so this
-# is exactly one env var.
+# facilitator that cannot settle sells nothing. Coinbase CDP (the x402
+# Bazaar's facilitator) needs CDP_API_KEY_ID/CDP_API_KEY_SECRET beside it;
+# the CDP guard ignores those credentials for non-Coinbase hosts, so this
+# stays exactly one env var either way.
 FACILITATOR="${X402_FACILITATOR:-https://facilitator.payai.network}"
 
 STRIPE_SECRET_NAME="${STRIPE_SECRET_NAME:-SECRET_STRIPE_KEY}"
