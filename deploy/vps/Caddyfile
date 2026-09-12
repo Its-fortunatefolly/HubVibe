@@ -16,6 +16,16 @@
 	request_body {
 		max_size 4MB
 	}
+	# Access log, one JSON line per request, to the container's stdout:
+	# client address, method, path, status, duration and User-Agent. The
+	# app's own access log has method, path and status only, so without this
+	# there is no way to tell which agents arrive, which bounce on the 402,
+	# and which pay. scripts/traffic-ledger.sh reads it. Rotated by the same
+	# json-file limits as every other container here.
+	log {
+		output stdout
+		format json
+	}
 	reverse_proxy hubvibe:8080
 }
 
