@@ -319,10 +319,12 @@ Shell included. Each line below says which it is.
   `bash scripts/publish-action-repo.sh /tmp/hubvibe-audit-action`, then in
   `hubvibe-audit-action`: `git tag -f v1 origin/main && git tag v1.0.1 origin/main && git push -f origin v1 v1.0.1`.
   A Marketplace Release is UI-only.
-- Republish the MCP registry entry (1.2.0, domain URL), from a clone:
-  `./mcp-publisher login github` then `./mcp-publisher publish`. Bump
-  `version` in `server.json` before any later republish; the registry
-  rejects a version it already serves.
+- Republish the MCP registry entry (1.2.0, domain URL): GitHub → Actions →
+  "Publish MCP registry entry" → Run workflow. It logs in with the
+  workflow's own OIDC token (no browser, no local install) and fails if the
+  registry does not serve `server.json`'s version afterwards. It also runs
+  by itself whenever `server.json` changes on main. Bump `version` before
+  any later republish; the registry rejects a version it already serves.
 - Optional Cloud Run stopgap until the registry is republished:
   `bash scripts/repair-and-deploy.sh` (pins `PUBLIC_BASE_URL` to the
   service URL, min-instances 0). `DELETE_IDLE=1 bash scripts/cost-sweep.sh`
