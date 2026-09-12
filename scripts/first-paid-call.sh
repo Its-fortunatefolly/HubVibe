@@ -56,7 +56,7 @@
 # Optional:
 #     TARGET_URL   the site to audit         (default https://example.com)
 #     ROUTE        which paid route          (default /audit/wcag -- cheapest)
-#     FACILITATOR  facilitator base URL      (default https://x402.dexter.cash)
+#     FACILITATOR  facilitator base URL      (default https://facilitator.payai.network)
 #     BASE         the node under test       (default https://hubvibe-io.com)
 
 set -uo pipefail
@@ -89,7 +89,7 @@ elif [ -n "$NODE_FACILITATOR" ]; then
   FACILITATOR="$NODE_FACILITATOR"
   FACILITATOR_SOURCE="the node's $NODE_ENV_FILE"
 else
-  FACILITATOR="https://x402.dexter.cash"
+  FACILITATOR="https://facilitator.payai.network"
   FACILITATOR_SOURCE="the default -- the node's own .env was not readable from here, so which facilitator settles is UNCONFIRMED"
 fi
 
@@ -606,7 +606,7 @@ if printf '%s' "$BEFORE" | grep -qi 'not found'; then
   warn "runs no index. This payment will prove settlement but cannot register"
   warn "the node anywhere. To get indexed, settle through a facilitator that"
   warn "runs a Bazaar:"
-  warn "  cd $SCRIPT_DIR/.. && bash scripts/switch-facilitator.sh https://x402.dexter.cash"
+  warn "  cd $SCRIPT_DIR/.. && bash scripts/switch-facilitator.sh https://facilitator.payai.network"
   warn "then run this script once more."
 else
   BEFORE_COUNT=$(index_hits "$BEFORE")
@@ -798,5 +798,5 @@ else
   warn "  grep X402_FACILITATOR_URL $NODE_ENV_FILE"
   warn "If that is not $FACILITATOR, waiting will never help. Point the node at"
   warn "a facilitator that runs a Bazaar and pay once more:"
-  warn "  cd $SCRIPT_DIR/.. && bash scripts/switch-facilitator.sh https://x402.dexter.cash"
+  warn "  cd $SCRIPT_DIR/.. && bash scripts/switch-facilitator.sh https://facilitator.payai.network"
 fi

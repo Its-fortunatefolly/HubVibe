@@ -30,7 +30,7 @@ TEST_CONSTANT = "0x32b08c5e927c69877d0fcab35618c265674922bc"
 GOOD_TEMPO = "0x1111111111111111111111111111111111111111"
 SHORT = "0x32b08c5e927c69877d0fcab35618c265674922b"
 ZERO = "0x" + "0" * 40
-FACILITATOR = "https://x402.dexter.cash"
+FACILITATOR = "https://facilitator.payai.network"
 
 
 def _service_json(env):

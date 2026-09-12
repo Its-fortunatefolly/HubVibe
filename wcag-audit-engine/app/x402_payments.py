@@ -734,6 +734,65 @@ def _facilitator_supports(version: int, network: str) -> bool:
     return True
 
 
+def _facilitator_transfer_method(version: int, network: str) -> Optional[str]:
+    """The `assetTransferMethod` the facilitator declares for this kind, if any.
+
+    Read off the same cached /supported the version gate uses, so the answer is
+    the facilitator's own word rather than ours.
+    """
+    try:
+        kind = _get_server().get_supported_kind(version, network, "exact")
+    except Exception:
+        return None
+    if kind is None:
+        return None
+    return (getattr(kind, "extra", None) or {}).get("assetTransferMethod")
+
+
+def _v2_accepts(priced):
+    """Every `exact` rail on this network the facilitator will actually settle.
+
+    The default rail is whatever the scheme's own asset table picks. For Base
+    mainnet USDC that is EIP-3009 `transferWithAuthorization`, which the token
+    verifies with a plain `ecrecover` and no ERC-1271 fallback -- so it is
+    payable ONLY by a wallet whose signature recovers to the payer address.
+    A plain EOA qualifies. A Coinbase Base Account does not: it is an EIP-7702
+    account that signs through its delegate, and the settlement simulation
+    reverts. That is one rejected payment for every smart-account wallet on
+    Base, which is most of them, and it looks from this side like nobody is
+    buying.
+
+    Permit2 verifies through ERC-1271, so it is the rail those wallets can pay
+    on. It is offered as an ADDITIONAL entry, never a replacement: Permit2
+    needs a prior token approval that a fresh agent wallet will not have, so
+    taking EIP-3009 away would simply move the outage to the other half of the
+    market. Offering both is what makes the tollbooth payable by both.
+
+    Gated on the facilitator declaring the method, for the same reason every
+    other rail here is gated: a rail nobody can settle is worse than no rail.
+    """
+    from x402.schemas import PaymentRequirements
+
+    def rail(extra):
+        return PaymentRequirements(
+            scheme="exact",
+            network=_NETWORK,
+            asset=priced.asset,
+            amount=priced.amount,
+            payTo=_PAY_TO_ADDRESS,
+            maxTimeoutSeconds=_MAX_TIMEOUT_SECONDS,
+            extra=extra,
+        )
+
+    default_extra = dict(priced.extra or {})
+    accepts = [rail(default_extra)]
+    offered = default_extra.get("assetTransferMethod")
+    declared = _facilitator_transfer_method(2, _NETWORK)
+    if declared and declared != offered:
+        accepts.append(rail({**default_extra, "assetTransferMethod": declared}))
+    return accepts
+
+
 def payment_required_v2(
     price: Optional[str] = None,
     resource_url: Optional[str] = None,
@@ -766,7 +825,7 @@ def payment_required_v2(
         return None
     resolved = price or _PRICE
     try:
-        from x402.schemas import PaymentRequired, PaymentRequirements, ResourceInfo
+        from x402.schemas import PaymentRequired, ResourceInfo
 
         priced = _priced_asset(resolved)
         return PaymentRequired(
@@ -782,17 +841,7 @@ def payment_required_v2(
                 serviceName=_SERVICE_NAME,
                 tags=list(_SERVICE_TAGS),
             ),
-            accepts=[
-                PaymentRequirements(
-                    scheme="exact",
-                    network=_NETWORK,
-                    asset=priced.asset,
-                    amount=priced.amount,
-                    payTo=_PAY_TO_ADDRESS,
-                    maxTimeoutSeconds=_MAX_TIMEOUT_SECONDS,
-                    extra=priced.extra,
-                )
-            ],
+            accepts=_v2_accepts(priced),
             extensions=extensions or None,
         )
     except Exception as exc:
@@ -1488,10 +1537,12 @@ def _settle_outcome_of(exc) -> str:
 def settle_sync(pending) -> bool:
     """Capture a previously verified payment. Call only after delivering.
 
-    A False here means we delivered an audit we were not paid for, which is
-    the deliberately-chosen lesser evil: the alternative ordering charges for
-    work that was never delivered. Callers should surface it rather than
-    swallow it, so the gap stays visible instead of silent.
+    A False here means the audit ran and was not paid for. What the caller
+    does with that follows `pending.settle_state`: a definite "refused"
+    withholds the result and re-issues the 402 (main._settlement_refused);
+    "pending" and "unknown" may have moved the money and are delivered with
+    the state on the body. Never charge for work that was not delivered;
+    never deliver work the facilitator refused to charge for.
     """
     if pending is None:
         return False

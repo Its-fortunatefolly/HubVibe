@@ -23,6 +23,7 @@ SCRIPT = REPO_ROOT / "scripts" / "probe-facilitators.sh"
 _SUPPORTED_BASE = '{"kinds":[{"scheme":"exact","network":"eip155:8453"}]}'
 _SUPPORTED_LEGACY = '{"kinds":[{"scheme":"exact","network":"base"}]}'
 _SUPPORTED_OTHER = '{"kinds":[{"scheme":"exact","network":"eip155:137"}]}'
+_SUPPORTED_SEPOLIA_ONLY = '{"kinds":[{"x402Version":2,"scheme":"exact","network":"eip155:84532"},{"x402Version":1,"scheme":"exact","network":"base-sepolia"}]}'
 _INDEX = '{"x402Version":2,"items":[{"resource":"https://a.example"}]}'
 _NOT_AN_INDEX = '{"message":"Not Found"}'
 
@@ -96,6 +97,16 @@ def test_a_legacy_only_facilitator_is_reported_unusable_not_a_winner(tmp_path):
     result = _run(tmp_path, _SUPPORTED_LEGACY, "200", _INDEX, "200")
     assert "legacy name only" in result.stdout
     assert "cannot use this facilitator" in result.stdout
+    assert "KEYLESS WINNER" not in result.stdout
+
+
+def test_a_testnet_only_facilitator_is_not_reported_as_a_mainnet_settler(tmp_path):
+    """"eip155:84532" (Base Sepolia) contains "eip155:8453". A substring
+    match called x402.org/facilitator -- Sepolia only -- a Base mainnet
+    settler on 2026-09-12, the exact bug the handoff's own rule names."""
+    result = _run(tmp_path, _SUPPORTED_SEPOLIA_ONLY, "200", _INDEX, "200")
+    assert "Base mainnet listed" not in result.stdout, "eip155:84532 matched as eip155:8453"
+    assert "Base mainnet not offered" in result.stdout
     assert "KEYLESS WINNER" not in result.stdout
 
 

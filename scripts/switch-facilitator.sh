@@ -2,7 +2,7 @@
 # Point the running node at a different x402 facilitator -- and put it back
 # if that facilitator cannot serve a payable challenge.
 #
-#     bash scripts/switch-facilitator.sh https://x402.dexter.cash
+#     bash scripts/switch-facilitator.sh https://facilitator.payai.network
 #
 # WHY THIS IS NOT A ONE-LINE ENV EDIT
 #
@@ -41,7 +41,7 @@ ROUTE="${ROUTE:-/audit/wcag}"
 
 NEW_FACILITATOR="${1:-}"
 if [ -z "$NEW_FACILITATOR" ]; then
-  printf '\nUsage:  bash scripts/switch-facilitator.sh https://x402.dexter.cash\n\n'
+  printf '\nUsage:  bash scripts/switch-facilitator.sh https://facilitator.payai.network\n\n'
   printf 'Switches the running node to that facilitator and rolls back if the\n'
   printf 'node stops advertising a payable x402 rail.\n\n'
   exit 1

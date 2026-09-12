@@ -46,12 +46,16 @@ def test_health_check(monkeypatch):
 
     module = _load_main(monkeypatch)
     client = TestClient(module.app)
-    expected = {"status": "ok", "service": "wcag-audit-engine"}
 
     for path in ("/health", "/healthz"):
         response = client.get(path)
         assert response.status_code == 200, f"{path} did not answer"
-        assert response.json() == expected
+        body = response.json()
+        assert body["status"] == "ok"
+        assert body["service"] == "wcag-audit-engine"
+        # The probe also reports whether a browser is present, because a node
+        # that cannot launch one cannot serve a single paid audit.
+        assert "browser" in body
 
 
 def test_landing_page_served_at_root(monkeypatch):
@@ -1841,24 +1845,41 @@ def test_successful_audit_settles_the_x402_payment(monkeypatch):
     assert "billing_warning" not in response.json()
 
 
-def test_settlement_failure_after_delivery_is_surfaced_not_hidden(monkeypatch):
-    """If we delivered but couldn't collect, say so on the response rather
-    than silently eating the loss."""
+def test_a_refused_settlement_withholds_the_audit_and_charges_nothing(monkeypatch, load_main_fresh):
+    """A settle the facilitator refuses used to be answered with the audit
+    anyway plus a "not charged" warning -- the work given away on every
+    refusal (2026-09-11: a facilitator whose settlement signer was out of
+    gas delivered every call free). The reference x402 server discards the
+    handler's response on a failed settle and re-issues the 402; so do we.
+    """
     from fastapi.testclient import TestClient
 
-    module = _load_main(monkeypatch)
-    _x402_caller(monkeypatch, module, settle_ok=False)
+    # The rail must be configured for the re-challenge to carry accepts[], and
+    # x402_payments reads its configuration once per process, so the module
+    # is loaded fresh under this environment rather than reused.
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_audit_main_refused_settle_rest")
+    calls = _x402_caller(monkeypatch, module, settle_ok=False)
     monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
 
-    client = TestClient(module.app)
-    body = client.post(
+    response = TestClient(module.app).post(
         "/audit/wcag",
         json={"url": "https://example.com"},
         headers={"X-PAYMENT": "signed-payment"},
-    ).json()
+    )
 
-    assert "billing_warning" in body
-    assert "not charged" in body["billing_warning"]
+    assert calls["settled"] == 1, "settle must still be attempted once"
+    assert response.status_code == 402, "a refused settle delivered the audit anyway"
+    body = response.json()
+    assert body["error"] == "settlement_refused"
+    assert body["billed"] is False
+    assert "Nothing was charged" in body["error_detail"]
+    assert "fresh authorization" in body["error_detail"]
+    assert "violations" not in body and "pass" not in body, "the audit leaked on a refusal"
+    assert body["accepts"], "the 402 must still be payable, so the caller can retry"
+    assert body["accepts"][0]["resource"].endswith("/audit/wcag"), (
+        "the re-challenge names a different resource than the one the caller paid for"
+    )
 
 
 def test_failed_bundle_does_not_settle_either(monkeypatch):
@@ -1873,6 +1894,10 @@ def test_failed_bundle_does_not_settle_either(monkeypatch):
         raise RuntimeError("target site unreachable")
 
     monkeypatch.setattr(module, "_run_axe", _boom)
+    # The bundle loads the page through its own combined runner, not _run_axe.
+    # Stubbing only _run_axe let this test pass wherever Chromium could not
+    # launch and fail with a real 200 wherever it could.
+    monkeypatch.setattr(module, "_run_axe_and_performance", _boom)
 
     client = TestClient(module.app)
     response = client.post(
@@ -3198,8 +3223,8 @@ def test_no_receipt_when_settlement_failed_after_delivery(monkeypatch):
 
     response = _paid(TestClient(module.app))
 
-    assert response.status_code == 200
-    assert "billing_warning" in response.json()
+    assert response.status_code == 402
+    assert response.json()["error"] == "settlement_refused"
     assert "PAYMENT-RESPONSE" not in response.headers
     assert "X-PAYMENT-RESPONSE" not in response.headers
 
@@ -4012,10 +4037,15 @@ def test_a_pending_settlement_is_reported_as_pending_with_its_hash_not_as_free(m
         return False
 
     monkeypatch.setattr(module.x402_payments, "settle_sync", _refused)
-    warning = TestClient(module.app).post(
+    response = TestClient(module.app).post(
         "/audit/wcag", json={"url": "https://example.com"}, headers={"X-PAYMENT": "signed-payment"}
-    ).json()["billing_warning"]
-    assert "not charged" in warning
+    )
+    # Only a definite refusal withholds: pending and unknown above may have
+    # moved the money, so they deliver; refused delivers nothing and charges
+    # nothing.
+    assert response.status_code == 402
+    assert response.json()["error"] == "settlement_refused"
+    assert "PAYMENT-RESPONSE" not in response.headers
 
 
 def test_oversized_bodies_are_refused_before_they_are_read(monkeypatch):
@@ -4321,8 +4351,9 @@ def test_checkout_refuses_a_plan_now_that_the_tiers_are_retired(monkeypatch, loa
 def test_the_settlement_failure_says_WHY_on_the_response(monkeypatch):
     """The node is the only party that knows why a settle failed.
 
-    The payer sees a 200 with an audit in it; the operator has to be logged
-    into the box to read the log. On 2026-09-08 that cost the owner a night
+    The payer used to see a 200 with an audit in it, and now sees the 402
+    that withholds it; the operator has to be logged into the box to read
+    the log. On 2026-09-08 that cost the owner a night
     of grepping for a one-line answer the node already had in hand. "The
     facilitator refused it: insufficient_funds" and "ReadTimeout" call for
     completely different next moves, and one generic sentence for both is
@@ -4343,16 +4374,19 @@ def test_the_settlement_failure_says_WHY_on_the_response(monkeypatch):
     monkeypatch.setattr(module.x402_payments, "settle_sync", _settle_with_reason)
     monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
 
-    body = TestClient(module.app).post(
+    response = TestClient(module.app).post(
         "/audit/wcag",
         json={"url": "https://example.com"},
         headers={"X-PAYMENT": "signed-payment"},
-    ).json()
+    )
 
     assert calls["settled"] == 1
-    warning = body["billing_warning"]
-    assert "not charged" in warning
-    assert "insufficient_funds" in warning, (
+    # A refusal withholds the audit (see _settlement_refused); the reason
+    # rides the 402 that takes its place.
+    assert response.status_code == 402
+    detail = response.json()["error_detail"]
+    assert "Nothing was charged" in detail
+    assert "insufficient_funds" in detail, (
         "the reason is still only in the log, where the payer cannot see it"
     )
 
@@ -4384,3 +4418,204 @@ def test_an_unknown_settlement_says_WHY_too(monkeypatch):
     assert "unknown" in warning
     assert "do not re-pay" in warning
     assert "ReadTimeout" in warning
+# --- health means "can this node actually serve an audit" ------------------
+
+
+def test_health_degrades_when_the_browser_is_missing(monkeypatch):
+    """/health returned a constant, so it could only tell "uvicorn is up" from
+    "the box is down". The failure that costs money sits between: Chromium
+    absent or at an unexpected revision makes every paid audit 502 while the
+    container reports itself healthy, so nothing restarts and nobody is paged.
+    """
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module, "_BROWSER_PATH", "/nonexistent/chrome", raising=False)
+    monkeypatch.setattr(module, "_BROWSER_PATH_RESOLVED", True, raising=False)
+    client = TestClient(module.app)
+
+    response = client.get("/health")
+    assert response.status_code == 503, "a node that cannot audit reported itself healthy"
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert "chromium missing" in body["browser"]["detail"]
+
+
+def test_health_fails_open_when_the_browser_cannot_be_determined(monkeypatch):
+    """A probe that cannot tell must report ok: a false 503 restart-loops a
+    node that is serving fine, which is worse than the gap it closes."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module, "_BROWSER_PATH", None, raising=False)
+    monkeypatch.setattr(module, "_BROWSER_PATH_RESOLVED", True, raising=False)
+    client = TestClient(module.app)
+
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["browser"]["detail"] == "undetermined"
+
+
+# --- a charged top-up that cannot mint a key must say so -------------------
+
+
+def test_a_charged_topup_that_cannot_mint_a_key_tells_the_payer(monkeypatch):
+    """settle_topup_sync returns cents only after Stripe confirmed, so by the
+    time the mint runs the money has moved. Swallowing the failure meant the
+    payer was charged, got no key, and nothing recorded that credit was owed --
+    on a rail whose whole promise is that a machine can pay without a human.
+    """
+    module = _load_main(monkeypatch)
+
+    auth = module.AuthContext(
+        stripe_billable=False,
+        payment_method="mpp-topup",
+        issued_key=None,
+        credit_owed="paid 50 cents but the prepaid key could not be issued; 47 cents of credit is owed",
+    )
+    result = {"status": "ok", "pass": True}
+    module._attach_issued_key(result, auth)
+
+    assert "billing_warning" in result, "the payer was never told the charge went through"
+    assert "47 cents of credit is owed" in result["billing_warning"]
+    assert result["billed"] is True, "money moved; the response must not imply otherwise"
+
+
+def test_a_successful_topup_carries_no_owed_warning(monkeypatch):
+    module = _load_main(monkeypatch)
+    auth = module.AuthContext(
+        stripe_billable=False, payment_method="mpp-topup", issued_key="hv_abc"
+    )
+    result = {"status": "ok"}
+    module._attach_issued_key(result, auth)
+    assert "billing_warning" not in result
+    assert result["api_key"] == "hv_abc"
+
+
+# --- axe must reach iframes, or say it could not ---------------------------
+
+
+class _FakeFrame:
+    def __init__(self, name, refuses=False):
+        self.name = name
+        self.refuses = refuses
+        self.injected = False
+
+    def evaluate(self, script):
+        if self.refuses:
+            raise RuntimeError("cross-origin frame refused injection")
+        self.injected = True
+        return None
+
+
+class _FramedPage:
+    """A page whose main frame carries two children, one hostile."""
+
+    def __init__(self):
+        self.frames = [_FakeFrame("main"), _FakeFrame("widget"), _FakeFrame("ad", refuses=True)]
+
+
+def test_axe_is_injected_into_child_frames_before_running(monkeypatch):
+    """axe-playwright-python injects with a single page.evaluate, which reaches
+    the main frame only. axe's cross-frame protocol needs the bundle present in
+    every frame it is asked to reach, so violations inside an iframe -- a cookie
+    banner, an embedded booking widget, a payment form -- were absent from the
+    result rather than reported. The page came back cleaner than it is.
+    """
+    module = _load_main(monkeypatch)
+    page = _FramedPage()
+
+    monkeypatch.setattr(module._axe, "axe_script", "AXE_BUNDLE", raising=False)
+    monkeypatch.setattr(
+        module._axe, "run", lambda p, options=None: type("R", (), {"response": {"violations": []}})()
+    )
+
+    result = module._run_axe_all_frames(page)
+
+    assert page.frames[1].injected, "the child frame never received axe; its violations are invisible"
+    assert not page.frames[0].injected, "the main frame is axe.run's own job, not ours"
+    assert result["frames_unreachable"] == 1, "a frame that refused injection was not disclosed"
+    assert result["frames_audited"] == 2
+
+
+def test_a_page_with_no_iframes_reports_one_frame_audited(monkeypatch):
+    module = _load_main(monkeypatch)
+    page = type("P", (), {"frames": [_FakeFrame("main")]})()
+    monkeypatch.setattr(module._axe, "axe_script", "AXE_BUNDLE", raising=False)
+    monkeypatch.setattr(
+        module._axe, "run", lambda p, options=None: type("R", (), {"response": {"violations": []}})()
+    )
+    result = module._run_axe_all_frames(page)
+    assert result["frames_audited"] == 1
+    assert result["frames_unreachable"] == 0
+
+
+def test_no_audit_path_runs_axe_without_the_frame_pass():
+    """The frame-aware runner only helps where it is actually called. Both
+    browser audit paths -- /audit/wcag and the bundle's combined load -- must go
+    through it, or one of them silently goes back to main-frame-only results.
+    """
+    source = (REPO_ROOT / "wcag-audit-engine" / "app" / "main.py").read_text()
+    runner_start = source.index("def _run_axe_all_frames(")
+    runner_end = source.index("\ndef ", runner_start + 1)
+    inside = source[runner_start:runner_end]
+    outside = source[:runner_start] + source[runner_end:]
+
+    assert "_axe.run(" in inside, "the frame-aware runner no longer runs axe at all"
+    assert "_axe.run(" not in outside, (
+        "an audit path calls _axe.run directly, so iframe violations go unreported there"
+    )
+
+
+# --- a refused settle withholds the MCP result too --------------------------
+
+
+def test_a_refused_settlement_over_mcp_re_issues_the_paywall_not_the_audit(monkeypatch, load_main_fresh):
+    """Same rule as the REST routes, in the shape the x402 MCP client reads:
+    a settle the facilitator refuses answers with the v2 challenge in an
+    isError result, carrying the reason, and no audit."""
+    from fastapi.testclient import TestClient
+    from x402.mcp.utils import extract_payment_required_from_result
+    from x402.schemas import PaymentRequired
+
+    _x402_env(monkeypatch)
+    module = load_main_fresh("wcag_audit_main_mcp_refused_settle")
+    client = TestClient(module.app)
+    call = _tools_call("audit_wcag", {"url": "https://example.com"})
+
+    challenge = extract_payment_required_from_result(
+        _mcp_result_object(client.post("/mcp", json=call).json()["result"])
+    )
+    x402_client, _account = _x402_core_client()
+    payload_dict = x402_client.create_payment_payload(challenge).model_dump(by_alias=True)
+
+    settles = []
+
+    def _verify(header, price=None, **kw):
+        return module.x402_payments.PendingPayment(None, None, price)
+
+    def _settle(pending):
+        settles.append(pending)
+        pending.settle_state = "refused"
+        pending.settle_error = "the facilitator refused it: insufficient_funds"
+        return False
+
+    monkeypatch.setattr(module.x402_payments, "verify_only_sync", _verify)
+    monkeypatch.setattr(module.x402_payments, "settle_sync", _settle)
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
+
+    result = client.post(
+        "/mcp", json=_tools_call("audit_wcag", {"url": "https://example.com"},
+                                 meta={"x402/payment": payload_dict}, request_id=2)
+    ).json()["result"]
+
+    assert len(settles) == 1
+    assert result["isError"] is True, "a refused settle delivered the MCP audit anyway"
+    assert '"pass"' not in result["content"][0]["text"], "the audit leaked on a refusal"
+    structured = result["structuredContent"]
+    assert structured["error"] == "settlement_refused"
+    assert "insufficient_funds" in structured["error_detail"]
+    assert "Nothing was charged" in structured["error_detail"]
+    assert "_meta" not in result, "no settlement, no receipt"
+    parsed = extract_payment_required_from_result(_mcp_result_object(result))
+    assert isinstance(parsed, PaymentRequired), "the re-challenge is not payable by the MCP client"

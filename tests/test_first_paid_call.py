@@ -700,7 +700,7 @@ def test_an_unreadable_node_env_is_called_unconfirmed_not_assumed(tmp_path):
     every later line about the index then rests on a guess, and the reader
     has no way to know it."""
     out = _facilitator_note(tmp_path, None)
-    assert "https://x402.dexter.cash" in out
+    assert "https://facilitator.payai.network" in out
     assert "UNCONFIRMED" in out, "a guessed facilitator must not read as a known one"
 
 

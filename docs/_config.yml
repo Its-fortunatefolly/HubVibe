@@ -1,0 +1,6 @@
+# GitHub Pages builds this folder with Jekyll. The site is the about-page
+# (index.html); the two session documents beside it are operator notes and
+# must not be published as pages of the product site.
+exclude:
+  - HANDOFF.md
+  - SESSION_BRIEF.md

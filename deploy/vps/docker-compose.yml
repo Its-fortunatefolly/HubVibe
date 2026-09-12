@@ -40,6 +40,12 @@ services:
       RATE_LIMIT_PROXY_DEPTH: "1"
     volumes:
       - hubvibe_data:/data
+    # A page load is allowed 30s and a settle waits on chain inclusion, so
+    # Docker's default 10s grace SIGKILLed audits a customer had already paid
+    # for: `docker compose up -d --build` on a busy node dropped every call in
+    # flight. uvicorn stops accepting on SIGTERM and drains what it holds; this
+    # gives it room to finish rather than being shot halfway through.
+    stop_grace_period: 45s
     # Chromium under memory pressure takes the whole box with it; cap the
     # container so the worst case is a restarted service, not a dead host.
     mem_limit: 3g
