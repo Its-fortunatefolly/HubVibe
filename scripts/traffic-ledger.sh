@@ -97,7 +97,8 @@ else:
     print("  settlements: none in this window")
 if not requests:
     print("  no access-log lines seen: is Caddy's `log` directive deployed? "
-          "(deploy/vps/Caddyfile; rebuild after changing it)")
+          "(deploy/vps/Caddyfile is bind-mounted and read only on start, so a "
+          "rebuild is not enough: restart the caddy container from deploy/vps)")
 PY
 
 summarise() {
