@@ -35,6 +35,15 @@ ALLOWED = {
     # The ERC-20 Transfer event topic0 -- a public constant of the standard,
     # identical in every contract on every chain.
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+    # Uniswap V4 PoolId (keccak256 of the PoolKey: currencies, fee, tick
+    # spacing, hooks) for the Base ETH/USDC fee=3000/tickSpacing=60 pool --
+    # a deterministic, publicly computable identifier, not a secret.
+    # .claude/skills/base-mcp/plugins/uniswap.md
+    "0xe070797535b13431808f8fc81fdbe7b41362960ed0b55bc2b6117c49c51b7eb9",
+    # Bankr launch-API example response `poolId` for a token launch -- a
+    # public pool identifier, not a secret.
+    # .claude/skills/base-mcp/plugins/bankr.md
+    "0x2fee469c920ad9cd8d7fed1510c6034531e0f9fb7c94dbeea35623a358b7580f",
 }
 
 # Identifiers that are not credentials but should not sit in a public repo.

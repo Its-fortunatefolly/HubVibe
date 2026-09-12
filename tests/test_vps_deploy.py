@@ -170,9 +170,45 @@ def test_the_installer_writes_only_intended_defaults():
 def test_a_rerun_keeps_the_existing_env():
     script = SCRIPT.read_text()
     assert 'if [ -f "$ENV_FILE" ]' in script
-    assert "keeping it" in script, (
+    assert "keeping the keys" in script, (
         "a re-run that rewrote .env would destroy live Stripe keys"
     )
+    # The whole file is never regenerated on the re-run path.
+    rerun = script[script.index('if [ -f "$ENV_FILE" ]'):script.index("else\n  {")]
+    assert "> \"$ENV_FILE\"" not in rerun, "a re-run must not truncate .env"
+
+
+def test_a_rerun_updates_the_address_the_operator_explicitly_set():
+    """Updating only DOMAIN was a trap. An operator changing the address they
+    are paid at re-ran this, saw it succeed, and went on being paid at the old
+    address with nothing said. Only what they set in the shell is overwritten,
+    so a default can never clobber a deliberate value."""
+    script = SCRIPT.read_text()
+    rerun = script[script.index('if [ -f "$ENV_FILE" ]'):script.index("else\n  {")]
+    assert 'upsert_env X402_PAY_TO_ADDRESS' in rerun
+    assert 'upsert_env X402_FACILITATOR_URL' in rerun
+    assert '[ -n "${X402_PAY_TO_ADDRESS:-}" ]' in rerun, (
+        "the default must not overwrite a deliberately different address"
+    )
+    assert '[ -n "${X402_FACILITATOR_URL:-}" ]' in rerun
+
+
+def test_the_env_file_is_locked_down_on_every_path():
+    """.env.example tells the operator to copy it into place, and it can hold
+    live Stripe keys. chmod inside the create branch left every such file at
+    whatever mode it arrived with."""
+    script = SCRIPT.read_text()
+    after = script[script.index("  } > \"$ENV_FILE\""):]
+    assert 'chmod 600 "$ENV_FILE"' in after
+    body = after[:after.index('chmod 600 "$ENV_FILE"')]
+    assert body.count("fi") >= 1, "chmod must sit after the if/else, not inside it"
+
+
+def test_the_installer_says_who_gets_paid():
+    """The one fact an operator has to confirm in seconds, read from the file
+    the node will actually load rather than from the installing shell."""
+    script = SCRIPT.read_text()
+    assert "paid to $(grep '^X402_PAY_TO_ADDRESS=' \"$ENV_FILE\"" in script
 
 
 # --- 2026-09-06: the two mistakes the first real install could make ---

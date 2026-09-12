@@ -112,20 +112,34 @@ code is gone. Do not suggest Coinbase.
 Read `## Live state` and `## Owner runbook` in `docs/HANDOFF.md`. They are
 maintained; this list is not.
 
-The standing goal is the first paid call — one $0.03 payment that proves the
-settle side (never once exercised) and registers the node in whatever Bazaar
-index processes it:
+Whether the node can take a customer's money is a **free** question, and it
+is the one worth asking first:
 
 ```bash
-bash scripts/first-paid-call.sh --new-wallet   # only if no wallet yet
-# fund the printed address with USDC on Base -- $1 is plenty
+bash scripts/verify-live.sh
+```
+
+It validates the live 402's `accepts[]` against the fields
+`PaymentRequirementsV1` requires — the same validation a customer's client
+runs before signing. No wallet, no funds, no address to trust. The rail is
+gated on a facilitator URL and a well-formed pay-to address and nothing else
+(`x402_payments.is_configured()`), and the pay-to address only receives, so
+**an unfunded owner does not block a single customer.**
+
+The remaining goal is a first paid call — one $0.03 payment that exercises
+the settle side (never once run live) and registers the node in whatever
+Bazaar index processes it. It is a receipt, not a prerequisite:
+
+```bash
+bash scripts/first-paid-call.sh --new-wallet   # generates a NEW random key
+# fund the printed address with USDC on Base -- $1 is plenty, NO ETH needed
 BASE=https://hubvibe-io.com bash scripts/first-paid-call.sh
 ```
 
-That payer wallet needs no ETH: x402's exact-EVM scheme signs an EIP-3009
-authorization off-chain, so it never broadcasts, and the facilitator submits
-the transfer and pays the gas. The send that FUNDS it is an ordinary transfer
-out of whichever wallet holds the dollar, and covers its own gas like any
-other -- the one place on this path where gas is the owner's to pay. Saying
-"no ETH needed" without naming which wallet is what makes a routine gas
-prompt look like something broken.
+`--new-wallet` mints a fresh private key on the box; the address it prints
+belongs to nobody until then, so there is nothing to recognise and no reason
+to trust an address quoted in a document rather than shown by the script.
+Fund only what the script prints, and only what a call costs.
+
+No ETH because x402's exact-EVM scheme signs an EIP-3009 authorization
+off-chain; the facilitator submits it and pays the gas.
