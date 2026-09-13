@@ -46,14 +46,19 @@ def test_it_counts_arrivals_bounces_and_payments_per_route():
         _access("10.0.0.2", "curl/8.18.0", "/audit/seo?x=1", 402),
         _access("10.0.0.3", "some-agent/1.0", "/audit/bundle", 502),
         _access("10.0.0.4", "Mozilla/5.0", "/", 200),
+        _access("10.0.0.5", "mcp-client/1.0", "/mcp", 200),
+        _access("10.0.0.6", "uvd-bazaar-health/1.0", "/audit/wcag", 405),
         "hubvibe-1  | 2026-09-12T13:10:28Z INFO:app.x402_payments:x402 SETTLED (settle) "
         "price=$0.03 tx=0xabc network=eip155:8453 payer=0x1 amount=None",
         "hubvibe-1  | WARNING:app.main:x402 audit WITHHELD: settle refused after the audit ran (x); "
         "nothing charged, result not delivered",
     ]
     out = _run(lines)
-    assert "audit/mcp requests: 4" in out, out
-    assert "distinct clients: 3" in out
+    assert "audit/mcp requests: 6" in out, out
+    assert "distinct clients: 5" in out
+    # The /mcp 200 is a free tools/list, not a sale; the 405 is a crawler
+    # that never saw the price.
+    assert "refused before the price (400/405/422): 1" in out
     assert "paid (200): 1" in out and "challenged (402): 2" in out and "failed (502): 1" in out
     assert "withheld on refused settle: 1" in out
     # 10.0.0.1 paid after its 402; 10.0.0.2 bounced. The homepage hit is not traffic.

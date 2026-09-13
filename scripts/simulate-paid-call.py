@@ -716,13 +716,17 @@ def main() -> int:
         node2 = start_node(node2_port, env2, node2_log)
         try:
             base2 = f"http://127.0.0.1:{node2_port}"
+            probe_payer = {"X-PAYMENT": "not-a-real-payment"}
             for bad in (f"{facilitator}/page", "http://169.254.169.254/computeMetadata/v1/",
                         "http://metadata.google.internal/", "http://localhost:8080/health",
                         "http://10.0.0.1/", "ftp://example.com/"):
-                status, _, body = _post(f"{base2}/audit/wcag", {"url": bad})
+                # A dummy payment header: the target gate must answer BEFORE the
+                # payment is read, so a payer's bad request costs nothing. (A
+                # request with no credential at all is priced first, below.)
+                status, _, body = _post(f"{base2}/audit/wcag", {"url": bad}, headers=probe_payer)
                 checks.expect(
                     status == 400 and body.get("billed") is False,
-                    f"refuses to fetch {bad} (HTTP {status})",
+                    f"refuses to fetch {bad} before reading the payment (HTTP {status})",
                 )
             status, _, body = _post(
                 f"{base2}/audit/wcag", {"url": "http://93.184.216.34/"}, headers={"X-API-Key": "simulate-paid-call"}
@@ -740,7 +744,9 @@ def main() -> int:
                 f"unpaid call during a facilitator outage: 402 with no x402 rail (HTTP {status})",
             )
             checks.expect(elapsed < 10, f"that 402 took {elapsed:.1f}s (<10s), the node is not hanging on the outage")
-            status, _, body = _post(f"{base2}/audit/wcag", {"html": "<p>" + "x" * (2 * 1024 * 1024 + 1)})
+            status, _, body = _post(
+                f"{base2}/audit/wcag", {"html": "<p>" + "x" * (2 * 1024 * 1024 + 1)}, headers=probe_payer
+            )
             checks.expect(status == 422, f"an oversized html body is refused before any payment (HTTP {status})")
         finally:
             node2.terminate()

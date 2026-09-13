@@ -4072,8 +4072,15 @@ def test_oversized_bodies_are_refused_before_they_are_read(monkeypatch):
         for _ in range(6):
             yield b"x" * (1024 * 1024)
 
-    response = client.post("/audit/wcag", content=_stream(), headers={"Content-Type": "application/json"})
+    response = client.post(
+        "/audit/wcag", content=_stream(),
+        headers={"Content-Type": "application/json", "X-API-Key": "test-key"},
+    )
     assert response.status_code == 413
+    # With no credential the price is answered before the body is read at
+    # all -- even cheaper than the cap, and nothing is buffered either way.
+    response = client.post("/audit/wcag", content=_stream(), headers={"Content-Type": "application/json"})
+    assert response.status_code == 402
 
     # A legitimate 2 MiB html audit is under the cap and reaches the route.
     fine = b'{"html": "' + b"<p>x</p>" * (module.MAX_HTML_BYTES // 16) + b'"}'
@@ -4141,9 +4148,11 @@ def test_invalid_json_to_mcp_is_a_parse_error_in_jsonrpc_shape(monkeypatch):
         "jsonrpc": "2.0", "id": None,
         "error": {"code": -32700, "message": "Parse error: the body is not valid JSON"},
     }
-    # Every other route keeps FastAPI's default validation shape.
+    # Every other route keeps FastAPI's default validation shape for a caller
+    # holding a credential (one without is priced first, see below).
     response = TestClient(module.app).post(
-        "/audit/wcag", content=b"{not json", headers={"Content-Type": "application/json"}
+        "/audit/wcag", content=b"{not json",
+        headers={"Content-Type": "application/json", "X-API-Key": "test-key"},
     )
     assert response.status_code == 422
     assert "detail" in response.json()
@@ -4260,6 +4269,61 @@ def test_a_body_with_nothing_to_audit_is_refused_before_payment(monkeypatch):
         assert response.json()["billed"] is False
         assert "Nothing was charged" in response.json()["detail"]
     assert calls["verify"] == 0, "a body with nothing to audit reached the facilitator"
+
+
+def test_an_unpaid_probe_gets_the_price_before_anything_else(monkeypatch):
+    """The indexers that list this node (uvd-bazaar-health, PayAI's monitor,
+    x402lens, x402-directory-verifier, allow402-quote) probe with GET, HEAD
+    or an empty POST and no credential. For a day they got 405/422/400 and
+    25 requests in total ever saw the 402. A crawler that never sees the
+    price cannot list it: with no credential, the challenge comes first."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    touched = []
+    monkeypatch.setattr(
+        module.x402_payments, "verify_only_sync", lambda *a, **k: touched.append("verify")
+    )
+    monkeypatch.setattr(module, "_run_axe", lambda *a, **k: touched.append("audit"))
+    client = TestClient(module.app)
+    probes = [
+        ("POST", {"json": {}}),
+        ("POST", {"content": b"{not json", "headers": {"Content-Type": "application/json"}}),
+        ("POST", {"json": {"url": "http://127.0.0.1/"}}),
+        ("POST", {"json": {"html": "<p>" + "x" * (module.MAX_HTML_BYTES + 1)}}),
+        ("GET", {}),
+        ("HEAD", {}),
+    ]
+    for path, price in module._PAID_ROUTE_PRICES.items():
+        for method, kwargs in probes:
+            response = client.request(method, path, **kwargs)
+            assert response.status_code == 402, (method, path, response.status_code, response.text[:200])
+            assert response.headers["cache-control"] == "no-store"
+            if method == "HEAD":
+                assert response.content == b""
+            else:
+                assert response.json()["price_usd"] == price, (method, path)
+            if method != "POST":
+                assert response.headers["allow"] == "POST"
+    assert touched == [], "an unpaid probe reached the facilitator or ran an audit"
+    # Only paid routes are challenged; the discovery surfaces stay free.
+    assert client.get("/llms.txt").status_code == 200
+    assert client.get("/.well-known/agent.json").status_code == 200
+
+
+def test_a_credentialed_bad_request_is_still_refused_before_payment(monkeypatch):
+    """Pricing unpaid probes must not reorder anything for a payer: a signed
+    body with nothing to audit is refused for free BEFORE the facilitator
+    sees it (the test above this one), and a credentialed GET stays a 405 --
+    the price is not the answer to a caller that already holds a way to pay."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+    assert client.post("/audit/wcag", json={}, headers={"X-API-Key": "test-key"}).status_code == 400
+    assert client.post("/audit/security", json={}, headers={"X-API-Key": "test-key"}).status_code == 422
+    assert client.get("/audit/wcag", headers={"X-API-Key": "test-key"}).status_code == 405
+    assert client.get("/audit/wcag", headers={"PAYMENT-SIGNATURE": "signed"}).status_code == 405
 
 
 def test_a_failed_audit_says_it_was_not_charged(monkeypatch):

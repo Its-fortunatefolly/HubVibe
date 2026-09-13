@@ -70,16 +70,21 @@ for client, ua, method, path, status in audit:
 clients = Counter(r[0] for r in audit)
 agents = Counter(r[1][:60] for r in audit)
 challenged = {r[0] for r in audit if r[4] == 402}
-paid = {r[0] for r in audit if r[4] == 200}
+# A 200 on /mcp is mostly initialize/tools/list -- free discovery, not a sale.
+paid = {r[0] for r in audit if r[4] == 200 and r[3] != "/mcp"}
 bounced = challenged - paid
 
 print(f"Traffic ledger -- last {since}")
 print(f"  audit/mcp requests: {len(audit)}   distinct clients: {len(clients)}")
-print(f"  paid (200): {sum(c[200] for c in by_route.values())}   "
+print(f"  paid (200): {sum(c[200] for p, c in by_route.items() if p != '/mcp')}   "
       f"challenged (402): {sum(c[402] for c in by_route.values())}   "
       f"failed (502): {sum(c[502] for c in by_route.values())}   "
       f"withheld on refused settle: {withheld}")
 print(f"  clients that saw a 402 and never paid: {len(bounced)}")
+# An unpaid probe is priced before routing or validation, so these should be
+# near zero; a climb here means crawlers are bouncing before the 402 again.
+unpriced = sum(c[s] for p, c in by_route.items() if p != "/mcp" for s in (400, 405, 422))
+print(f"  audit requests refused before the price (400/405/422): {unpriced}")
 if by_route:
     print("  per route (status: count):")
     for path in sorted(by_route):
