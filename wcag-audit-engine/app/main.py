@@ -271,6 +271,85 @@ async def _empty_receive():
     return {"type": "http.request", "body": b"", "more_body": False}
 
 
+# Every paid audit route and its price. The middleware below keys on this
+# table and nothing else: a path that is not in it is not paid, so it is
+# never challenged, and the discovery surfaces stay free.
+_PAID_ROUTE_PRICES = {
+    "/audit": 0.03,
+    "/audit/wcag": 0.03,
+    "/audit/seo": 0.03,
+    "/audit/security": 0.03,
+    "/audit/performance": 0.03,
+    "/audit/bundle": 0.10,
+}
+_CREDENTIAL_HEADERS = ("x-api-key", "x-payment", "payment-signature", "authorization")
+
+
+def _carries_credential(request: Request) -> bool:
+    return any(request.headers.get(name) for name in _CREDENTIAL_HEADERS)
+
+
+class _PriceUnpaidProbes:
+    """A paid route answers a request that carries no credential with its
+    price, whatever else is wrong with the request.
+
+    The indexers and verifiers that decide whether this node is listed
+    (uvd-bazaar-health, PayAI-Uptime-Monitor, x402lens-indexer,
+    x402-directory-verifier, allow402-quote, hermes) cannot know the input
+    schema before they have seen the challenge, so they GET, HEAD, or POST an
+    empty body. Until 2026-09-13 method routing and body validation ran
+    before the payment gate, so those probes got 405, 422 or 400: in one day
+    the box's ledger showed ~240 crawler POSTs and ~500 GET/HEADs bouncing
+    that way while 25 requests in total saw a 402. A crawler that never sees
+    the price cannot list it, and a listing is where every paying agent
+    comes from.
+
+    Validation still runs first for a request that DOES carry a credential:
+    a payer's malformed body has to be refused before its signature reaches
+    the facilitator, or the nonce is burned and the corrected retry is
+    refused as a replay (see _reject_missing_input). With no credential there
+    is no nonce to protect, so the challenge can go first.
+
+    The 402 is the very one the auth gate issues, rate limiter included;
+    a non-POST probe also learns the method. OPTIONS passes through to CORS.
+    Pure ASGI, like _RequestBodyLimit, and registered before it so the cap
+    wraps this: a declared body over the cap is a 413, credential or not. A
+    Starlette BaseHTTPMiddleware here would wrap the body reader and turn the
+    cap's _BodyTooLarge into a generic 400 for a credentialed caller.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        method = scope.get("method")
+        price = _PAID_ROUTE_PRICES.get(scope.get("path") or "") if scope["type"] == "http" else None
+        if price is None or method == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope, _empty_receive)  # headers only; the body is never read here
+        if _carries_credential(request):
+            await self.app(scope, receive, send)
+            return
+        _, challenge = _authorize_and_rate_limit(None, None, None, request, price_usd=price)
+        if challenge is None:  # pragma: no cover -- nothing authenticates without a credential
+            await self.app(scope, receive, send)
+            return
+        if method != "POST":
+            challenge.headers["allow"] = "POST"
+        if method == "HEAD":
+            # Status and headers only: a body on a HEAD response is a protocol
+            # error at the HTTP layer, and h11 refuses to send it.
+            challenge = Response(
+                status_code=challenge.status_code,
+                headers={k: v for k, v in challenge.headers.items() if k.lower() != "content-length"},
+            )
+        await challenge(scope, _empty_receive, send)
+
+
+app.add_middleware(_PriceUnpaidProbes)
+
+
 # Added BEFORE CORS so CORS wraps it: a browser caller can read the 413.
 app.add_middleware(_RequestBodyLimit, max_bytes=MAX_REQUEST_BYTES)
 
