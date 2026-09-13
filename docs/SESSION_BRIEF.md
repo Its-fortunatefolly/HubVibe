@@ -26,7 +26,7 @@ Paid routes: `/audit/wcag`, `/audit/seo`, `/audit/security`,
 
 ## Money model
 
-$0.03 per single audit, $0.10 per bundle, ~98% gross margin. Revenue at that
+$0.05 per single audit, $0.15 per bundle, ~98% gross margin. Revenue at that
 rate needs enormous call volume, so the whole game is machine traffic.
 
 The human plan tiers are retired (2026-09-06): per call is the only price.
@@ -129,7 +129,7 @@ gated on a facilitator URL and a well-formed pay-to address and nothing else
 (`x402_payments.is_configured()`), and the pay-to address only receives, so
 **an unfunded owner does not block a single customer.**
 
-The remaining goal is a first paid call — one $0.03 payment that exercises
+The remaining goal is a first paid call — one $0.05 payment that exercises
 the settle side (never once run live) and registers the node in whatever
 Bazaar index processes it. It is a receipt, not a prerequisite:
 

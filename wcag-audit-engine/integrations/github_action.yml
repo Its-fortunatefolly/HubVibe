@@ -14,7 +14,7 @@
 # where a reviewer will actually see them. A hand-rolled curl step gets none
 # of that and has to be maintained against the API by whoever copied it.
 #
-# Cost: $0.10 per bundle run, $0.03 for a single dimension. A repo merging
+# Cost: $0.15 per bundle run, $0.05 for a single dimension. A repo merging
 # 100 pull requests a month running the full bundle on each spends $10/mo.
 #
 # With neither secret set the run stops on the service's HTTP 402 and prints

@@ -42,7 +42,7 @@ CANDIDATES=(
 # lists only the legacy name showed why that was wrong: the x402 server
 # library builds every payment's requirements under the CAIP-2 name and
 # only does so when the facilitator's /supported lists that exact name
-# (ExactEvmServerScheme.parse_price("$0.03", "base") raises "Unsupported
+# (ExactEvmServerScheme.parse_price("$0.05", "base") raises "Unsupported
 # network format"). Against a legacy-only facilitator the node can verify
 # nothing -- v1 or v2 -- and, since #82, correctly advertises nothing.
 # So a legacy-only answer is reported as what it is: unusable here.

@@ -27,12 +27,12 @@ MAIN_PATH = REPO_ROOT / "wcag-audit-engine" / "app" / "main.py"
 
 TARGET = {"url": "https://example.com"}
 PRICE_CENTS = {
-    "/audit": 3,
-    "/audit/wcag": 3,
-    "/audit/seo": 3,
-    "/audit/security": 3,
-    "/audit/performance": 3,
-    "/audit/bundle": 10,
+    "/audit": 5,
+    "/audit/wcag": 5,
+    "/audit/seo": 5,
+    "/audit/security": 5,
+    "/audit/performance": 5,
+    "/audit/bundle": 15,
 }
 
 
@@ -115,7 +115,7 @@ def test_the_refunded_key_still_buys_exactly_what_it_holds(monkeypatch, tmp_path
     audit, and the one after that is challenged."""
     module = _load_main(monkeypatch, tmp_path)
     client = TestClient(module.app)
-    key = module.billing.issue_prepaid_key(3)
+    key = module.billing.issue_prepaid_key(5)
 
     monkeypatch.setattr(module, "_run_axe", _explode)
     assert client.post("/audit/wcag", json=TARGET, headers={"X-API-Key": key}).status_code == 502
@@ -130,7 +130,7 @@ def test_a_failed_mcp_tool_call_refunds_the_prepaid_key(monkeypatch, tmp_path):
     module = _load_main(monkeypatch, tmp_path)
     monkeypatch.setattr(module, "_run_axe", _explode)
     client = TestClient(module.app)
-    key = module.billing.issue_prepaid_key(3)
+    key = module.billing.issue_prepaid_key(5)
 
     response = client.post(
         "/mcp",
@@ -147,7 +147,7 @@ def test_a_failed_mcp_tool_call_refunds_the_prepaid_key(monkeypatch, tmp_path):
     assert result["isError"] is True
     body = json.loads(result["content"][0]["text"])
     assert body["billed"] is False
-    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 3
+    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 5
 
 
 def test_a_topup_key_is_returned_holding_everything_it_bought_when_the_first_audit_fails(

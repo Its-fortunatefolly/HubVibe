@@ -11,7 +11,7 @@
 #      current code and not whatever an old directory had;
 #   3. bash scripts/repair-and-deploy.sh   (preflight, capacity, spend alert,
 #      source deploy, live verification);
-#   4. bash scripts/first-paid-call.sh     (one real $0.03 payment, receipt
+#   4. bash scripts/first-paid-call.sh     (one real $0.05 payment, receipt
 #      printed as a Basescan link).
 #
 # Every step is the same script the handoff documents; this only removes the

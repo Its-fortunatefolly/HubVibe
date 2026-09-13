@@ -32,7 +32,7 @@ regression that caused it** — not in an audit six months later.
   build means the checks actually ran.
 - `fail-on-error: false` keeps our outage from ever blocking your deploy;
   your real regressions still gate it.
-- **$0.10 per PR** for all four checks as one bundle, $0.03 for a single
+- **$0.15 per PR** for all four checks as one bundle, $0.05 for a single
   check. A repo merging 100 PRs a month spends $10. No subscription, no seat
   licence, no minimum.
 
@@ -77,7 +77,7 @@ WWW-Authenticate: Payment ...
 
 {
   "error": "payment_required",
-  "price_usd": 0.03,
+  "price_usd": 0.05,
   "accepts": [ { "protocol": "x402", ... }, { "protocol": "mpp", ... } ],
   "docs": "/.well-known/agent.json"
 }
@@ -99,8 +99,8 @@ limits enforced *before* anything is signed:
 from integrations.hubvibe_tollbooth import HubVibeTollbooth
 
 booth = HubVibeTollbooth.from_env()          # HUBVIBE_WALLET_KEY or HUBVIBE_API_KEY
-result = booth.audit("https://example.com")  # full bundle, $0.10
-result = booth.audit("https://example.com", endpoint="wcag")  # $0.03
+result = booth.audit("https://example.com")  # full bundle, $0.15
+result = booth.audit("https://example.com", endpoint="wcag")  # $0.05
 ```
 
 `accepts` lists only the payment rails that can genuinely settle on this
@@ -122,11 +122,11 @@ price is the charged price by construction.
 
 | Route | Price | Checks |
 |---|---|---|
-| `POST /audit/wcag` | $0.03 | WCAG 2.1 A/AA via axe-core, against the rendered page |
-| `POST /audit/seo` | $0.03 | Title, meta description, H1s, canonical, OpenGraph, structured data, lang |
-| `POST /audit/security` | $0.03 | HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking, Referrer-Policy, CORS |
-| `POST /audit/performance` | $0.03 | DOM nodes, transferred bytes, request count from one real page load |
-| `POST /audit/bundle` | $0.10 | All four against one URL, billed once |
+| `POST /audit/wcag` | $0.05 | WCAG 2.1 A/AA via axe-core, against the rendered page |
+| `POST /audit/seo` | $0.05 | Title, meta description, H1s, canonical, OpenGraph, structured data, lang |
+| `POST /audit/security` | $0.05 | HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking, Referrer-Policy, CORS |
+| `POST /audit/performance` | $0.05 | DOM nodes, transferred bytes, request count from one real page load |
+| `POST /audit/bundle` | $0.15 | All four against one URL, billed once |
 
 Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
 
@@ -300,7 +300,7 @@ scripts/verify-live.sh    verifies a deployed node from outside
 scripts/simulate-paid-call.py
                           the whole x402 paid path, locally, for free
 scripts/first-paid-call.sh
-                          the same paid path against the live node, for $0.03
+                          the same paid path against the live node, for $0.05
 scripts/payment-status.sh what the money is doing: wallet balances, live 402, verdict
 scripts/vps-install.sh    the whole service on any flat-rate box, one command
 deploy/vps/               compose + Caddy TLS + SQLite key store (no Google)

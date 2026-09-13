@@ -48,7 +48,7 @@ inputs:
     description: >-
       EVM private key (a repo secret) funded with USDC on Base, used to pay the
       402 per call via x402 -- no account, no checkout, no subscription. Costs
-      $0.03 a run ($0.10 for the bundle) and settles in seconds.
+      $0.05 a run ($0.15 for the bundle) and settles in seconds.
 
       This exists because requiring an account before the first useful run is
       an adoption wall: a CI step whose first execution fails and asks for a

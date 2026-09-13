@@ -273,10 +273,10 @@ else:
         if balance is None:
             warn(f"payer {payer} -- balance unreadable from here")
             print(f"        check: https://basescan.org/address/{payer}")
-        elif balance >= 0.03:
+        elif balance >= 0.05:
             ok(f"payer {payer} holds ${balance:,.6f} USDC -- enough for the first call")
         else:
-            bad(f"payer {payer} holds ${balance:,.6f} USDC -- needs at least $0.03")
+            bad(f"payer {payer} holds ${balance:,.6f} USDC -- needs at least $0.05")
             print("        Send it USDC ON BASE (no ETH needed; the facilitator pays gas):")
             print(f"        https://basescan.org/address/{payer}")
         if payer.lower() in OWNER_WALLETS:

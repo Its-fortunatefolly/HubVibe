@@ -26,8 +26,8 @@ STRANGER = "0x2b3bb4feb0c8af003da4a46e8c65e25bd6f10256"  # the historical uniden
 def _challenge(pay_to):
     return {
         "error": "payment_required",
-        "price": "$0.03",
-        "price_usd": 0.03,
+        "price": "$0.05",
+        "price_usd": 0.05,
         "x402Version": 1,
         "accepts": [
             {
@@ -117,7 +117,7 @@ def test_a_node_paying_the_owner_is_reported_as_safe(tmp_path):
     out = result.stdout
     assert "the node is up" in out
     assert "x402 is LIVE" in out
-    assert "$0.03" in out, "the price a caller actually pays must be shown"
+    assert "$0.05" in out, "the price a caller actually pays must be shown"
     assert "the node pays YOU" in out
     assert "hubvibe.base.eth" in out
     assert "Nothing structural" in out, out[-600:]

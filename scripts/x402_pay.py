@@ -7,7 +7,7 @@ a newly added CI step fail with "HTTP 402 -- go buy a plan", and a step that
 fails on its first execution is deleted on the next push. The adoption funnel
 was closed before it opened, however good the discovery surfaces were.
 
-With a funded wallet the pipeline pays $0.03 a run by itself: no account, no
+With a funded wallet the pipeline pays $0.05 a run by itself: no account, no
 checkout, no human. That is the machine-payable thesis applied to the channel
 with the most volume in it.
 

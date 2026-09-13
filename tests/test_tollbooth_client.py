@@ -261,11 +261,11 @@ def test_published_prices_match_the_service_catalog():
     service's rates change and these do not, the ceiling stops meaning what
     it says."""
     assert tollbooth.PRICES_USD == {
-        "wcag": 0.03,
-        "seo": 0.03,
-        "security": 0.03,
-        "performance": 0.03,
-        "bundle": 0.10,
+        "wcag": 0.05,
+        "seo": 0.05,
+        "security": 0.05,
+        "performance": 0.05,
+        "bundle": 0.15,
     }
 
 

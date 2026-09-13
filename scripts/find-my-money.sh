@@ -153,7 +153,7 @@ if found:
             print("  Nothing is lost: the same private key controls this address")
             print("  on every one of these chains. Bridge it to Base, or send a")
             print("  fresh $0.25 of USDC on Base and deal with the stranded")
-            print("  funds later -- the call only needs $0.03.")
+            print("  funds later -- the call only needs $0.05.")
 elif unreachable:
     print("  Nothing found, but some chains could not be read from here, so")
     print("  this is not a conclusion. Try again, or check in a browser:")

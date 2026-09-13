@@ -10,7 +10,7 @@ act, not a diary. `docs/SESSION_BRIEF.md` is the companion of standing rules.
 
 A machine-payable site-audit API: a tollbooth. Software agents POST a URL,
 get HTTP 402 carrying the price and the rails that can settle it, pay, and
-receive the audit. $0.03 per single audit, $0.10 per bundle, ~98% gross
+receive the audit. $0.05 per single audit, $0.15 per bundle, ~98% gross
 margin. Per call is the only price. Revenue is machine traffic; nothing else.
 
 ## Live state (2026-09-07)
@@ -71,7 +71,7 @@ margin. Per call is the only price. Revenue is machine traffic; nothing else.
   stack — ask the daemon directly:
   `docker logs --since 3h $(docker ps -qf name=hubvibe | head -1) 2>&1 | grep -i x402 | tail -30`
   Three of our own tools misreported this run and are fixed: the script
-  announced `settled $0.03` while printing that body (it read the HTTP
+  announced `settled $0.05` while printing that body (it read the HTTP
   status, never the body — it now exits 1 and says the node was not paid);
   it blamed the missing PAYMENT-RESPONSE receipt on a stale deployment when
   a settle that never happened simply has no hash (that would have sent the
@@ -391,7 +391,7 @@ Shell included. Each line below says which it is.
 | `scripts/payment-status.sh` | wallets, live 402, recipient match, payer readiness, verdict | anywhere |
 | `scripts/go.sh` | **the one command.** Finds or makes the payer wallet, prints the address to fund, waits for the money on-chain, then makes the paid call. Unattended: the owner's part is one transfer, whenever | box |
 | `scripts/find-my-money.sh` | "the box says it never arrived" — reads one address across Base, Ethereum, Arbitrum, Optimism and Polygon, native coin and USDC/USDbC/USDT, and says which chain holds it. Never reports an unreachable chain as an empty one | anywhere |
-| `scripts/first-paid-call.sh` | one real $0.03 x402 payment from the box's payer wallet, with preflight, receipt and index check; an empty wallet is reported as an empty wallet, not a broken rail | box |
+| `scripts/first-paid-call.sh` | one real $0.05 x402 payment from the box's payer wallet, with preflight, receipt and index check; an empty wallet is reported as an empty wallet, not a broken rail | box |
 | `scripts/simulate-paid-call.py` | the whole paid path locally, for free | dev |
 | `scripts/verify-live.sh` | end-to-end checks of a deployed node | anywhere |
 | `scripts/probe-facilitators.sh` | which facilitators this library can use, and which keep a Bazaar index | anywhere |

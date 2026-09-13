@@ -111,8 +111,8 @@ app = FastAPI(
     description=(
         "Machine-payable site compliance audits. Four deterministic audit "
         "dimensions -- accessibility (axe-core), SEO, security headers, and "
-        "performance -- callable a la carte at $0.03/call or as a single "
-        "$0.10 bundle.\n\n"
+        "performance -- callable a la carte at $0.05/call or as a single "
+        "$0.15 bundle.\n\n"
         "Built for agent-to-agent use: every paid route answers an "
         "unauthenticated request with HTTP 402 carrying a machine-readable "
         "payment challenge, so a paying agent can discover the price and "
@@ -271,17 +271,43 @@ async def _empty_receive():
     return {"type": "http.request", "body": b"", "more_body": False}
 
 
-# Every paid audit route and its price. The middleware below keys on this
-# table and nothing else: a path that is not in it is not paid, so it is
-# never challenged, and the discovery surfaces stay free.
-_PAID_ROUTE_PRICES = {
-    "/audit": 0.03,
-    "/audit/wcag": 0.03,
-    "/audit/seo": 0.03,
-    "/audit/security": 0.03,
-    "/audit/performance": 0.03,
-    "/audit/bundle": 0.10,
-}
+# The rate a caller is quoted when the route cannot be resolved -- a
+# signature default or a price string that would not parse. It is the single
+# audit rate, read from the catalog below rather than written twice, because
+# a stale literal here quotes one price while the route charges another.
+_DEFAULT_PRICE_USD = 0.05
+
+
+def _price_of(path: str) -> float:
+    """The catalog price for a route this module serves. Raises on an unknown
+    path rather than defaulting: a route that cannot say what it charges must
+    not quietly bill whatever the cheapest one costs."""
+    price = _paid_route_price(path)
+    if price is None:
+        raise KeyError(f"{path} is not a priced route in _CATALOG")
+    return price
+
+
+def _paid_route_price(path: Optional[str]) -> Optional[float]:
+    """This route's price, or None when the path is not a paid route.
+
+    Read from `_CATALOG` -- the one row per sellable route -- rather than
+    from a second table beside it. A hardcoded copy here would let the price
+    a probe is quoted drift from the price the handler charges, which is the
+    same class of fault as advertising a rail that cannot settle: the node
+    would be telling an agent one number and billing another. Resolved at
+    call time because _CATALOG is defined further down this module; the
+    middleware only ever runs per-request, long after import.
+    """
+    if not path:
+        return None
+    resolved = _CATALOG_ALIASES.get(path, path)
+    for entry in _CATALOG:
+        if entry["path"] == resolved:
+            return entry["price_usd"]
+    return None
+
+
 _CREDENTIAL_HEADERS = ("x-api-key", "x-payment", "payment-signature", "authorization")
 
 
@@ -323,7 +349,7 @@ class _PriceUnpaidProbes:
 
     async def __call__(self, scope, receive, send):
         method = scope.get("method")
-        price = _PAID_ROUTE_PRICES.get(scope.get("path") or "") if scope["type"] == "http" else None
+        price = _paid_route_price(scope.get("path")) if scope["type"] == "http" else None
         if price is None or method == "OPTIONS":
             await self.app(scope, receive, send)
             return
@@ -627,7 +653,7 @@ def _route_description(path: Optional[str]) -> str:
 
 def _payment_required_response(
     host: Optional[str] = None,
-    price_usd: float = 0.03,
+    price_usd: float = _DEFAULT_PRICE_USD,
     path: Optional[str] = None,
     error: Optional[str] = None,
     error_detail: Optional[str] = None,
@@ -686,7 +712,7 @@ def _payment_required_response(
     # configured, no key can be issued or metered, so advertising it would be
     # advertising a rail that cannot settle.
     # The SPT top-up. Advertised only when a per-call SPT charge is
-    # impossible -- Stripe's 0.50 USD floor against a $0.03 route -- because
+    # impossible -- Stripe's 0.50 USD floor against a cents-priced route -- because
     # that is exactly when buying a block is the only way this rail can
     # settle at all. An agent iterating `other_rails` sees a fiat option it
     # can actually use, instead of a rail that is simply missing.
@@ -818,7 +844,7 @@ def _authenticate(
     x_payment: Optional[str],
     authorization: Optional[str],
     host: Optional[str] = None,
-    price_usd: float = 0.03,
+    price_usd: float = _DEFAULT_PRICE_USD,
     path: Optional[str] = None,
     client_ip: Optional[str] = None,
 ):
@@ -916,7 +942,7 @@ def _authenticate(
         credential = authorization[len("Payment "):].strip()
         # Top-up first: it is a different intent with a different meaning, and
         # letting it fall through to the per-call path would consume a $0.50
-        # purchase as payment for one $0.03 audit.
+        # purchase as payment for one single audit.
         if credential:
             bought_cents = mpp_payments.settle_topup_sync(credential, realm=host)
             if bought_cents:
@@ -1249,7 +1275,7 @@ def _settlement_refused(auth) -> Optional[JSONResponse]:
     try:
         price_usd = float(str(getattr(pending, "price", "") or "").lstrip("$"))
     except ValueError:
-        price_usd = 0.03
+        price_usd = _DEFAULT_PRICE_USD
     logging.getLogger(__name__).warning(
         "x402 audit WITHHELD: settle refused after the audit ran (%s); "
         "nothing charged, result not delivered", reason,
@@ -1682,50 +1708,63 @@ _HTML_OR_URL_INPUT_SCHEMA = {"html": "string (optional)", "url": "string (option
 _CATALOG = [
     {
         "path": "/audit/wcag",
-        "price_usd": 0.03,
+        "price_usd": 0.05,
         "input": _HTML_OR_URL_INPUT_SCHEMA,
-        "description": "WCAG 2.1 A/AA accessibility audit via axe-core.",
+        "description": (
+            "Web accessibility audit: WCAG 2.1 level A and AA conformance "
+            "checked with axe-core in a real browser, against a live URL or "
+            "raw HTML. Deterministic rules, never a model's opinion, and a "
+            "check that cannot run returns an error rather than a pass."
+        ),
         "returns": "pass (bool), violations[] with id/impact/help/help_url/nodes_affected.",
     },
     {
         "path": "/audit/seo",
-        "price_usd": 0.03,
+        "price_usd": 0.05,
         "input": _HTML_OR_URL_INPUT_SCHEMA,
         "description": (
-            "Title, meta description, H1 structure, canonical link, "
-            "OpenGraph tags, structured data, and lang attribute."
+            "On-page SEO audit of a live URL or raw HTML: title, meta "
+            "description, H1 structure, canonical link, OpenGraph tags, "
+            "structured data and lang attribute, each checked by rule. "
+            "Reports what is missing or malformed, never a score guess."
         ),
         "returns": "pass (bool), findings[] with id/severity/detail.",
     },
     {
         "path": "/audit/security",
-        "price_usd": 0.03,
+        "price_usd": 0.05,
         "input": _URL_INPUT_SCHEMA,
         "description": (
-            "HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking "
-            "protection, Referrer-Policy, and CORS from a live HTTP "
-            "response -- not a TLS/cipher scan or a penetration test."
+            "HTTP security header audit of a live site: HTTPS, HSTS, "
+            "Content-Security-Policy, X-Content-Type-Options, clickjacking "
+            "protection, Referrer-Policy and CORS, read from the real "
+            "response. Header posture only -- not a TLS or cipher scan, and "
+            "not a penetration test."
         ),
         "returns": "pass (bool), findings[] with id/severity/detail.",
     },
     {
         "path": "/audit/performance",
-        "price_usd": 0.03,
+        "price_usd": 0.05,
         "input": _URL_INPUT_SCHEMA,
         "description": (
-            "DOM node count, transferred bytes, and request count "
-            "from one real page load -- not a full Lighthouse audit."
+            "Page weight audit from one real browser load: DOM node count, "
+            "bytes transferred and request count, measured rather than "
+            "estimated. Page-weight signals only -- not Core Web Vitals and "
+            "not a full Lighthouse run."
         ),
         "returns": "pass (bool), metrics{}, findings[] with id/severity/detail.",
     },
     {
         "path": "/audit/bundle",
-        "price_usd": 0.10,
+        "price_usd": 0.15,
         "input": _URL_INPUT_SCHEMA,
         "description": (
-            "Runs wcag + seo + security + performance against one URL, "
-            "billed as a single call. Atomic: if any dimension fails to "
-            "run, the whole call fails and nothing is billed."
+            "Full site audit of one URL in a single call: accessibility "
+            "(WCAG 2.1 A/AA via axe-core), on-page SEO, HTTP security "
+            "headers and page weight, from one browser load. Atomic -- if "
+            "any dimension cannot run, the whole call fails and nothing is "
+            "billed."
         ),
         "returns": "pass (bool) plus wcag{}, seo{}, security{}, performance{} sub-results.",
     },
@@ -1850,7 +1889,7 @@ def _payment_methods_live() -> list:
     # The SPT rail is listed only if SOME sellable route clears Stripe's
     # minimum card charge. This list is deployment-wide while the floor is
     # per-amount, so the honest question is "is there anything here this rail
-    # could ever settle" -- and with the catalog priced at $0.03-$0.10, the
+    # could ever settle" -- and with the catalog priced in cents, the
     # answer today is no. Listing it anyway would put a method in the array an
     # agent picks from that fails at the Stripe API every single time.
     if mpp_payments.stripe_available_for(_max_catalog_price_cents()):
@@ -1881,8 +1920,8 @@ async def agent_manifest(request: Request):
         "pricing": {
             "model": "per-call",
             "currency": "USD",
-            "single_audit_usd": 0.03,
-            "bundle_usd": 0.10,
+            "single_audit_usd": _price_of("/audit/wcag"),
+            "bundle_usd": _price_of("/audit/bundle"),
             "note": (
                 "Per-call pricing is the product and is what a machine caller "
                 "should use -- no account, no minimum, no subscription."
@@ -1972,7 +2011,7 @@ async def agent_manifest(request: Request):
                 "path": "/audit",
                 "method": "POST",
                 "payment_required": True,
-                "price_usd": 0.03,
+                "price_usd": _price_of("/audit"),
                 "input": _HTML_OR_URL_INPUT_SCHEMA,
                 "input_schema": _schema_for(_HTML_OR_URL_INPUT_SCHEMA),
                 "output_schema": _MCP_OUTPUT_SCHEMAS["/audit/wcag"],
@@ -2918,7 +2957,7 @@ def audit(
     missing = _reject_missing_input(payload)
     if missing is not None:
         return missing
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit"))
     if err:
         return err
 
@@ -2948,7 +2987,7 @@ def audit(
         ],
     }
 
-    warning = _bill(auth, price_usd=0.03)
+    warning = _bill(auth, price_usd=_price_of("/audit"))
     if warning:
         result["billing_warning"] = warning
     remediation = _remediation_notes(violations)
@@ -2965,7 +3004,7 @@ def audit_wcag(
     x_payment: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
 ):
-    """Identical to /audit -- same axe-core check, same $0.03 price, kept
+    """Identical to /audit -- same axe-core check, same price, kept
     as its own path alongside the other 4 audit dimensions so a caller can
     request accessibility specifically without relying on /audit's name."""
     refused = _reject_unfetchable_target(payload.url)
@@ -2978,7 +3017,7 @@ def audit_wcag(
     missing = _reject_missing_input(payload)
     if missing is not None:
         return missing
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/wcag"))
     if err:
         return err
 
@@ -3004,7 +3043,7 @@ def audit_wcag(
             for v in violations
         ],
     }
-    warning = _bill(auth, price_usd=0.03)
+    warning = _bill(auth, price_usd=_price_of("/audit/wcag"))
     if warning:
         result["billing_warning"] = warning
     return _deliver(result, auth)
@@ -3028,7 +3067,7 @@ def audit_seo(
     missing = _reject_missing_input(payload)
     if missing is not None:
         return missing
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/seo"))
     if err:
         return err
 
@@ -3037,7 +3076,7 @@ def audit_seo(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
-    warning = _bill(auth, price_usd=0.03)
+    warning = _bill(auth, price_usd=_price_of("/audit/seo"))
     if warning:
         result["billing_warning"] = warning
     return _deliver(result, auth)
@@ -3054,7 +3093,7 @@ def audit_security(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/security"))
     if err:
         return err
 
@@ -3063,7 +3102,7 @@ def audit_security(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
-    warning = _bill(auth, price_usd=0.03)
+    warning = _bill(auth, price_usd=_price_of("/audit/security"))
     if warning:
         result["billing_warning"] = warning
     return _deliver(result, auth)
@@ -3080,7 +3119,7 @@ def audit_performance(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.03)
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/performance"))
     if err:
         return err
 
@@ -3089,7 +3128,7 @@ def audit_performance(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
-    warning = _bill(auth, price_usd=0.03)
+    warning = _bill(auth, price_usd=_price_of("/audit/performance"))
     if warning:
         result["billing_warning"] = warning
     return _deliver(result, auth)
@@ -3104,13 +3143,13 @@ def audit_bundle(
     authorization: Optional[str] = Header(None),
 ):
     """Runs all four audits against one URL. Priced and billed as a single
-    $0.10 unit, not four separate $0.03 charges -- if any dimension fails
+    one unit, not four separate single-audit charges -- if any dimension fails
     to run, the whole call fails (502) and nothing is billed, since a
     partial bundle isn't the product being sold here."""
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=0.10)
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/bundle"))
     if err:
         return err
 
@@ -3151,7 +3190,7 @@ def audit_bundle(
         "security": security_result,
         "performance": performance_result,
     }
-    warning = _bill(auth, price_usd=0.10)
+    warning = _bill(auth, price_usd=_price_of("/audit/bundle"))
     if warning:
         result["billing_warning"] = warning
     return _deliver(result, auth)
