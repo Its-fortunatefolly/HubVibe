@@ -28,7 +28,7 @@
 #
 # Which is a deadlock: agents find us by capability only if we are indexed,
 # and we are indexed only once someone pays. Nobody breaks that from the
-# outside. This script breaks it from the inside, for $0.03, by being the
+# outside. This script breaks it from the inside, for $0.05, by being the
 # first payer ourselves.
 #
 # It does two things nothing else has done:
@@ -254,7 +254,7 @@ except Exception as exc:
   ADDRESS=$(new_wallet)
   printf '\n  \033[1mNew Base wallet created.\033[0m Key saved to %s (mode 600).\n\n' "$WALLET_FILE"
   printf '      address: \033[1m%s\033[0m\n\n' "$ADDRESS"
-  printf '  Send it USDC on Base -- $1 is plenty for a $0.03 call. THIS wallet\n'
+  printf '  Send it USDC on Base -- $1 is plenty for a $0.05 call. THIS wallet\n'
   printf '  needs NO ETH: x402 signs off-chain and the facilitator pays the gas,\n'
   printf '  so it never broadcasts and never spends gas. (Sending it the dollar\n'
   printf '  is an ordinary transfer out of YOUR wallet, which pays gas as usual --\n'
@@ -594,7 +594,7 @@ esac
 # Baseline the index BEFORE paying, so "we appeared" is a measured change
 # rather than an assumption. A facilitator with no index answers 404 here;
 # that is a real answer and the script keeps going -- proving settlement is
-# worth the $0.03 on its own.
+# worth the $0.05 on its own.
 # ---------------------------------------------------------------------------
 
 step "Baselining the facilitator's Bazaar index"
@@ -692,7 +692,7 @@ RESULT=$(printf '%s' "$PAID" | cut -f4-)
 # purpose, as the lesser evil versus charging for undelivered work -- and
 # admits it in `billing_warning` on the body it returns. Reading only the
 # HTTP status and announcing "settled" converts that admission into a
-# success report. On 2026-09-08 this script printed `settled $0.03 and the
+# success report. On 2026-09-08 this script printed `settled $0.05 and the
 # audit returned a result` directly above a body reading "payment settlement
 # failed after the audit ran; this call was not charged", and the owner was
 # told revenue had started when no money had moved at all.

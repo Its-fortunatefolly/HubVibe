@@ -7,7 +7,7 @@ never needed one, and `KEY_STORE=sqlite` gives the API-key store a local
 file instead of Firestore.
 
 A 4 GB / 2 vCPU box (≈ $4–5/month) runs 2 concurrent audits — roughly
-30–50k audits/day of capacity, which at $0.03/call is far more than the
+30–50k audits/day of capacity, which at $0.05/call is far more than the
 box costs. Raise `MAX_CONCURRENT_AUDITS` and `mem_limit` together when
 revenue outgrows it, or add a second box behind the same domain.
 

@@ -215,7 +215,7 @@ def test_the_whole_http_path_spends_a_prepaid_key_out_of_sqlite(monkeypatch, tmp
     monkeypatch.setattr(module, "_run_axe", lambda *a, **k: {"violations": []})
     client = TestClient(module.app)
 
-    key = module.billing.issue_prepaid_key(6)  # exactly two $0.03 calls
+    key = module.billing.issue_prepaid_key(10)  # exactly two $0.05 calls
     for _ in range(2):
         response = client.post(
             "/audit/wcag", json={"url": "https://example.com"}, headers={"X-API-Key": key}
@@ -262,7 +262,7 @@ def test_a_prepaid_key_spends_without_a_sellable_subscription(monkeypatch, tmp_p
     assert response.status_code != 402, (
         "a funded prepaid key was refused on a box that cannot sell subscriptions"
     )
-    assert billing.lookup_key(key)["prepaid_balance_cents"] == 47, "the call was not charged"
+    assert billing.lookup_key(key)["prepaid_balance_cents"] == 45, "the call was not charged"
 
 
 def test_a_topup_credits_the_key_you_already_have(monkeypatch, tmp_path):
@@ -273,7 +273,7 @@ def test_a_topup_credits_the_key_you_already_have(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
 
     billing = _load_billing(monkeypatch, tmp_path)
-    # 1 cent left: too little for a $0.03 call, so the key path falls through
+    # 1 cent left: too little for a $0.05 call, so the key path falls through
     # to the top-up. That is the refill moment, and the moment the residual
     # used to be stranded on a key nothing could spend again.
     key = billing.issue_prepaid_key(1)
@@ -293,11 +293,11 @@ def test_a_topup_credits_the_key_you_already_have(monkeypatch, tmp_path):
     )
     assert response.status_code == 200, response.text
 
-    # Same key, and it carries the 4 cents it already had plus the 47 the
+    # Same key, and it carries the cent it already had plus the 45 the
     # top-up bought after the call it paid for.
     assert response.json().get("api_key", key) == key, "the top-up rotated the caller's key"
-    # The 1 cent it still held, plus the 47 the top-up bought after the call.
-    assert billing.lookup_key(key)["prepaid_balance_cents"] == 48
+    # The 1 cent it still held, plus the 45 the top-up bought after the call.
+    assert billing.lookup_key(key)["prepaid_balance_cents"] == 46
 
 
 def test_a_topup_without_a_key_still_mints_one(monkeypatch, tmp_path):
@@ -321,4 +321,4 @@ def test_a_topup_without_a_key_still_mints_one(monkeypatch, tmp_path):
     assert response.status_code == 200, response.text
     minted = response.json().get("api_key")
     assert minted, "a payer with no key must leave holding one"
-    assert billing.lookup_key(minted)["prepaid_balance_cents"] == 47
+    assert billing.lookup_key(minted)["prepaid_balance_cents"] == 45

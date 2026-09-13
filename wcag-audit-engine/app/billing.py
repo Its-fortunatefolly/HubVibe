@@ -49,7 +49,7 @@ _METER_EVENT_NAME = os.environ.get("STRIPE_METER_EVENT_NAME", "wcag_audit_call")
 _METER_AGGREGATION = (os.environ.get("STRIPE_METER_AGGREGATION") or "count").strip().lower()
 
 # What one unit on the metered Price is worth, in cents. The live Price
-# (price_1U2Hqm...) is $0.01 per unit, so a $0.03 audit is 3 units and a $0.10
+# (price_1U2Hqm...) is $0.01 per unit, so a $0.05 audit is 5 units and a $0.15
 # bundle is 10. See record_usage: the meter counts cents, not calls, and this
 # is the one number that ties the two together. If the Price is ever changed,
 # change it here in the same breath -- a mismatch here is a silent, uniform
@@ -121,7 +121,7 @@ def monthly_quota_for(plan: Optional[str]) -> int:
 
 # Human-facing plans, priced per SITE MONITORED rather than per scan.
 # Denominating a plan in scans invites the obvious arithmetic against the
-# $0.03 machine rate; the old scan-denominated plan worked out dearer per
+# $0.05 machine rate; the old scan-denominated plan worked out dearer per
 # scan than paying per call, so nobody rational would buy it. Sites are the
 # unit a human actually cares about and aren't comparable to the machine
 # rate, so the two audiences stop competing with each other.
@@ -297,7 +297,7 @@ def create_checkout_session(
         if not _plan_offered(plan):
             raise ValueError(
                 f"Plan {plan!r} is retired: there are no subscriptions. "
-                "Pay per call ($0.03 an audit, $0.10 the bundle) with a rail from the 402."
+                "Pay per call ($0.05 an audit, $0.15 the bundle) with a rail from the 402."
             )
         price_id = PLAN_PRICE_IDS.get(plan)
         if not price_id:
@@ -428,9 +428,10 @@ def record_usage(customer_id: str, price_cents: int) -> None:
     call so a retried request can't double-bill.
 
     **The meter counts cents, not calls.** That is the whole fix. This used to
-    report one event per "unit", where a unit was a call ($0.03) or a third of
+    report one event per "unit", where a unit was a call ($0.05) or a third of
     a bundle -- and the metered Price on the account is $0.01 per unit, so a
-    $0.03 audit metered $0.01 and a $0.10 bundle metered $0.03. Every invoice
+    $0.05 audit metered $0.01 and a $0.15 bundle metered $0.03 under the old
+    per-call unit count. Every invoice
     this ever produced would have been for roughly a third of the money owed.
     It was invisible because the human plans are `licensed` flat prices with
     no metered item on the subscription: the events were accepted by Stripe,
@@ -438,7 +439,7 @@ def record_usage(customer_id: str, price_cents: int) -> None:
     waiting for the day someone attached the Price.
 
     Reporting the price in cents against a $0.01/unit Price makes the two
-    reconcile exactly -- 3 units for $0.03, 10 for $0.10 -- with no second
+    reconcile exactly -- 5 units for $0.05, 15 for $0.15 -- with no second
     meter, no second Price, and no per-route arithmetic anywhere else.
 
     Two facts live on the Stripe side, which is why both are variables here
@@ -503,7 +504,7 @@ def issue_prepaid_key(credit_cents: int) -> str:
 
     This is what makes the MPP `stripe` rail usable at all here. Stripe
     requires a minimum 0.50 USD charge for a card payment made with a Shared
-    Payment Token, and every route on this service is $0.03-$0.10 -- so a
+    Payment Token, and every route on this service is $0.05-$0.15 -- so a
     per-call SPT charge is rejected by Stripe on amount alone, and no amount
     of correct protocol work changes that. The rail can only settle if what it
     sells is a BLOCK, not a call.

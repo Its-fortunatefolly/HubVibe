@@ -138,7 +138,7 @@ Not buried in log output. A reviewer opens the Checks tab and sees the rule, its
 
 ## What it costs
 
-**$0.03** per single audit. **$0.10** for all four as one bundle.
+**$0.05** per single audit. **$0.15** for all four as one bundle.
 
 Concretely: a repo merging 100 pull requests a month, running the full bundle on each, spends **$10/month**. Running only the accessibility check, **$3/month**. No subscription, no seat licence, no minimum — you are billed for calls you make.
 

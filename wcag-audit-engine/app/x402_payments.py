@@ -21,7 +21,7 @@ Requires, at deploy time:
                           processor's x402 facilitator endpoint)
 - X402_PAY_TO_ADDRESS    the wallet address that receives payment
 - X402_NETWORK           CAIP-2 network id (default: "eip155:8453", Base mainnet)
-- X402_PRICE             default: "$0.03"
+- X402_PRICE             default: "$0.05"
 
 Where the money goes: X402_PAY_TO_ADDRESS is a self-custody Base wallet.
 Stripe does MPP, not x402 (owner's fact, 2026-09-01), so x402 revenue lands
@@ -68,7 +68,7 @@ _NETWORK = os.environ.get("X402_NETWORK", "eip155:8453")
 # facilitator's own key signs the transfer, so a client can build one).
 _SOLANA_PAY_TO_ADDRESS = os.environ.get("X402_SOLANA_PAY_TO_ADDRESS")
 _SOLANA_NETWORK = os.environ.get("X402_SOLANA_NETWORK", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")
-_PRICE = os.environ.get("X402_PRICE", "$0.03")
+_PRICE = os.environ.get("X402_PRICE", "$0.05")
 
 # Headers sent with every facilitator call, as a JSON object, e.g.
 #   {"Authorization": "Bearer sk_live_..."}
@@ -460,7 +460,7 @@ def _get_server() -> x402ResourceServer:
 
 
 def _get_requirements(price: str):
-    """Cached per price -- a $0.03 payment must never satisfy a $0.10
+    """Cached per price -- a single-audit payment must never satisfy a bundle
     challenge, so each price gets its own requirements object rather than
     sharing one global cache across every route."""
     with _LOCK:
@@ -549,7 +549,7 @@ def _payload_mismatch(payload, requirement, server) -> Optional[str]:
 
     The facilitator is asked to verify a payment against the requirements the
     node built for the route being called. It compares the signature to those
-    requirements, so a $0.03 authorization sent to the $0.10 route fails there
+    requirements, so a single-audit authorization sent to the bundle route fails there
     -- on every standard facilitator. This check is the node's own copy of
     that comparison, run BEFORE the round trip: defence in depth against a
     facilitator that is lenient about `value`, and a clearer reason for the
@@ -800,7 +800,7 @@ _SERVICE_TAGS = ["accessibility", "wcag", "seo", "security", "performance"]
 
 
 def _priced_asset(price: str):
-    """Resolve "$0.03" to the concrete asset, atomic amount and EIP-712 extra.
+    """Resolve a price like "$0.05" to the asset, atomic amount and EIP-712 extra.
 
     Done locally through the scheme's own price parser rather than through the
     facilitator, so building a challenge never depends on the facilitator being
@@ -926,7 +926,7 @@ def _facilitator_supports(version: int, network: str) -> bool:
         # requirements under the CAIP-2 name (_get_requirements ->
         # build_payment_requirements(network=_NETWORK)), and the library only
         # does that when the facilitator's /supported lists that exact name:
-        # ExactEvmServerScheme.parse_price("$0.03", "base") raises
+        # ExactEvmServerScheme.parse_price("$0.05", "base") raises
         # "Unsupported network format". So a facilitator that lists only the
         # legacy name can be offered nothing -- not even v1 -- because the
         # node could take the signature and never build the thing to verify

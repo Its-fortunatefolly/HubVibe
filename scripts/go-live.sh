@@ -16,10 +16,10 @@
 #                 appear in Stripe. Facilitator settles, we hold the key.
 #   mpp-tempo  -- Stripe-custodied Tempo deposit address. USDC is offramped by
 #                 Stripe into the Stripe balance. 1c minimum, so it is the one
-#                 Stripe rail that works at $0.03.
+#                 Stripe rail that works at $0.05.
 #
 # mpp-stripe (cards / Shared Payment Tokens) is deliberately absent: Stripe's
-# minimum for an SPT charge is 0.50 USD and every route here is $0.03-$0.10.
+# minimum for an SPT charge is 0.50 USD and every route here is $0.05-$0.15.
 # It is gated on the amount in code and is not something a deploy turns on.
 #
 # Each rail is independent. One that cannot be configured is left OFF and the

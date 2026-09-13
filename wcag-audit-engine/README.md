@@ -46,12 +46,12 @@ run, never billed):
 
 | Route | Input | Price | Checks |
 |---|---|---|---|
-| `POST /audit` | `html` or `url` | $0.03 | Alias of `/audit/wcag`, kept for compatibility |
-| `POST /audit/wcag` | `html` or `url` | $0.03 | WCAG 2.1 A/AA via axe-core |
-| `POST /audit/seo` | `html` or `url` | $0.03 | Title, meta description, H1s, canonical, OpenGraph, structured data, lang |
-| `POST /audit/security` | `url` (required) | $0.03 | HTTPS, HSTS, CSP, X-Content-Type-Options, frame protection, Referrer-Policy, CORS |
-| `POST /audit/performance` | `url` (required) | $0.03 | DOM node count, transferred bytes, request count from one real page load |
-| `POST /audit/bundle` | `url` (required) | $0.10 | All four above, atomically -- if any fails, the whole call fails and nothing is billed |
+| `POST /audit` | `html` or `url` | $0.05 | Alias of `/audit/wcag`, kept for compatibility |
+| `POST /audit/wcag` | `html` or `url` | $0.05 | WCAG 2.1 A/AA via axe-core |
+| `POST /audit/seo` | `html` or `url` | $0.05 | Title, meta description, H1s, canonical, OpenGraph, structured data, lang |
+| `POST /audit/security` | `url` (required) | $0.05 | HTTPS, HSTS, CSP, X-Content-Type-Options, frame protection, Referrer-Policy, CORS |
+| `POST /audit/performance` | `url` (required) | $0.05 | DOM node count, transferred bytes, request count from one real page load |
+| `POST /audit/bundle` | `url` (required) | $0.15 | All four above, atomically -- if any fails, the whole call fails and nothing is billed |
 
 `security`/`performance`/`bundle` need a live, fetchable URL (they inspect a
 real HTTP response / real browser load) -- raw HTML alone isn't enough for
@@ -72,7 +72,7 @@ If none of those is present or valid, the response is HTTP 402 with both:
   "x402Version": 1,
   "scheme": "exact",
   "network": "eip155:8453",
-  "price": "$0.03",
+  "price": "$0.05",
   "payTo": "0x...",
   "accepted_payment_header": "X-PAYMENT",
   "alternative": "X-API-Key header (Stripe-based billing) is also accepted"
@@ -111,7 +111,7 @@ invites abuse.
 
 ## Getting paid
 
-Per call is the only price ($0.03 per audit, $0.10 for the bundle), paid
+Per call is the only price ($0.05 per audit, $0.15 for the bundle), paid
 by the calling software on the request itself. No account, no signup, no
 subscription, no human step:
 
@@ -124,8 +124,8 @@ subscription, no human step:
   the machine spends per call as `X-API-Key`. Nothing is bought on a page.
 
 Every call that Stripe bills still reports a Stripe Meter Event
-(`billing.record_usage`), priced in meter units: a $0.03 audit is 3 units
-of a $0.01 Price, a $0.10 bundle is 10, so `STRIPE_METERED_PRICE_ID`,
+(`billing.record_usage`), priced in meter units: a $0.05 audit is 5 units
+of a $0.01 Price, a $0.15 bundle is 15, so `STRIPE_METERED_PRICE_ID`,
 `STRIPE_METER_UNIT_CENTS` (default `1`) and `STRIPE_METER_AGGREGATION`
 (`count` or `sum`, default `count`) must describe the same Price or every
 invoice is wrong uniformly and invisibly. The key store (Firestore on
@@ -161,7 +161,7 @@ either way:
 - `X402_FACILITATOR_URL` — the facilitator's base URL.
 - `X402_PAY_TO_ADDRESS` — the wallet address that receives payment.
 - `X402_NETWORK` — CAIP-2 network id (default `eip155:8453`, Base mainnet).
-- `X402_PRICE` — default `$0.03`.
+- `X402_PRICE` — default `$0.05`.
 - `X402_FACILITATOR_AUTH_HEADERS` — JSON object of headers sent on every
   facilitator call, e.g. `{"Authorization": "Bearer ..."}`. Optional, but in
   practice required: the free public facilitator at `x402.org` is
@@ -287,7 +287,7 @@ header on a 402 for that method) and stays inert:
 - **stripe** method needs `MPP_STRIPE_NETWORK_PROFILE_ID` (your Stripe
   profile ID, `profile_...` -- Dashboard → "Stripe profile" → Get started,
   in **live** mode; no Product/Price needed, unlike the subscription flow
-  above). `MPP_STRIPE_PRICE_CENTS` (default `3`, i.e. $0.03),
+  above). `MPP_STRIPE_PRICE_CENTS` (default `5`, i.e. $0.05),
   `MPP_STRIPE_CURRENCY` (default `usd`), and `MPP_STRIPE_API_VERSION`
   (default `2026-05-27.preview`) are optional.
 
@@ -297,7 +297,7 @@ header on a 402 for that method) and stays inert:
   no `WWW-Authenticate` challenge, no `accepts` entry, not listed in
   `payment.methods` -- and a stale challenge under the floor is refused
   before an SPT is spent on it. Configured is not the same as usable: at the
-  $0.03/$0.10 machine rates this rail stays dark on purpose, because
+  $0.05/$0.15 machine rates this rail stays dark on purpose, because
   advertising it would take a caller's single-use token and then fail at the
   Stripe API every time. For sub-50c machine payments through Stripe, use
   stablecoins (below) — their minimum is 1 cent — or price a route at 50c+.
@@ -307,7 +307,7 @@ header on a 402 for that method) and stays inert:
   `https://rpc.tempo.xyz`, `MPP_TEMPO_TOKEN_ADDRESS` defaults to the actual
   mainnet USDC.e contract `0x20C000000000000000000000b9537d11c60E8b50`, and
   `MPP_TEMPO_CHAIN_ID` defaults to `4217`. `MPP_TEMPO_PRICE_BASE_UNITS`
-  defaults to `30000` ($0.03 at USDC's 6 decimals).
+  defaults to `50000` ($0.05 at USDC's 6 decimals).
 
   **This method is not actually Tempo-specific — it runs on any EVM chain.**
   Verification is `eth_getTransactionReceipt` over JSON-RPC plus standard
@@ -436,7 +436,7 @@ gcloud run deploy hubvibe \
   --cpu=2 \
   --concurrency=4 \
   --min-instances=1 \
-  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.03,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
+  --set-env-vars=STRIPE_METERED_PRICE_ID=price_...,STRIPE_METER_EVENT_NAME=wcag_audit_call,X402_FACILITATOR_URL=https://...,X402_PAY_TO_ADDRESS=0x...,X402_NETWORK=eip155:8453,X402_PRICE=\$0.05,MPP_STRIPE_NETWORK_PROFILE_ID=profile_...,MPP_TEMPO_RPC_URL=https://...,MPP_TEMPO_TOKEN_ADDRESS=0x...,MPP_TEMPO_RECIPIENT_ADDRESS=0x... \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,AUDIT_API_KEY=audit-api-key:latest,STRIPE_SECRET_KEY=stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest
 ```
 

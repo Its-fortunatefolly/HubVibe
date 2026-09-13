@@ -208,8 +208,8 @@ def test_audit_requires_api_key(monkeypatch):
     response = client.post("/audit", json={"url": "https://example.com"})
     assert response.status_code == 402
     body = response.json()
-    assert body["price"] == "$0.03"
-    assert body["price_usd"] == 0.03
+    assert body["price"] == "$0.05"
+    assert body["price_usd"] == 0.05
     assert body["error"] == "payment_required"
     # Machine-readable list of rails that can actually settle here.
     assert isinstance(body["accepts"], list)
@@ -257,7 +257,7 @@ def test_402_advertises_x402_when_it_is_configured(monkeypatch):
     assert entry["payTo"] == addr
     assert entry["scheme"] == "exact"
     assert entry["network"] == "base", "v1 clients register schemes by legacy name"
-    assert entry["maxAmountRequired"] == "30000", "$0.03 in USDC atomic units"
+    assert entry["maxAmountRequired"] == "50000", "$0.05 in USDC atomic units"
     assert entry["asset"].startswith("0x")
     assert entry["maxTimeoutSeconds"] > 0
     assert body["x402Version"] == 1, "without this a client will not read the body"
@@ -270,8 +270,8 @@ def test_402_bundle_price_is_carried_everywhere(monkeypatch):
     client = TestClient(module.app)
     body = client.post("/audit/bundle", json={"url": "https://example.com"}).json()
 
-    assert body["price"] == "$0.10"
-    assert body["price_usd"] == 0.10
+    assert body["price"] == "$0.15"
+    assert body["price_usd"] == 0.15
 
 
 def test_audit_rejects_wrong_api_key(monkeypatch):
@@ -545,11 +545,11 @@ def test_rate_limit_is_enforced_before_any_payment_is_settled(monkeypatch):
 # --- New multi-route audit suite -------------------------------------------
 
 NEW_PAID_ROUTES = [
-    ("/audit/wcag", {"url": "https://example.com"}, 0.03),
-    ("/audit/seo", {"url": "https://example.com"}, 0.03),
-    ("/audit/security", {"url": "https://example.com"}, 0.03),
-    ("/audit/performance", {"url": "https://example.com"}, 0.03),
-    ("/audit/bundle", {"url": "https://example.com"}, 0.10),
+    ("/audit/wcag", {"url": "https://example.com"}, 0.05),
+    ("/audit/seo", {"url": "https://example.com"}, 0.05),
+    ("/audit/security", {"url": "https://example.com"}, 0.05),
+    ("/audit/performance", {"url": "https://example.com"}, 0.05),
+    ("/audit/bundle", {"url": "https://example.com"}, 0.15),
 ]
 
 
@@ -645,8 +645,8 @@ def test_bundle_failure_is_atomic_and_unbilled(monkeypatch):
 
 
 def test_bundle_success_meters_the_price_it_charges(monkeypatch):
-    # The bundle charges $0.10, so it must meter 10 cents -- not the 3 "units"
-    # it used to report, which at $0.01/unit invoiced $0.03 for a $0.10 call.
+    # The bundle charges $0.15, so it must meter 15 cents -- not the 3 "units"
+    # it used to report, which at $0.01/unit invoiced $0.03 for the whole call.
     # See billing.record_usage.
     from fastapi.testclient import TestClient
     from unittest.mock import patch
@@ -690,7 +690,7 @@ def test_bundle_success_meters_the_price_it_charges(monkeypatch):
             "/audit/bundle", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
         )
     assert response.status_code == 200
-    assert recorded == [10]
+    assert recorded == [15]
 
 
 def _capture_meter_events(monkeypatch, module):
@@ -707,12 +707,12 @@ def _capture_meter_events(monkeypatch, module):
 
 
 def test_record_usage_meters_the_price_not_the_call(monkeypatch):
-    """The metered Price is $0.01 per unit, so a $0.03 call owes 3 units.
+    """The metered Price is $0.01 per unit, so a $0.05 call owes 5 units.
 
     It used to report exactly one unit per call, which invoiced a third of the
     money on every single call -- and nothing said so, because the Price was
     never attached to a subscription. This account's meter aggregates by
-    `count`, where the event value is ignored, so 3 units means 3 events.
+    `count`, where the event value is ignored, so 5 units means 5 events.
     """
     module = _load_main(monkeypatch)
     events = _capture_meter_events(monkeypatch, module)
@@ -757,7 +757,7 @@ def test_record_usage_refuses_an_unknown_meter_aggregation(monkeypatch):
 
 def test_record_usage_follows_the_price_when_the_meter_unit_changes(monkeypatch):
     """The unit is a fact about the Stripe Price, not a constant. If the Price
-    goes to $0.05/unit, a $0.10 bundle is 2 units."""
+    goes to $0.05/unit, a $0.15 bundle is 3 units."""
     module = _load_main(monkeypatch)
     monkeypatch.setattr(module.billing, "_METER_UNIT_CENTS", 5)
     monkeypatch.setattr(module.billing, "_METER_AGGREGATION", "sum")
@@ -790,7 +790,7 @@ def test_a_failed_meter_call_warns_but_never_withholds_the_audit(monkeypatch):
         raise ValueError("meter rejected it")
 
     monkeypatch.setattr(module.billing, "record_usage", _explode)
-    assert "meter rejected it" in module._bill(auth, price_usd=0.03)
+    assert "meter rejected it" in module._bill(auth, price_usd=0.05)
 
 
 def test_each_route_meters_its_own_price(monkeypatch):
@@ -805,9 +805,9 @@ def test_each_route_meters_its_own_price(monkeypatch):
         lambda customer_id, price_cents: metered.append(price_cents),
     )
 
-    assert module._bill(auth, price_usd=0.03) is None
-    assert module._bill(auth, price_usd=0.10) is None
-    assert metered == [3, 10]
+    assert module._bill(auth, price_usd=0.05) is None
+    assert module._bill(auth, price_usd=0.15) is None
+    assert metered == [5, 15]
 
 
 def _openapi_with_tempo(monkeypatch):
@@ -853,7 +853,7 @@ def test_openapi_marks_every_paid_route_with_x_payment_info(monkeypatch):
 
     # The bundle's offer must carry the bundle's price, not the flat rate.
     bundle = doc["paths"]["/audit/bundle"]["post"]["x-payment-info"]["offers"]
-    assert bundle[0]["amount"] == "100000"  # $0.10 in USDC base units
+    assert bundle[0]["amount"] == "150000"  # $0.15 in USDC base units
 
     assert "docs" in doc["x-service-info"]
 
@@ -894,7 +894,7 @@ def test_agent_manifest_lists_all_five_audit_routes(monkeypatch):
     for expected in ("/audit/wcag", "/audit/seo", "/audit/security", "/audit/performance", "/audit/bundle"):
         assert expected in paths
     bundle = next(e for e in response.json()["endpoints"] if e["path"] == "/audit/bundle")
-    assert bundle["price_usd"] == 0.10
+    assert bundle["price_usd"] == 0.15
 
 
 # --- key store outage ---------------------------------------------------
@@ -1684,7 +1684,7 @@ def test_bazaar_failure_never_blocks_a_payment_challenge(monkeypatch, load_main_
     response = TestClient(module.app).post("/audit/bundle", json={"url": "https://example.com"})
     assert response.status_code == 402
     body = response.json()
-    assert body["price_usd"] == 0.10
+    assert body["price_usd"] == 0.15
     assert body["accepts"], "the challenge lost its payable rail"
     assert body["accepts"][0]["scheme"] == "exact"
     assert "extensions" not in body
@@ -1775,7 +1775,7 @@ def _x402_caller(monkeypatch, module, *, settle_ok=True):
     so the route's receipt header is built by the real code, not faked.
     """
     calls = {"verified": 0, "settled": 0}
-    sentinel = module.x402_payments.PendingPayment(None, None, "$0.03")
+    sentinel = module.x402_payments.PendingPayment(None, None, "$0.05")
 
     def _verify(header, price=None, **kw):
         calls["verified"] += 1
@@ -1883,7 +1883,7 @@ def test_a_refused_settlement_withholds_the_audit_and_charges_nothing(monkeypatc
 
 
 def test_failed_bundle_does_not_settle_either(monkeypatch):
-    """The bundle is the $0.10 route -- the most expensive thing to wrongly
+    """The bundle is the priciest route -- the most expensive thing to wrongly
     charge for."""
     from fastapi.testclient import TestClient
 
@@ -2057,7 +2057,7 @@ def test_no_served_page_offers_a_free_scan(monkeypatch):
 
 
 def test_landing_page_never_prints_a_per_call_cent_price(monkeypatch):
-    """A human must not see $0.03 sitting a scroll above a $79 plan.
+    """A human must not see the per-call rate sitting a scroll above a plan.
 
     A2A is still the product and the machine section still leads -- that is
     the test below. But printing the per-call rate on the same page as the
@@ -2072,7 +2072,7 @@ def test_landing_page_never_prints_a_per_call_cent_price(monkeypatch):
     module = _load_main(monkeypatch)
     html = TestClient(module.app).get("/").text
 
-    for price in ("$0.03", "$0.10", '"0.03"', '"0.10"'):
+    for price in ("$0.05", "$0.15", '"0.05"', '"0.15"'):
         assert price not in html, (
             f"landing page prints the per-call rate {price} -- it undercuts the plans"
         )
@@ -2088,12 +2088,12 @@ def test_machine_surfaces_still_publish_the_exact_rate(monkeypatch):
     module = _load_main(monkeypatch)
     client = TestClient(module.app)
 
-    assert "$0.03" in client.get("/llms.txt").text
+    assert "$0.05" in client.get("/llms.txt").text
     manifest = client.get("/.well-known/agent.json").json()
-    assert manifest["pricing"]["single_audit_usd"] == 0.03
-    assert manifest["pricing"]["bundle_usd"] == 0.10
+    assert manifest["pricing"]["single_audit_usd"] == 0.05
+    assert manifest["pricing"]["bundle_usd"] == 0.15
     challenge = client.post("/audit/wcag", json={"url": "https://example.com"}).json()
-    assert challenge["price_usd"] == 0.03
+    assert challenge["price_usd"] == 0.05
 
 
 # --- One-off paid report ---------------------------------------------------
@@ -2375,7 +2375,7 @@ def test_mcp_paywall_is_machine_parseable_not_prose(monkeypatch):
 
     challenge = json.loads(result["content"][0]["text"])
     assert challenge["error"] == "payment_required"
-    assert challenge["price_usd"] == 0.10, "MCP must quote the same price as the REST route"
+    assert challenge["price_usd"] == 0.15, "MCP must quote the same price as the REST route"
     assert isinstance(challenge["accepts"], list)
     assert "docs" in challenge
     # The human-readable line survives alongside the machine-readable fields.
@@ -2913,12 +2913,12 @@ def _sign_402(http_client, headers, body, request_url="https://node.example/audi
 @pytest.mark.parametrize(
     "route,price",
     [
-        ("/audit", 0.03),
-        ("/audit/wcag", 0.03),
-        ("/audit/seo", 0.03),
-        ("/audit/security", 0.03),
-        ("/audit/performance", 0.03),
-        ("/audit/bundle", 0.10),
+        ("/audit", 0.05),
+        ("/audit/wcag", 0.05),
+        ("/audit/seo", 0.05),
+        ("/audit/security", 0.05),
+        ("/audit/performance", 0.05),
+        ("/audit/bundle", 0.15),
     ],
 )
 def test_every_paid_route_returns_a_402_a_real_client_can_pay(
@@ -3569,7 +3569,7 @@ def test_mcp_paywall_is_the_v2_challenge_the_x402_mcp_client_pays(monkeypatch, l
     assert requirement.scheme == "exact"
     assert requirement.network == "eip155:8453"
     assert requirement.pay_to.lower() == _X402_TEST_PAY_TO.lower()
-    assert requirement.amount == "100000", "bundle must be priced at $0.10 in atomic USDC"
+    assert requirement.amount == "150000", "bundle must be priced at $0.15 in atomic USDC"
     assert parsed.resource.url == f"{module.PUBLIC_BASE_URL}/mcp", (
         "the resource an agent connects to is the MCP endpoint"
     )
@@ -3580,7 +3580,7 @@ def test_mcp_paywall_is_the_v2_challenge_the_x402_mcp_client_pays(monkeypatch, l
     # text, and must find the same challenge there.
     text_only = dict(result, structuredContent=None)
     fallback = extract_payment_required_from_result(_mcp_result_object(text_only))
-    assert fallback is not None and fallback.accepts[0].amount == "100000"
+    assert fallback is not None and fallback.accepts[0].amount == "150000"
 
     # The v2 object is the same challenge the HTTP path sends in its header:
     # one builder, so the two transports cannot quote different terms.
@@ -3592,14 +3592,14 @@ def test_mcp_paywall_is_the_v2_challenge_the_x402_mcp_client_pays(monkeypatch, l
 
     # The LLM-facing fields survive beside the machine-readable ones.
     sc = result["structuredContent"]
-    assert sc["price_usd"] == 0.10
+    assert sc["price_usd"] == 0.15
     assert "Payment required" in sc["message"]
     assert "docs" in sc
 
     # And a real client can sign it.
     client, _ = _x402_core_client()
     payload = client.create_payment_payload(parsed)
-    assert payload.payload["authorization"]["value"] == "100000"
+    assert payload.payload["authorization"]["value"] == "150000"
 
 
 def test_an_x402_mcp_client_pays_in_meta_and_gets_its_receipt_in_meta(monkeypatch, load_main_fresh):
@@ -3656,7 +3656,7 @@ def test_an_x402_mcp_client_pays_in_meta_and_gets_its_receipt_in_meta(monkeypatc
     # same signed authorization the client produced.
     assert len(seen) == 1
     header, price = seen[0]
-    assert price == "$0.03"
+    assert price == "$0.05"
     decoded = decode_payment_signature_header(header)
     assert decoded.payload["signature"] == payload_dict["payload"]["signature"]
     assert decoded.payload["authorization"]["from"].lower() == account.address.lower()
@@ -3999,7 +3999,7 @@ def test_a_pending_settlement_is_reported_as_pending_with_its_hash_not_as_free(m
 
     module = _load_main(monkeypatch)
     tx = "0x" + "ab" * 32
-    sentinel = module.x402_payments.PendingPayment(None, None, "$0.03")
+    sentinel = module.x402_payments.PendingPayment(None, None, "$0.05")
 
     def _settle(pending):
         pending.settle_state = "pending"
@@ -4239,7 +4239,7 @@ def test_openapi_prices_the_x402_rail(monkeypatch, load_main_fresh):
     module = load_main_fresh("wcag_main_openapi_x402")
     doc = TestClient(module.app).get("/openapi.json").json()
 
-    for path, amount in (("/audit/wcag", "30000"), ("/audit/bundle", "100000"), ("/audit", "30000")):
+    for path, amount in (("/audit/wcag", "50000"), ("/audit/bundle", "150000"), ("/audit", "50000")):
         operation = doc["paths"][path]["post"]
         offers = operation["x-payment-info"]["offers"]
         x402 = [o for o in offers if o["method"] == "x402"]
@@ -4294,7 +4294,12 @@ def test_an_unpaid_probe_gets_the_price_before_anything_else(monkeypatch):
         ("GET", {}),
         ("HEAD", {}),
     ]
-    for path, price in module._PAID_ROUTE_PRICES.items():
+    # Driven off the catalog, the one source of price, so a probe is quoted
+    # exactly what the handler would charge -- the two used to be separate
+    # tables and could silently disagree.
+    priced_paths = [e["path"] for e in module._CATALOG] + list(module._CATALOG_ALIASES)
+    for path in priced_paths:
+        price = module._price_of(path)
         for method, kwargs in probes:
             response = client.request(method, path, **kwargs)
             assert response.status_code == 402, (method, path, response.status_code, response.text[:200])

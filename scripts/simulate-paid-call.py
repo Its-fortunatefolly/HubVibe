@@ -594,7 +594,7 @@ def main() -> int:
                 v["pay_to"].lower() == recipient.lower(),
                 f"payTo is the configured recipient ({v['pay_to']})",
             )
-            checks.expect(str(v["amount"]) == "30000", f"amount is $0.03 in atomic USDC ({v['amount']})")
+            checks.expect(str(v["amount"]) == "50000", f"amount is $0.05 in atomic USDC ({v['amount']})")
             checks.expect(v["payer"].lower() == payer.address.lower(), "payer is the funded wallet, not the recipient")
             checks.expect(v["x402Version"] == 2, f"the client paid with x402 v{v['x402Version']} (the header path)")
             checks.expect(
@@ -978,9 +978,9 @@ def _hammer_module(facilitator: str, recipient: str, *, threads: int, rounds: in
         payer = Account.create()
         http_client = _x402_http_client(payer)
         for _ in range(rounds):
-            header = module.payment_required_header("$0.03", resource_url="http://node/audit/wcag")
+            header = module.payment_required_header("$0.05", resource_url="http://node/audit/wcag")
             pay = _sign(http_client, header, b"", "http://node/audit/wcag")
-            pending = module.verify_only_sync(pay["PAYMENT-SIGNATURE"], "$0.03")
+            pending = module.verify_only_sync(pay["PAYMENT-SIGNATURE"], "$0.05")
             good = pending is not None and module.settle_sync(pending)
             with lock:
                 counts["ok" if good else "fail"] += 1
@@ -997,10 +997,10 @@ def _outage_probe(dead_facilitator: str, recipient: str):
     """Time two 402 builds against a facilitator that is not there."""
     module = _load_payments_module(dead_facilitator, recipient)
     t0 = time.time()
-    header = module.payment_required_header("$0.03", resource_url="http://node/audit/wcag")
+    header = module.payment_required_header("$0.05", resource_url="http://node/audit/wcag")
     t_first = time.time() - t0
     t0 = time.time()
-    module.payment_required_header("$0.03", resource_url="http://node/audit/wcag")
+    module.payment_required_header("$0.05", resource_url="http://node/audit/wcag")
     t_second = time.time() - t0
     return t_first, t_second, header
 

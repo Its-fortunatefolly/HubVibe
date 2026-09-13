@@ -82,14 +82,14 @@ def _call(path: str, url: str) -> dict:
 
 @server.tool()
 def audit_wcag(url: str) -> dict:
-    """WCAG 2.1 A/AA accessibility audit via axe-core. $0.03/call."""
+    """WCAG 2.1 A/AA accessibility audit via axe-core. $0.05/call."""
     return _call("/audit/wcag", url)
 
 
 @server.tool()
 def audit_seo(url: str) -> dict:
     """SEO audit: title, meta description, H1 structure, canonical link,
-    OpenGraph tags, structured data, lang attribute. $0.03/call."""
+    OpenGraph tags, structured data, lang attribute. $0.05/call."""
     return _call("/audit/seo", url)
 
 
@@ -97,7 +97,7 @@ def audit_seo(url: str) -> dict:
 def audit_security(url: str) -> dict:
     """Security headers audit: HTTPS, HSTS, CSP, X-Content-Type-Options,
     clickjacking protection, Referrer-Policy, CORS. Not a TLS/cipher scan
-    or a penetration test. $0.03/call."""
+    or a penetration test. $0.05/call."""
     return _call("/audit/security", url)
 
 
@@ -105,7 +105,7 @@ def audit_security(url: str) -> dict:
 def audit_performance(url: str) -> dict:
     """Performance audit: DOM node count, transferred bytes, and request
     count from one real page load. Not a full Lighthouse-style audit.
-    $0.03/call."""
+    $0.05/call."""
     return _call("/audit/performance", url)
 
 
@@ -113,7 +113,7 @@ def audit_performance(url: str) -> dict:
 def audit_bundle(url: str) -> dict:
     """Runs audit_wcag + audit_seo + audit_security + audit_performance
     atomically against one URL, billed once. If any dimension fails to
-    run, the whole call fails and nothing is billed. $0.10/call."""
+    run, the whole call fails and nothing is billed. $0.15/call."""
     return _call("/audit/bundle", url)
 
 

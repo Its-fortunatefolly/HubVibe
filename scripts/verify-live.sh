@@ -445,9 +445,9 @@ try:
     challenge = json.loads(text)
 except Exception:
     sys.exit(1)
-sys.exit(0 if challenge.get("price_usd") == 0.10 else 1)
+sys.exit(0 if challenge.get("price_usd") == 0.15 else 1)
 ' 2>/dev/null; then
-  pass "MCP paywall parses as JSON and quotes \$0.10 for the bundle"
+  pass "MCP paywall parses as JSON and quotes \$0.15 for the bundle"
 else
   fail "MCP paywall is not machine-parseable -- an agent cannot read the price"
 fi
@@ -618,7 +618,7 @@ echo "The paid path: can a caller who CAN pay actually get an audit?"
 # created, so the API key lookup raised on every keyed request -- while this
 # script reported 28/28 passing. The revenue path was dead and nothing said so.
 #
-# This check costs real money ($0.03), which is why it is opt-in rather than
+# This check costs real money ($0.05), which is why it is opt-in rather than
 # always-on. But a skipped check must be loud: silence is exactly what let the
 # outage live.
 # Resolve a key rather than demanding one. This check used to SKIP on every

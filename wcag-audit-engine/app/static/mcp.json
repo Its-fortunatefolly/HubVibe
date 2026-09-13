@@ -132,7 +132,7 @@
       "httpEndpoint": {
         "method": "POST",
         "path": "/audit/wcag",
-        "price_usd": 0.03
+        "price_usd": 0.05
       }
     },
     {
@@ -222,7 +222,7 @@
       "httpEndpoint": {
         "method": "POST",
         "path": "/audit/seo",
-        "price_usd": 0.03
+        "price_usd": 0.05
       }
     },
     {
@@ -299,7 +299,7 @@
       "httpEndpoint": {
         "method": "POST",
         "path": "/audit/security",
-        "price_usd": 0.03
+        "price_usd": 0.05
       }
     },
     {
@@ -393,7 +393,7 @@
       "httpEndpoint": {
         "method": "POST",
         "path": "/audit/performance",
-        "price_usd": 0.03
+        "price_usd": 0.05
       }
     },
     {
@@ -647,7 +647,7 @@
       "httpEndpoint": {
         "method": "POST",
         "path": "/audit/bundle",
-        "price_usd": 0.1
+        "price_usd": 0.15
       }
     }
   ]

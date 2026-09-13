@@ -34,28 +34,37 @@ key, an x402 on-chain payment, or an MPP (Machine Payments Protocol)
 payment. There is no free tier and no unauthenticated access: every audit
 costs a real browser page load, so every audit is paid for.
 
-- POST /audit/wcag -- $0.03 -- WCAG 2.1 A/AA accessibility audit via axe-core.
+- POST /audit/wcag -- $0.05 -- Web accessibility audit: WCAG 2.1 level A
+  and AA conformance checked with axe-core in a real browser. Deterministic
+  rules, never a model's opinion; a check that cannot run returns an error
+  rather than a pass.
   Input: {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
 
-- POST /audit/seo -- $0.03 -- Title, meta description, H1 structure,
-  canonical link, OpenGraph tags, structured data, and lang attribute.
+- POST /audit/seo -- $0.05 -- On-page SEO audit: title, meta description,
+  H1 structure, canonical link, OpenGraph tags, structured data and lang
+  attribute, each checked by rule. Reports what is missing or malformed,
+  never a score guess.
   Input: {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
 
-- POST /audit/security -- $0.03 -- HTTPS, HSTS, CSP, X-Content-Type-Options,
-  clickjacking protection, Referrer-Policy, and CORS from a live HTTP
-  response. Not a TLS/cipher scan or a penetration test.
+- POST /audit/security -- $0.05 -- HTTP security header audit: HTTPS, HSTS,
+  Content-Security-Policy, X-Content-Type-Options, clickjacking protection,
+  Referrer-Policy and CORS, read from the real response. Header posture
+  only -- not a TLS or cipher scan, and not a penetration test.
   Input: {"url": "string (required)"}
 
-- POST /audit/performance -- $0.03 -- DOM node count, transferred bytes,
-  and request count from one real page load. Not a full Lighthouse audit.
+- POST /audit/performance -- $0.05 -- Page weight audit from one real
+  browser load: DOM node count, bytes transferred and request count,
+  measured rather than estimated. Not Core Web Vitals, not a full
+  Lighthouse run.
   Input: {"url": "string (required)"}
 
-- POST /audit/bundle -- $0.10 -- Runs wcag + seo + security + performance
-  against one URL, billed as a single call. Atomic: if any dimension
-  fails to run, nothing is billed.
+- POST /audit/bundle -- $0.15 -- Full site audit of one URL in a single
+  call: accessibility (WCAG 2.1 A/AA via axe-core), on-page SEO, HTTP
+  security headers and page weight, from one browser load. Atomic: if any
+  dimension cannot run, nothing is billed.
   Input: {"url": "string (required)"}
 
-- POST /audit -- $0.03 -- Alias of /audit/wcag, kept for backward compatibility.
+- POST /audit -- $0.05 -- Alias of /audit/wcag, kept for backward compatibility.
 
 ## Payment and auth
 
@@ -104,8 +113,8 @@ https://github.com/its-fortunatefolly/hubvibe/tree/main/wcag-audit-engine/integr
 
 ## Pricing
 
-Machine, per call (this is the product): $0.03 per single-dimension audit,
-$0.10 per bundle. No account, no minimum.
+Machine, per call (this is the product): $0.05 per single-dimension audit,
+$0.15 per bundle. No account, no minimum.
 
 There are no subscriptions: per call is the only price.
 See /.well-known/agent.json for the authoritative live pricing.

@@ -9,7 +9,7 @@ the 402 itself from a wallet and continue, with no human in the loop.
     from hubvibe_tollbooth import HubVibeTollbooth
 
     booth = HubVibeTollbooth.from_env()
-    result = booth.audit("https://example.com")     # pays $0.10 if needed
+    result = booth.audit("https://example.com")     # pays $0.15 if needed
     if not result["pass"]:
         ...
 
@@ -68,11 +68,11 @@ _USDC_DECIMALS = 6
 # to an LLM -- the authoritative price is always the one in the 402 challenge,
 # and that is what actually gets paid.
 PRICES_USD = {
-    "wcag": 0.03,
-    "seo": 0.03,
-    "security": 0.03,
-    "performance": 0.03,
-    "bundle": 0.10,
+    "wcag": 0.05,
+    "seo": 0.05,
+    "security": 0.05,
+    "performance": 0.05,
+    "bundle": 0.15,
 }
 
 
@@ -255,7 +255,7 @@ class HubVibeTollbooth:
     def _challenge_price_usd(body: Any, fallback: float) -> float:
         """The price the 402 actually asked for, in USD.
 
-        The service quotes `"$0.03"`. Anything unparseable falls back to the
+        The service quotes `"$0.05"`. Anything unparseable falls back to the
         published rate for the route rather than to zero -- a price of zero
         would silently defeat both spending limits.
         """
@@ -423,7 +423,7 @@ def hubvibe_tools():
         standards before reporting it as done. Returns a dict with `pass`
         (bool, true only if every dimension passed) plus per-dimension
         `wcag`, `seo`, `security` and `performance` results, each with its
-        own `pass` and findings. Costs $0.10, paid automatically.
+        own `pass` and findings. Costs $0.15, paid automatically.
         """
         return shared_client().audit(url, "bundle")
 
@@ -431,7 +431,7 @@ def hubvibe_tools():
     def hubvibe_audit_accessibility(url: str) -> dict:
         """Run only the WCAG 2.1 A/AA accessibility audit (axe-core) against a
         live URL. Returns `pass` and a list of violations with rule id,
-        impact, and how many nodes are affected. Costs $0.03, paid
+        impact, and how many nodes are affected. Costs $0.05, paid
         automatically. Use the full site audit instead if you also care about
         SEO, security headers, or performance.
         """
@@ -441,7 +441,7 @@ def hubvibe_tools():
     def hubvibe_audit_html(html: str) -> dict:
         """Check raw HTML for accessibility violations before it is deployed
         anywhere. Takes the HTML source as a string rather than a URL.
-        Returns `pass` and a list of violations. Costs $0.03, paid
+        Returns `pass` and a list of violations. Costs $0.05, paid
         automatically.
         """
         return shared_client().audit_html(html, "wcag")

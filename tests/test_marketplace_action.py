@@ -156,8 +156,8 @@ def test_the_listing_states_the_price(tmp_path):
         check=True, capture_output=True, text=True,
     )
     readme = (target / "README.md").read_text()
-    assert "$0.03" in readme
-    assert "$0.10" in readme
+    assert "$0.05" in readme
+    assert "$0.15" in readme
 
 
 def test_the_listing_does_not_assert_a_payment_rail(tmp_path):

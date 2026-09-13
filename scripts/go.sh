@@ -23,7 +23,7 @@
 #     cd ~/HubVibe && bash scripts/go.sh
 #
 # Overrides:
-#     MIN_USDC       balance that counts as fundable   (default 0.03)
+#     MIN_USDC       balance that counts as fundable   (default 0.05)
 #     POLL_SECONDS   seconds between balance reads     (default 30)
 #     WAIT_SECONDS   give up waiting after this        (default 7200 = 2h)
 #     BASE           the node to pay                   (default the domain)
@@ -33,7 +33,7 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE="${BASE:-https://hubvibe-io.com}"
-MIN_USDC="${MIN_USDC:-0.03}"
+MIN_USDC="${MIN_USDC:-0.05}"
 POLL_SECONDS="${POLL_SECONDS:-30}"
 WAIT_SECONDS="${WAIT_SECONDS:-7200}"
 BASE_RPC="${BASE_RPC:-https://mainnet.base.org,https://base.publicnode.com,https://base-rpc.publicnode.com}"
@@ -153,7 +153,7 @@ FUNDED=$(python3 -c "import sys; sys.exit(0 if float('${BALANCE:-0}') >= float('
 if [ "$FUNDED" = "no" ]; then
   printf '\n  \033[1mSend USDC on Base to this address:\033[0m\n\n'
   printf '      \033[1m%s\033[0m\n\n' "$PAYER"
-  printf '  $0.25 is plenty -- the call spends $0.03. This wallet needs NO ETH:\n'
+  printf '  $0.25 is plenty -- the call spends $0.05. This wallet needs NO ETH:\n'
   printf '  x402 signs off-chain and the facilitator pays the gas. (The transfer\n'
   printf '  that funds it comes out of YOUR wallet and pays gas as usual -- that\n'
   printf '  is the one place on this path where gas is yours to cover.)\n\n'

@@ -3,7 +3,7 @@
 
 The constraint on this business has never been the plumbing. It is that
 nobody arrives. Discovery surfaces make a node findable by buyers who are
-already looking, and for site audits at $0.03 that population is currently
+already looking, and for site audits at $0.05 that population is currently
 close to zero. Outbound is the only channel that does not require waiting.
 
 What makes outbound work here is that the product IS the pitch. A cold email
@@ -40,7 +40,7 @@ DEFAULT_BASE = os.environ.get(
 
 # Bundle rate. Used only to show the operator what a run will cost before it
 # starts; the service's own 402 remains the authority on price.
-BUNDLE_USD = 0.10
+BUNDLE_USD = 0.15
 
 # Weighting for the ranking. Deliberately crude and legible: a prospect with
 # one critical failure outranks one with twenty cosmetic ones, because the
