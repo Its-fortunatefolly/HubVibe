@@ -70,6 +70,16 @@ fi
 [ -f "$ENV_FILE" ] || die "no $ENV_FILE -- run this on the box where the stack is installed."
 command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH."
 
+# The x402 client lives in the private environment first-paid-call.sh builds
+# beside the wallet key (a fresh Ubuntu box ships python3 with no pip and
+# PEP 668 refuses system installs). Use it when it is there. The box's bare
+# python3 has no eth_account, and on 2026-09-14 that came out as "no payer
+# wallet" -- which sent the owner looking at the wrong thing.
+VENV="${HUBVIBE_VENV:-${HOME:-/tmp}/.hubvibe-venv}"
+[ -x "$VENV/bin/python3" ] && export PATH="$VENV/bin:$PATH"
+python3 -c 'import x402, eth_account' 2>/dev/null \
+  || die "this python3 cannot import x402/eth_account and there is no environment at $VENV. first-paid-call.sh builds one before it pays; by hand: python3 -m venv $VENV && $VENV/bin/pip install 'x402[evm,extensions]==2.22.0' eth-account httpx"
+
 read_env() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$ENV_FILE" | tail -n 1 | tr -d '"'"'"'' | tr -d '\r' | sed 's:/*$::'; }
 STARTED_ON="$(read_env X402_FACILITATOR_URL)"
 [ -n "$STARTED_ON" ] || die "no X402_FACILITATOR_URL in $ENV_FILE"
@@ -135,8 +145,11 @@ import json, os, urllib.request, sys
 USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 path = os.environ["HUBVIBE_WALLET_FILE"]
 try:
-    key = open(path).read().strip()
     from eth_account import Account
+except ImportError as exc:
+    print("ERR python3 cannot import eth_account (%s)" % exc); sys.exit(0)
+try:
+    key = open(path).read().strip()
     address = Account.from_key(key).address
 except Exception as exc:
     print("ERR no payer wallet at %s (%s)" % (path, exc)); sys.exit(0)
