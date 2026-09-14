@@ -73,18 +73,31 @@ curl -i -X POST https://hubvibe-io.com/audit/wcag \
 
 ```
 HTTP/1.1 402 Payment Required
-WWW-Authenticate: Payment ...
+PAYMENT-REQUIRED: <base64 x402 v2 PaymentRequired: the same offer, Base and Solana>
 
 {
+  "x402Version": 1,
   "error": "payment_required",
   "price_usd": 0.05,
-  "accepts": [ { "protocol": "x402", ... }, { "protocol": "mpp", ... } ],
-  "docs": "/.well-known/agent.json"
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "base",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "payTo": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd",
+      "maxAmountRequired": "50000",
+      "resource": "https://hubvibe-io.com/audit/wcag",
+      ...
+    }
+  ],
+  "extensions": { "bazaar": { ... } },
+  "docs": "https://hubvibe-io.com/.well-known/agent.json"
 }
 ```
 
-An agent reads the 402, signs an x402 payment (USDC on Base), retries with
-`X-PAYMENT`, and gets the audit. Payment is **verified before the audit runs
+An agent reads the 402, signs an x402 payment (USDC on Base, or on Solana
+from the v2 header), retries with `X-PAYMENT` (v1) or `PAYMENT-SIGNATURE`
+(v2), and gets the audit. Payment is **verified before the audit runs
 and settled only after it produces a result** — a failed audit is never
 charged: x402 is settled only once the audit has run (and a settlement the
 facilitator refuses withholds the result and charges nothing), a prepaid key
@@ -141,6 +154,9 @@ Three rails, all fail-closed — no valid credential means no audit runs:
 
 Which are live is deployment-specific. Read `accepts` in any 402, or
 `payment.methods` in the agent manifest — both list only what actually works.
+On the public node at hubvibe-io.com, x402 is the live rail; the prepaid-key
+and MPP rails are in the code but not enabled there (`other_rails` is empty
+in its 402).
 
 ### What you are charged for
 
