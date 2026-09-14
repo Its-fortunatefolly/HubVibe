@@ -205,12 +205,17 @@ while IFS='|' read -r name url mcp; do
 
   for route in $ROUTES; do
     printf '  %-24s ' "$route"
-    if ROUTE="$route" BASE="$BASE" bash "$REPO_ROOT/scripts/first-paid-call.sh" 2>&1 \
-         | grep -q "settled \$"; then
-      printf 'listed\n'
-    else
-      printf '\033[31mFAILED\033[0m\n'; FAILED=1
-    fi
+    # Captured, not piped into grep -q: under pipefail, grep -q exiting at
+    # the first match sends first-paid-call.sh a SIGPIPE on its next write
+    # and the pipeline reports failure -- which is how the 2026-09-14 cycle
+    # settled all ten routes (tx hashes in the node log) while printing
+    # FAILED for every one of them.
+    OUT="$(ROUTE="$route" BASE="$BASE" bash "$REPO_ROOT/scripts/first-paid-call.sh" 2>&1)"
+    case "$OUT" in
+      *"settled \$"*) printf 'listed\n' ;;
+      *) printf '\033[31mFAILED\033[0m\n'; FAILED=1
+         printf '%s\n' "$OUT" | tail -n 4 | sed 's/^/        /' ;;
+    esac
   done
 
   if [ "$mcp" = "yes" ]; then

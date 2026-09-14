@@ -278,6 +278,17 @@ def test_the_mcp_registrar_treats_an_uncollected_call_as_a_failure():
     assert "fail(" in body.split("\n\n")[0] or "fail(" in body[:400]
 
 
+def test_a_settled_route_is_not_reported_as_failed():
+    """The 2026-09-14 cycle paid all ten routes and printed FAILED for each:
+    first-paid-call.sh was piped into `grep -q`, which exits at the first
+    match, and under pipefail the writer's resulting SIGPIPE fails the
+    pipeline. The result must be captured and inspected, never piped."""
+    text = SCRIPT.read_text()
+    assert 'first-paid-call.sh" 2>&1)"' in text, "capture first-paid-call.sh's output into a variable"
+    assert "first-paid-call.sh\" 2>&1 \\\n         | grep -q" not in text
+    assert "| grep -q \"settled" not in text, "a pipe into grep -q reports success as failure under pipefail"
+
+
 def test_both_scripts_are_valid():
     assert subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True).returncode == 0
     compile(MCP_REGISTER.read_text(), str(MCP_REGISTER), "exec")
