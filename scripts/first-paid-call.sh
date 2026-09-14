@@ -544,7 +544,7 @@ body = json.dumps({"jsonrpc":"2.0","id":1,"method":"eth_call","params":[
     {"to": asset, "data": "0x70a08231" + addr[2:].rjust(64, "0").lower()}, "latest"]}).encode()
 try:
     req = urllib.request.Request(os.environ.get("BASE_RPC", "https://mainnet.base.org"),
-                                 data=body, headers={"Content-Type": "application/json"})
+                                 data=body, headers={"Content-Type": "application/json", "User-Agent": "hubvibe-first-paid-call/1.0"})
     with urllib.request.urlopen(req, timeout=25) as r:
         result = json.load(r).get("result")
     balance = int(result, 16) if result and result != "0x" else 0

@@ -13,6 +13,7 @@ it did not start on.
 import json
 import os
 import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -176,6 +177,59 @@ def test_an_unreadable_chain_is_not_reported_as_an_empty_wallet(tmp_path):
     assert result.returncode == 1
     assert "could not read the balance" in result.stdout
     assert "short" not in result.stdout
+
+
+def _pythons(tmp_path):
+    """Two python3 wrappers: one whose eth_account import fails (a shadow
+    module on PYTHONPATH, so it fails wherever the real one is installed),
+    and one that works. The first goes on PATH, the second into a fake
+    ~/.hubvibe-venv -- the environment first-paid-call.sh builds on the box."""
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "eth_account.py").write_text("raise ImportError(\"No module named 'eth_account'\")\n")
+    broken = tmp_path / "broken-bin"
+    broken.mkdir()
+    (broken / "python3").write_text("#!/bin/sh\nPYTHONPATH=%s exec %s \"$@\"\n" % (shadow, sys.executable))
+    (broken / "python3").chmod(0o755)
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python3").write_text("#!/bin/sh\nexec %s \"$@\"\n" % sys.executable)
+    (venv / "bin" / "python3").chmod(0o755)
+    return broken, venv
+
+
+def test_a_python_without_the_client_is_named_as_such_not_as_a_missing_wallet(tmp_path):
+    """The failure the owner hit on the box on 2026-09-14: bare python3 has no
+    eth_account and the script said "no payer wallet". Stop before the wallet
+    check, and say what is actually missing."""
+    broken, _ = _pythons(tmp_path)
+    env, compose, rpc = _env(tmp_path)
+    env["PATH"] = "%s:%s" % (broken, env["PATH"])
+    env["HUBVIBE_VENV"] = str(tmp_path / "does-not-exist")
+    try:
+        result = _run(env)
+    finally:
+        rpc.stop()
+    assert result.returncode == 1
+    assert "eth_account" in result.stdout, result.stdout
+    assert "no payer wallet" not in result.stdout, result.stdout
+    assert "X402_FACILITATOR_URL=https://facilitator.payai.network" in (compose / ".env").read_text()
+
+
+def test_it_uses_the_environment_first_paid_call_builds(tmp_path):
+    """Same broken python3 on PATH, but the venv exists: the script must put
+    it first and carry on. This is what makes it work on the box at all."""
+    broken, venv = _pythons(tmp_path)
+    env, _, rpc = _env(tmp_path)
+    env["PATH"] = "%s:%s" % (broken, env["PATH"])
+    env["HUBVIBE_VENV"] = str(venv)
+    env["DRY_RUN"] = "1"
+    try:
+        result = _run(env)
+    finally:
+        rpc.stop()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "$1.05" in result.stdout
 
 
 def test_the_script_restores_the_facilitator_it_started_on():
