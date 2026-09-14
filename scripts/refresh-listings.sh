@@ -156,8 +156,11 @@ except Exception as exc:
 body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [
     {"to": USDC, "data": "0x70a08231" + "0" * 24 + address[2:]}, "latest"]}).encode()
 try:
+    # Every public Base RPC (mainnet.base.org, publicnode, drpc, 1rpc) answers
+    # 403 to a request with no User-Agent -- measured from the box 2026-09-14.
     request = urllib.request.Request(os.environ["BASE_RPC"], data=body,
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json",
+                                              "User-Agent": "hubvibe-refresh-listings/1.0"})
     with urllib.request.urlopen(request, timeout=30) as response:
         result = json.load(response)["result"]
     print("%s %.6f" % (address, int(result, 16) / 1e6))
