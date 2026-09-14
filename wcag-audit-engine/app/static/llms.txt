@@ -34,34 +34,36 @@ key, an x402 on-chain payment, or an MPP (Machine Payments Protocol)
 payment. There is no free tier and no unauthenticated access: every audit
 costs a real browser page load, so every audit is paid for.
 
-- POST /audit/wcag -- $0.05 -- Web accessibility audit: WCAG 2.1 level A
-  and AA conformance checked with axe-core in a real browser. Deterministic
-  rules, never a model's opinion; a check that cannot run returns an error
-  rather than a pass.
+- POST /audit/wcag -- $0.05 -- Website accessibility audit (a11y, WCAG compliance check): WCAG 2.1 level
+  A and AA conformance of any live URL or raw HTML, tested with axe-core
+  in a real headless browser. Returns every violation with rule id,
+  impact, help text and affected node count. Deterministic rules; a check
+  that cannot run returns an error, never a pass.
   Input: {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
 
-- POST /audit/seo -- $0.05 -- On-page SEO audit: title, meta description,
-  H1 structure, canonical link, OpenGraph tags, structured data and lang
-  attribute, each checked by rule. Reports what is missing or malformed,
-  never a score guess.
+- POST /audit/seo -- $0.05 -- SEO audit of a web page (on-page SEO check) for any live URL or raw HTML:
+  title tag, meta description, H1 heading structure, canonical link,
+  OpenGraph and social tags, JSON-LD structured data, html lang attribute.
+  Rule-by-rule findings with severity and what is missing or malformed.
   Input: {"html": "string (optional)", "url": "string (optional, one of html/url required)"}
 
-- POST /audit/security -- $0.05 -- HTTP security header audit: HTTPS, HSTS,
-  Content-Security-Policy, X-Content-Type-Options, clickjacking protection,
-  Referrer-Policy and CORS, read from the real response. Header posture
-  only -- not a TLS or cipher scan, and not a penetration test.
+- POST /audit/security -- $0.05 -- Security headers check for a website: audits HTTPS, HSTS, Content-
+  Security-Policy (CSP), X-Content-Type-Options, X-Frame-Options /
+  clickjacking protection, Referrer-Policy and CORS from the real HTTP
+  response of any live URL. Findings with severity for what is missing.
+  Header posture only, not a penetration test.
   Input: {"url": "string (required)"}
 
-- POST /audit/performance -- $0.05 -- Page weight audit from one real
-  browser load: DOM node count, bytes transferred and request count,
-  measured rather than estimated. Not Core Web Vitals, not a full
-  Lighthouse run.
+- POST /audit/performance -- $0.05 -- Page speed and page weight audit of a web page from one real browser load:
+  total bytes transferred, HTTP request count and DOM node count, measured
+  rather than estimated, with findings when the page is heavy. Page-weight
+  signals, not Core Web Vitals.
   Input: {"url": "string (required)"}
 
-- POST /audit/bundle -- $0.15 -- Full site audit of one URL in a single
-  call: accessibility (WCAG 2.1 A/AA via axe-core), on-page SEO, HTTP
-  security headers and page weight, from one browser load. Atomic: if any
-  dimension cannot run, nothing is billed.
+- POST /audit/bundle -- $0.15 -- Full website audit in one call: accessibility (WCAG 2.1 A/AA via axe-
+  core), on-page SEO, HTTP security headers and page speed / page weight,
+  from a single browser load of one URL. Cheaper than four separate calls;
+  if any part cannot run, nothing is billed.
   Input: {"url": "string (required)"}
 
 - POST /audit -- $0.05 -- Alias of /audit/wcag, kept for backward compatibility.
