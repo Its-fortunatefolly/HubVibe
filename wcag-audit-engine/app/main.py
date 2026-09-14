@@ -1711,10 +1711,12 @@ _CATALOG = [
         "price_usd": 0.05,
         "input": _HTML_OR_URL_INPUT_SCHEMA,
         "description": (
-            "Web accessibility audit: WCAG 2.1 level A and AA conformance "
-            "checked with axe-core in a real browser, against a live URL or "
-            "raw HTML. Deterministic rules, never a model's opinion, and a "
-            "check that cannot run returns an error rather than a pass."
+            "Website accessibility audit (a11y, WCAG compliance check): WCAG "
+            "2.1 level A and AA conformance of any live URL or raw HTML, tested "
+            "with axe-core in a real headless browser. Returns every violation "
+            "with rule id, impact, help text and affected node count. "
+            "Deterministic rules; a check that cannot run returns an error, "
+            "never a pass."
         ),
         "returns": "pass (bool), violations[] with id/impact/help/help_url/nodes_affected.",
     },
@@ -1723,10 +1725,11 @@ _CATALOG = [
         "price_usd": 0.05,
         "input": _HTML_OR_URL_INPUT_SCHEMA,
         "description": (
-            "On-page SEO audit of a live URL or raw HTML: title, meta "
-            "description, H1 structure, canonical link, OpenGraph tags, "
-            "structured data and lang attribute, each checked by rule. "
-            "Reports what is missing or malformed, never a score guess."
+            "SEO audit of a web page (on-page SEO check) for any live URL or "
+            "raw HTML: title tag, meta description, H1 heading structure, "
+            "canonical link, OpenGraph and social tags, JSON-LD structured "
+            "data, html lang attribute. Rule-by-rule findings with severity and "
+            "what is missing or malformed."
         ),
         "returns": "pass (bool), findings[] with id/severity/detail.",
     },
@@ -1735,11 +1738,11 @@ _CATALOG = [
         "price_usd": 0.05,
         "input": _URL_INPUT_SCHEMA,
         "description": (
-            "HTTP security header audit of a live site: HTTPS, HSTS, "
-            "Content-Security-Policy, X-Content-Type-Options, clickjacking "
-            "protection, Referrer-Policy and CORS, read from the real "
-            "response. Header posture only -- not a TLS or cipher scan, and "
-            "not a penetration test."
+            "Security headers check for a website: audits HTTPS, HSTS, Content- "
+            "Security-Policy (CSP), X-Content-Type-Options, X-Frame-Options / "
+            "clickjacking protection, Referrer-Policy and CORS from the real "
+            "HTTP response of any live URL. Findings with severity for what is "
+            "missing. Header posture only, not a penetration test."
         ),
         "returns": "pass (bool), findings[] with id/severity/detail.",
     },
@@ -1748,10 +1751,10 @@ _CATALOG = [
         "price_usd": 0.05,
         "input": _URL_INPUT_SCHEMA,
         "description": (
-            "Page weight audit from one real browser load: DOM node count, "
-            "bytes transferred and request count, measured rather than "
-            "estimated. Page-weight signals only -- not Core Web Vitals and "
-            "not a full Lighthouse run."
+            "Page speed and page weight audit of a web page from one real "
+            "browser load: total bytes transferred, HTTP request count and DOM "
+            "node count, measured rather than estimated, with findings when the "
+            "page is heavy. Page-weight signals, not Core Web Vitals."
         ),
         "returns": "pass (bool), metrics{}, findings[] with id/severity/detail.",
     },
@@ -1760,11 +1763,10 @@ _CATALOG = [
         "price_usd": 0.15,
         "input": _URL_INPUT_SCHEMA,
         "description": (
-            "Full site audit of one URL in a single call: accessibility "
-            "(WCAG 2.1 A/AA via axe-core), on-page SEO, HTTP security "
-            "headers and page weight, from one browser load. Atomic -- if "
-            "any dimension cannot run, the whole call fails and nothing is "
-            "billed."
+            "Full website audit in one call: accessibility (WCAG 2.1 A/AA via "
+            "axe-core), on-page SEO, HTTP security headers and page speed / "
+            "page weight, from a single browser load of one URL. Cheaper than "
+            "four separate calls; if any part cannot run, nothing is billed."
         ),
         "returns": "pass (bool) plus wcag{}, seo{}, security{}, performance{} sub-results.",
     },
