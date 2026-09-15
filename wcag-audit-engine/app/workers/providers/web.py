@@ -36,20 +36,39 @@ MAX_TEXT_CHARS = int(os.environ.get("WORKER_MAX_EXTRACT_CHARS", "40000"))
 _with_page: Optional[Callable] = None
 _executor = None
 _goto_guarded: Optional[Callable] = None
+_blocked_target_reason: Optional[Callable] = None
 
 
 def configure(with_page: Optional[Callable] = None, executor=None,
-              goto_guarded: Optional[Callable] = None) -> None:
-    """Hand this module the audit engine's browser pool.
+              goto_guarded: Optional[Callable] = None,
+              blocked_target_reason: Optional[Callable] = None) -> None:
+    """Hand this module the audit engine's browser pool and its target guard.
 
-    `goto_guarded` is the audit code's own navigation guard (SSRF blocking,
-    redirect limits). Reusing it means a worker cannot be pointed at a private
-    address that the audit routes already refuse -- one guard, not two.
+    `goto_guarded` is the audit code's own navigation guard, and
+    `blocked_target_reason` the rule behind it (private, loopback, link-local
+    and reserved addresses, plus internal hostnames). Both are REUSED rather
+    than reimplemented: a second copy of an SSRF rule is a second thing to
+    forget to update, and the copy that drifts is the one guarding the fetch.
     """
-    global _with_page, _executor, _goto_guarded
+    global _with_page, _executor, _goto_guarded, _blocked_target_reason
     _with_page = with_page
     _executor = executor
     _goto_guarded = goto_guarded
+    _blocked_target_reason = blocked_target_reason
+
+
+def target_problem(url: str) -> Optional[str]:
+    """Why this URL must not be fetched, or None.
+
+    FAILS CLOSED when the guard was not injected: a deployment that did not
+    wire it refuses every fetch rather than fetching whatever it is told to.
+    An unguarded fetcher behind a paywall is a service that will read a cloud
+    metadata endpoint for anyone with $0.10.
+    """
+    if _blocked_target_reason is None:
+        return ("this deployment has no target guard configured, so no URL "
+                "can be fetched")
+    return _blocked_target_reason(url)
 
 
 _TAG_STRIP = re.compile(r"<(script|style|noscript|template)[^>]*>.*?</\1>",
@@ -101,6 +120,12 @@ class _BrowserExtractor:
         if not self.available():
             raise runtime.ProviderUnavailable(self.unavailable_reason())
 
+        # Checked here as well as in the skill: this is the last line before a
+        # socket is opened, and it is the only one a future caller cannot skip.
+        problem = target_problem(url)
+        if problem:
+            raise runtime.InvalidRequest(f"`url` {problem}.")
+
         def _render(page):
             if _goto_guarded is not None:
                 _goto_guarded(page, url, wait_until="networkidle", timeout=30000)
@@ -149,14 +174,39 @@ class _HttpExtractor:
         return ""
 
     async def extract(self, url: str) -> runtime.ProviderResult:
-        try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True,
-                                         max_redirects=5) as client:
-                response = await client.get(url, headers={"User-Agent": USER_AGENT})
-        except httpx.TimeoutException as exc:
-            raise runtime.TransientProviderError(f"{url} timed out: {exc}") from exc
-        except httpx.HTTPError as exc:
-            raise runtime.TransientProviderError(f"{url} unreachable: {exc}") from exc
+        # Redirects are followed BY HAND, one hop at a time, so every hop is
+        # checked against the same guard as the first.
+        #
+        # httpx's own follow_redirects would take us wherever the target says
+        # to go: a perfectly public URL that answers 302 to
+        # http://169.254.169.254/ turns a paid page fetch into a cloud
+        # credential read. Checking only the URL the caller supplied is not a
+        # guard, it is a formality.
+        current = url
+        response = None
+        for _hop in range(6):
+            problem = target_problem(current)
+            if problem:
+                raise runtime.InvalidRequest(f"`url` {problem}.")
+            try:
+                async with httpx.AsyncClient(timeout=_TIMEOUT,
+                                             follow_redirects=False) as client:
+                    response = await client.get(current, headers={"User-Agent": USER_AGENT})
+            except httpx.TimeoutException as exc:
+                raise runtime.TransientProviderError(f"{current} timed out: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise runtime.TransientProviderError(f"{current} unreachable: {exc}") from exc
+
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get("location")
+                if not location:
+                    raise runtime.InvalidProviderResponse(
+                        f"{current} redirected without a destination.")
+                current = str(httpx.URL(current).join(location))
+                continue
+            break
+        else:
+            raise runtime.InvalidRequest("`url` redirected too many times.")
 
         if response.status_code in (429, 500, 502, 503, 504):
             raise runtime.TransientProviderError(f"{url} returned {response.status_code}")
@@ -175,7 +225,7 @@ class _HttpExtractor:
         if not text:
             raise runtime.InvalidProviderResponse(f"{url} contained no readable text.")
         return runtime.ProviderResult(
-            value={"url": url, "final_url": str(response.url), "title": _title_of(html),
+            value={"url": url, "final_url": current, "title": _title_of(html),
                    "description": _meta_description(html), "text": text,
                    "text_chars": len(text), "truncated": truncated, "links": [],
                    "rendered": False},

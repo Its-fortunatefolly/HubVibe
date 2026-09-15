@@ -3360,6 +3360,10 @@ if workers is not None:
             failed_response=_failed_audit_response,
             with_page=browser_pool.with_page,
             goto_guarded=getattr(audits, "goto_guarded", None),
+            # The SAME rule the audit routes refuse targets with. Injected
+            # rather than reimplemented so a worker can never fetch something
+            # an audit would refuse -- one guard, one place to fix it.
+            blocked_target_reason=audits.blocked_target_reason,
         )
         app.include_router(workers.router.router)
     except Exception as _workers_mount_error:  # pragma: no cover - defensive

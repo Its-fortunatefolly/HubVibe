@@ -17,6 +17,12 @@ def validate_url(raw, field: str = "url") -> str:
         raise runtime.InvalidRequest(f"`{field}` must be an http(s) URL.")
     if not parsed.netloc:
         raise runtime.InvalidRequest(f"`{field}` has no host.")
+    # The same guard the audit routes apply, run here so the refusal is FREE:
+    # raised before the payment gate, the caller is never charged and their
+    # x402 nonce is never burned on a URL we were always going to refuse.
+    problem = web.target_problem(url)
+    if problem:
+        raise runtime.InvalidRequest(f"`{field}` {problem}.")
     return url
 
 

@@ -68,7 +68,7 @@ _executor: Optional[ThreadPoolExecutor] = None
 
 
 def configure(authorize_and_rate_limit, bill, deliver, failed_response,
-              with_page=None, goto_guarded=None) -> None:
+              with_page=None, goto_guarded=None, blocked_target_reason=None) -> None:
     """Hand the worker network the core's payment gate and browser pool."""
     global _authorize, _bill, _deliver, _failed, _executor, _semaphore, _configured
     _authorize = authorize_and_rate_limit
@@ -81,7 +81,8 @@ def configure(authorize_and_rate_limit, bill, deliver, failed_response,
 
     from .providers import google_auth, web
 
-    web.configure(with_page=with_page, executor=_executor, goto_guarded=goto_guarded)
+    web.configure(with_page=with_page, executor=_executor, goto_guarded=goto_guarded,
+                  blocked_target_reason=blocked_target_reason)
     # Resolve Google credentials in the background now, so the one-off cost
     # (and its timeout, if the metadata probe is wedged) lands at startup
     # rather than inside the first agent's paid request.

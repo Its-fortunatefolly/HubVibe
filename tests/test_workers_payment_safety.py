@@ -56,6 +56,27 @@ def app_module(monkeypatch, tmp_path):
     spec.loader.exec_module(module)
     monkeypatch.setattr(module.x402_payments, "_facilitator_supports",
                         lambda version, network: True)
+
+    # Re-bind the router to THIS app instance.
+    #
+    # The worker package is a singleton, but the wider suite loads main.py
+    # many times (load_main_fresh), and every load re-runs the mount block at
+    # the end of main.py -- so whichever module loaded LAST owns the router's
+    # gate functions. Run alone, that is this module and everything passes;
+    # run after test_wcag_audit_engine.py, the router still points at a
+    # different app, and a test that stubs _bill here watches a stub that is
+    # never called. Binding explicitly makes these tests order-independent.
+    #
+    # Production loads main.py exactly once, so this is a test-isolation
+    # concern rather than a behaviour this fixes.
+    W.router.configure(
+        authorize_and_rate_limit=module._authorize_and_rate_limit,
+        bill=module._bill,
+        deliver=module._deliver,
+        failed_response=module._failed_audit_response,
+        with_page=module.browser_pool.with_page,
+        goto_guarded=getattr(module.audits, "goto_guarded", None),
+    )
     yield module
     W.ledger.reset_for_tests()
 
