@@ -1,10 +1,13 @@
-# HubVibe Site Compliance Auditing Suite
+# HubVibe -- machine-payable services for autonomous agents
 
-> Rule-based, verifiable site audits -- accessibility (axe-core), SEO,
-> security headers, and performance -- callable a la carte or as a single
-> bundle. Every result is a deterministic check against the actual page;
-> nothing here is an LLM guessing at quality, and a check that couldn't
-> run is never reported as a false pass.
+> A machine-service gateway: site compliance audits plus a catalog of
+> per-call capabilities -- LLM inference, web search and extraction,
+> blockchain/market/prediction-market data, media generation, sandboxed
+> compute, composite research -- every one paid per call over HTTP 402
+> with no account and no human in the loop. The audits are deterministic
+> checks against the actual page; a check that couldn't run is never
+> reported as a false pass, and a call that produced no result is never
+> billed.
 
 Base URL: https://hubvibe-io.com
 
@@ -67,6 +70,41 @@ costs a real browser page load, so every audit is paid for.
   Input: {"url": "string (required)"}
 
 - POST /audit -- $0.05 -- Alias of /audit/wcag, kept for backward compatibility.
+
+## Machine services (/svc/*)
+
+Beside the audits, this node sells a catalog of per-call machine services
+under /svc/*. WHICH of them are live is deployment-specific -- a capability
+whose provider is not configured on a node is absent from that node's
+manifest, routes and tools rather than advertised broken -- so read
+/.well-known/agent.json (the `endpoints` array) for the live list and
+GET /svc/health (free) for per-provider availability. The full catalog:
+
+- POST /svc/llm -- LLM inference (Anthropic Claude / Google Gemini /
+  OpenAI, cheap-tier models, capped output, automatic failover)
+- POST /svc/search -- web search with ranked results
+- POST /svc/fetch -- fetch one public URL (status, headers, body text)
+- POST /svc/extract -- extract readable content from one public HTML page
+  (title, metadata, plain text, links)
+- POST /svc/rpc -- read-only blockchain JSON-RPC against Base mainnet
+  (balances, blocks, transactions, receipts, logs, eth_call)
+- POST /svc/market -- current market data (spot price, exchange-rate
+  table, exchange ticker) from Coinbase's public data APIs
+- POST /svc/prediction -- prediction-market data (markets, prices,
+  events) from Polymarket's public Gamma API
+- POST /svc/image -- image generation from a text prompt
+- POST /svc/tts -- voice synthesis (text-to-speech, playable audio)
+- POST /svc/code -- sandboxed Python execution (operator-enabled
+  deployments only)
+- POST /svc/research -- one completed research job: search, read the top
+  sources, synthesize a cited answer
+
+Same payment gate and the same guarantees as the audits: an
+unauthenticated call answers HTTP 402 with the price, requests are
+validated before any payment is read, and a call no provider could
+complete returns HTTP 502 with per-provider reasons and bills nothing.
+Input schemas and prices for every live service are in
+/.well-known/agent.json and the /mcp tools/list.
 
 ## Payment and auth
 
