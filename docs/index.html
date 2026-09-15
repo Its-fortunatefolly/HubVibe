@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HubVibe — Automated Website Audits</title>
-<meta name="description" content="HubVibe provides programmatic API services for automated website audits — WCAG accessibility, SEO, security, and performance verification for developers and automated workflows.">
+<title>HubVibe — Machine-Payable Services and Website Audits</title>
+<meta name="description" content="HubVibe provides programmatic, machine-payable API services — automated website audits (WCAG accessibility, SEO, security, performance) plus AI inference, search, extraction, blockchain and market data, media and compute for automated workflows.">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <meta property="og:type" content="website">
 <meta property="og:title" content="HubVibe — Automated Website Audits">
@@ -80,11 +80,31 @@
   </header>
 
   <p class="lead">
-    HubVibe provides programmatic API services for automated website audits —
-    WCAG 2.1 accessibility, SEO, security-header, and performance verification —
-    for developers and automated workflows. Every check is a deterministic rule
-    run against the live page, never a language model's opinion, and a check
-    that could not run is reported as an error rather than a pass.
+    HubVibe provides programmatic, machine-payable API services for developers
+    and automated workflows: automated website audits — WCAG 2.1 accessibility,
+    SEO, security-header, and performance verification — alongside a catalog of
+    per-call machine services: LLM inference, web search and extraction,
+    read-only blockchain RPC, market and prediction-market data, media
+    generation, and sandboxed compute. Audit checks are deterministic rules run
+    against the live page, and a call that could not produce a result is
+    reported as an error rather than billed.
+  </p>
+
+  <h2>Machine services</h2>
+  <table>
+    <tr><th>Capability</th><th>What an agent gets</th></tr>
+    <tr><td>AI models</td><td>LLM inference across Claude, Gemini and OpenAI with failover</td></tr>
+    <tr><td>Search &amp; research</td><td>Web search, guarded fetch, content extraction, cited research jobs</td></tr>
+    <tr><td>Blockchain</td><td>Read-only JSON-RPC on Base: balances, blocks, transactions, logs</td></tr>
+    <tr><td>Market data</td><td>Spot prices, exchange rates, tickers; prediction-market data</td></tr>
+    <tr><td>Media</td><td>Image generation and voice synthesis, delivered in the response</td></tr>
+    <tr><td>Compute</td><td>Sandboxed code execution on deployments that enable it</td></tr>
+  </table>
+  <p class="lead" style="font-size:14.5px">
+    Which capabilities are live on a node is read from its
+    <a href="https://hubvibe-io.com/.well-known/agent.json">agent manifest</a> —
+    a capability without a configured provider is omitted, never advertised
+    broken.
   </p>
 
   <h2>What every audit checks</h2>
@@ -116,7 +136,7 @@
   </div>
 
   <footer>
-    HubVibe · automated website auditing for developers and automated workflows.
+    HubVibe · machine-payable services for developers and automated workflows.
   </footer>
 
 </div>

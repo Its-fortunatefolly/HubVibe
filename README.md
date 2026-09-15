@@ -1,8 +1,13 @@
 # HubVibe
 
-**Machine-payable site compliance audits.** WCAG 2.1 A/AA, SEO, security
-headers, and performance — deterministic rules against the real rendered page,
-priced per call, payable by software with no account and no human in the loop.
+**Machine-payable services for autonomous agents.** The core product is the
+site compliance audit suite — WCAG 2.1 A/AA, SEO, security headers, and
+performance, deterministic rules against the real rendered page — and beside
+it a catalog of per-call machine services (`/svc/*`): LLM inference, web
+search and extraction, read-only blockchain RPC, market and prediction-market
+data, media generation, sandboxed compute, and a composite research job.
+Everything is priced per call and payable by software with no account and no
+human in the loop.
 
 Live: **https://hubvibe-io.com**
 
@@ -142,6 +147,48 @@ price is the charged price by construction.
 | `POST /audit/bundle` | $0.15 | All four against one URL, billed once |
 
 Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
+
+### Machine services (`/svc/*`)
+
+The same payment gate sells a wider catalog beside the audits — each route
+validated for free before any payment is read, never billed for a call that
+produced no result, with per-provider retries, exponential backoff, failover
+and a circuit breaker behind it:
+
+| Route | Capability | Providers |
+|---|---|---|
+| `POST /svc/llm` | LLM inference (capped, cheap-tier models) | Anthropic Claude · Google Gemini · OpenAI |
+| `POST /svc/search` | Web search | Brave · Serper |
+| `POST /svc/fetch` | Guarded fetch of one public URL | built in |
+| `POST /svc/extract` | Structured content extraction | built in |
+| `POST /svc/rpc` | Read-only JSON-RPC on Base mainnet | public Base RPC, with failover |
+| `POST /svc/market` | Spot prices, exchange rates, tickers | Coinbase public data APIs |
+| `POST /svc/prediction` | Prediction-market data | Polymarket Gamma (public) |
+| `POST /svc/image` | Image generation | Gemini · OpenAI |
+| `POST /svc/tts` | Voice synthesis | OpenAI · Gemini |
+| `POST /svc/code` | Sandboxed Python execution | local sandbox (operator opt-in) |
+| `POST /svc/research` | Search → read → cited synthesis, one call | composite |
+
+**A capability whose provider is not configured is absent** — no route, no
+price, no tool, no manifest entry — the same rule the payment rails follow.
+The keyless services (fetch, extract, rpc, market, prediction) are live on
+any deployment with outbound HTTPS; the rest appear when the operator sets
+the provider key (see `deploy/vps/.env.example`). `SVC_DISABLED=all` turns
+the whole catalog off and restores the audit-only surface exactly.
+
+Prices are flat per call and published where the audits' are: the 402
+challenge, `/.well-known/agent.json`, `/openapi.json`, and the MCP tool
+list. `GET /svc/health` (free) reports per-provider availability and
+circuit state; `GET /svc/metrics` (internal key required) is the revenue /
+provider-cost / margin ledger, per service and per provider, from measured
+usage. Keyed callers can send `X-Idempotency-Key` to make retries of one
+request return the first delivery instead of buying the work twice.
+
+Video generation is deliberately not in the catalog: Veo-class APIs are
+long-running polled operations, and this service settles payment only after
+delivery inside one synchronous call — an honest video capability needs an
+async job rail first, and claiming one without it is the kind of fabricated
+integration this repo refuses.
 
 ## Paying
 
