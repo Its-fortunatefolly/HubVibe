@@ -4,7 +4,7 @@ import base64
 import binascii
 
 from .. import runtime
-from ..providers import imagen, stt, tts
+from ..providers import imagen, stt, tts, veo
 
 MAX_PROMPT_CHARS = 2_000
 MAX_TTS_CHARS = 3_000
@@ -76,8 +76,42 @@ async def transcribe_speech(ctx, payload: dict) -> dict:
     }
 
 
+async def generate_video(ctx, payload: dict) -> dict:
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        raise runtime.InvalidRequest("`prompt` is required.")
+    if len(prompt) > MAX_PROMPT_CHARS:
+        raise runtime.InvalidRequest(
+            f"`prompt` is {len(prompt)} characters, over the {MAX_PROMPT_CHARS} limit.")
+    aspect_ratio = (payload.get("aspect_ratio") or "16:9").strip()
+    try:
+        duration_seconds = int(payload.get("duration_seconds", 6))
+    except (TypeError, ValueError):
+        raise runtime.InvalidRequest("`duration_seconds` must be a whole number.")
+    generate_audio = bool(payload.get("generate_audio", False))
+
+    async def call(provider):
+        # A poll loop lives inside this one call, so its budget is what is
+        # actually left in the job -- minus a margin so the ledger write
+        # and response still land inside the caller's own deadline.
+        return await provider.generate(
+            prompt, aspect_ratio=aspect_ratio, duration_seconds=duration_seconds,
+            generate_audio=generate_audio, deadline_seconds=max(30.0, ctx.remaining() - 15))
+
+    # One attempt only: a retried generation re-bills Google for a second
+    # video, same reasoning as image.generate and speech.synthesize.
+    value = await ctx.run("generate", veo.PROVIDERS, call, per_attempt_seconds=ctx.remaining(),
+                          max_attempts=1)
+    return {
+        "prompt": prompt, "aspect_ratio": aspect_ratio,
+        "duration_seconds": value["duration_seconds"], "video_base64": value["video_base64"],
+        "gcs_uri": value.get("gcs_uri"), "mime_type": value["mime_type"], "model": value["model"],
+    }
+
+
 SKILLS = {
     "image.generate": generate_image,
     "speech.synthesize": synthesize_speech,
     "speech.transcribe": transcribe_speech,
+    "video.generate": generate_video,
 }

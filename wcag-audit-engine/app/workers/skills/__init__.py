@@ -15,11 +15,11 @@ rather than merely coexist.
 """
 
 from . import (  # noqa: F401
-    chain, code, composites, data, extract, fetch, llm, market, media, monitor,
-    search, security, verify,
+    chain, code, composites, data, extract, fetch, llm, maps, market, media,
+    monitor, search, security, verify,
 )
 
 REGISTRY = {}
 for _module in (extract, llm, chain, market, data, composites, search, code,
-                media, security, monitor, verify, fetch):
+                media, security, monitor, verify, fetch, maps):
     REGISTRY.update(_module.SKILLS)

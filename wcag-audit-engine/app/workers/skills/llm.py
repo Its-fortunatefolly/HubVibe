@@ -116,15 +116,23 @@ async def generate(ctx, payload: dict) -> dict:
     requested_provider = payload.get("provider")
     if requested_provider is not None and not isinstance(requested_provider, str):
         raise runtime.InvalidRequest("`provider`, when given, must be a string.")
+    requested_model = payload.get("model")
+    if requested_model is not None and not isinstance(requested_model, str):
+        raise runtime.InvalidRequest("`model`, when given, must be a string.")
 
-    matching = [p for p in completion.PROVIDERS if p.matches(requested_provider)]
+    matching = [p for p in completion.PROVIDERS if p.matches(requested_provider, requested_model)]
     if not matching:
-        raise runtime.InvalidRequest(
-            "`provider` must be one of: "
-            f"{sorted({p.provider_name for p in completion.PROVIDERS})}.")
+        if requested_provider is not None and requested_model is not None:
+            detail = f"provider={requested_provider!r} does not offer model={requested_model!r}"
+        elif requested_model is not None:
+            detail = (f"model={requested_model!r} is not offered by any configured provider "
+                      f"(known: {sorted(m for p in completion.PROVIDERS for m in p.models)})")
+        else:
+            detail = f"provider must be one of {sorted({p.provider_name for p in completion.PROVIDERS})}"
+        raise runtime.InvalidRequest(f"`provider`/`model`: {detail}.")
 
     async def call(provider):
-        return await provider.generate(prompt, system, max_tokens, temperature)
+        return await provider.generate(prompt, system, max_tokens, temperature, model=requested_model)
 
     value = await ctx.run("generate", matching, call, per_attempt_seconds=90)
     return {
@@ -136,3 +144,4 @@ async def generate(ctx, payload: dict) -> dict:
 
 
 SKILLS = {"llm.analyze": analyze, "llm.extract": extract_structured, "llm.generate": generate}
+

@@ -357,15 +357,18 @@ CATALOG = [
         title="Raw text completion",
         description=(
             "A raw completion from a large language model: your prompt, your system "
-            "message, your model choice among what this deployment has configured. "
-            "Unlike llm.analyze, nothing is prescribed about the shape of the answer."),
-        tags=["llm", "generate", "completion", "gemini", "inference"],
+            "message, your provider and model choice among what this deployment has "
+            "configured (Gemini; Claude on Vertex once Model Garden access is "
+            "enabled). Unlike llm.analyze, nothing is prescribed about the shape of "
+            "the answer."),
+        tags=["llm", "generate", "completion", "gemini", "claude", "inference"],
         input_schema=_obj({
             "prompt": {"type": "string", "description": "The prompt."},
             "system": {"type": "string", "description": "Optional system message."},
             "max_tokens": {"type": "integer", "description": "1-4096, default 1024."},
             "temperature": {"type": "number", "description": "0-2, default 0.7."},
-            "provider": {"type": "string", "description": "Optional: pin a vendor (e.g. gemini)."},
+            "provider": {"type": "string", "description": "Optional: gemini or anthropic."},
+            "model": {"type": "string", "description": "Optional: a specific model from that provider."},
         }, ["prompt"]),
         output_schema=_RESULT,
         returns="text, model, provider, finish_reason, usage{input_tokens,output_tokens}.",
@@ -657,6 +660,74 @@ CATALOG = [
         skill="prediction.events", max_seconds=20,
         pricing_basis="Provisional. Provider cost zero (public API).",
         requires=("polymarket",)),
+    # --- wave 2b: fail-closed until the operator enables one Google product -
+    Worker(
+        name="maps.places", price_usd=0.10, tier="utility",
+        title="Search places",
+        description=(
+            "Search for places -- businesses, addresses, points of interest -- via "
+            "Google's managed Maps Grounding Lite MCP server. Requires the operator "
+            "to enable the Maps Grounding Lite API and set a key; unavailable until "
+            "then."),
+        tags=["maps", "places", "search", "google", "geospatial"],
+        input_schema=_obj({
+            "query": {"type": "string", "description": "What to find, e.g. 'coffee near the Ferry Building'."},
+            "region_code": {"type": "string", "description": "Optional ISO 3166-1 alpha-2 bias."},
+        }, ["query"]),
+        output_schema=_RESULT,
+        returns="query, result (places found, per Maps Grounding Lite's own shape).",
+        skill="maps.places", max_seconds=40,
+        pricing_basis="Provisional. Maps Grounding Lite's own billing is not yet measured here.",
+        requires=("maps_grounding",)),
+    Worker(
+        name="maps.route", price_usd=0.10, tier="utility",
+        title="Compute a route",
+        description=(
+            "Directions and travel time between two places, via Google's managed "
+            "Maps Grounding Lite MCP server."),
+        tags=["maps", "route", "directions", "google", "geospatial"],
+        input_schema=_obj({
+            "origin": {"type": "string"},
+            "destination": {"type": "string"},
+            "travel_mode": {"type": "string", "description": "DRIVE, WALK, BICYCLE or TRANSIT. Default DRIVE."},
+        }, ["origin", "destination"]),
+        output_schema=_RESULT,
+        returns="origin, destination, travel_mode, result (route, per Maps Grounding Lite's own shape).",
+        skill="maps.route", max_seconds=40,
+        pricing_basis="Provisional. Maps Grounding Lite's own billing is not yet measured here.",
+        requires=("maps_grounding",)),
+    Worker(
+        name="maps.weather", price_usd=0.10, tier="utility",
+        title="Weather at a location",
+        description=(
+            "Current or forecast weather at a named place, via Google's managed "
+            "Maps Grounding Lite MCP server."),
+        tags=["maps", "weather", "forecast", "google", "geospatial"],
+        input_schema=_obj({"location": {"type": "string"}}, ["location"]),
+        output_schema=_RESULT,
+        returns="location, result (weather, per Maps Grounding Lite's own shape).",
+        skill="maps.weather", max_seconds=40,
+        pricing_basis="Provisional. Maps Grounding Lite's own billing is not yet measured here.",
+        requires=("maps_grounding",)),
+    Worker(
+        name="video.generate", price_usd=10.00, tier="premium",
+        title="Generate a video",
+        description=(
+            "Generate a short video from a text prompt using Veo. Off by default: "
+            "enabled only once the operator has confirmed the configured Veo model "
+            "resolves on this project (see the provider module for why)."),
+        tags=["video", "generate", "veo", "media", "visual"],
+        input_schema=_obj({
+            "prompt": {"type": "string"},
+            "aspect_ratio": {"type": "string", "description": "16:9 or 9:16. Default 16:9."},
+            "duration_seconds": {"type": "integer", "description": "4, 6 or 8. Default 6."},
+            "generate_audio": {"type": "boolean", "description": "Default false."},
+        }, ["prompt"]),
+        output_schema=_RESULT,
+        returns="prompt, aspect_ratio, duration_seconds, video_base64 or gcs_uri, mime_type, model.",
+        skill="video.generate", max_seconds=MAX_WORKER_SECONDS,
+        pricing_basis="Provisional. Flat per-second rate once measured; one attempt only (a retry would re-bill the vendor).",
+        requires=("veo",)),
 ]
 
 BY_PATH = {worker.path: worker for worker in CATALOG}
@@ -711,13 +782,25 @@ _EXAMPLE_VALUES = {
     "method": "eth_blockNumber",
     "currency": "USD",
     "slug": "example-prediction-market-slug",
+    "origin": "San Francisco, CA",
+    "destination": "Oakland, CA",
+    "location": "San Francisco, CA",
+}
+
+_EXAMPLE_OVERRIDES = {
+    # llm.generate and image.generate both take a required "prompt", but
+    # sharing one example would make one of the two look like a mistake.
+    "image.generate": {"prompt": "A beehive built from circuit boards, isometric illustration"},
+    "video.generate": {"prompt": "A single bee landing on a circuit-board flower, slow motion"},
 }
 
 
 def example_for(worker: "Worker") -> dict:
     """A request body carrying every required field of this worker."""
     required = worker.input_schema.get("required") or []
-    return {field: _EXAMPLE_VALUES[field] for field in required if field in _EXAMPLE_VALUES}
+    example = {field: _EXAMPLE_VALUES[field] for field in required if field in _EXAMPLE_VALUES}
+    example.update(_EXAMPLE_OVERRIDES.get(worker.name, {}))
+    return example
 
 
 def description_of(path: str) -> Optional[str]:

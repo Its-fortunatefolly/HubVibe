@@ -92,6 +92,13 @@ ROUTES = [
     ("utility", "/work/market/ticker", {"product_id": "BTC-USD"}),
     ("utility", "/work/prediction/events", {"limit": 3}),
     ("utility", "/work/prediction/market", {"slug": None}),
+    # --- wave 2b: fail-closed until the operator enables one Google product -
+    ("utility", "/work/maps/places", {"query": "coffee near the Ferry Building, San Francisco"}),
+    ("utility", "/work/maps/route", {"origin": "San Francisco, CA", "destination": "Oakland, CA"}),
+    ("utility", "/work/maps/weather", {"location": "San Francisco, CA"}),
+    ("premium", "/work/video/generate", {
+        "prompt": "A single bee landing on a circuit-board flower, slow motion",
+        "duration_seconds": 4}),
     ("svc", "/svc/fetch", {"url": "https://example.com"}),
     ("svc", "/svc/extract", {"url": "https://example.com"}),
     ("svc", "/svc/rpc", {"method": "eth_blockNumber"}),
