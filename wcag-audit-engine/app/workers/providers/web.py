@@ -57,6 +57,41 @@ def configure(with_page: Optional[Callable] = None, executor=None,
     _blocked_target_reason = blocked_target_reason
 
 
+async def _get_guarded(url: str):
+    """Follow redirects BY HAND, one hop at a time, checking every hop
+    against the same guard as the first.
+
+    httpx's own follow_redirects would take us wherever the target says to
+    go: a perfectly public URL that answers 302 to http://169.254.169.254/
+    turns a paid fetch into a cloud credential read. Checking only the URL
+    the caller supplied is not a guard, it is a formality. Returns
+    (response, final_url).
+    """
+    current = url
+    response = None
+    for _hop in range(6):
+        problem = target_problem(current)
+        if problem:
+            raise runtime.InvalidRequest(f"`url` {problem}.")
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=False) as client:
+                response = await client.get(current, headers={"User-Agent": USER_AGENT})
+        except httpx.TimeoutException as exc:
+            raise runtime.TransientProviderError(f"{current} timed out: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise runtime.TransientProviderError(f"{current} unreachable: {exc}") from exc
+
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("location")
+            if not location:
+                raise runtime.InvalidProviderResponse(
+                    f"{current} redirected without a destination.")
+            current = str(httpx.URL(current).join(location))
+            continue
+        return response, current
+    raise runtime.InvalidRequest("`url` redirected too many times.")
+
+
 def target_problem(url: str) -> Optional[str]:
     """Why this URL must not be fetched, or None.
 
@@ -174,39 +209,7 @@ class _HttpExtractor:
         return ""
 
     async def extract(self, url: str) -> runtime.ProviderResult:
-        # Redirects are followed BY HAND, one hop at a time, so every hop is
-        # checked against the same guard as the first.
-        #
-        # httpx's own follow_redirects would take us wherever the target says
-        # to go: a perfectly public URL that answers 302 to
-        # http://169.254.169.254/ turns a paid page fetch into a cloud
-        # credential read. Checking only the URL the caller supplied is not a
-        # guard, it is a formality.
-        current = url
-        response = None
-        for _hop in range(6):
-            problem = target_problem(current)
-            if problem:
-                raise runtime.InvalidRequest(f"`url` {problem}.")
-            try:
-                async with httpx.AsyncClient(timeout=_TIMEOUT,
-                                             follow_redirects=False) as client:
-                    response = await client.get(current, headers={"User-Agent": USER_AGENT})
-            except httpx.TimeoutException as exc:
-                raise runtime.TransientProviderError(f"{current} timed out: {exc}") from exc
-            except httpx.HTTPError as exc:
-                raise runtime.TransientProviderError(f"{current} unreachable: {exc}") from exc
-
-            if response.status_code in (301, 302, 303, 307, 308):
-                location = response.headers.get("location")
-                if not location:
-                    raise runtime.InvalidProviderResponse(
-                        f"{current} redirected without a destination.")
-                current = str(httpx.URL(current).join(location))
-                continue
-            break
-        else:
-            raise runtime.InvalidRequest("`url` redirected too many times.")
+        response, current = await _get_guarded(url)
 
         if response.status_code in (429, 500, 502, 503, 504):
             raise runtime.TransientProviderError(f"{url} returned {response.status_code}")
@@ -233,3 +236,48 @@ class _HttpExtractor:
 
 
 PROVIDERS = [_BrowserExtractor(), _HttpExtractor()]
+
+# --- raw fetch: status/headers/body, no extraction, no browser ------------
+#
+# A worker whose whole point is showing the RAW response must never fall
+# back to the browser -- rendering would hide the very thing (redirect
+# chain, status code, actual bytes) a caller paying for raw fetch is asking
+# to see.
+
+_TEXTUAL_TYPES = ("text/", "application/json", "application/xml", "application/xhtml",
+                  "application/javascript", "application/ld+json", "application/rss",
+                  "application/atom")
+MAX_FETCH_TEXT_CHARS = int(os.environ.get("WORKER_MAX_FETCH_CHARS", "500000"))
+
+
+class _RawFetcher:
+    id = "http-fetch-raw"
+
+    def available(self) -> bool:
+        return True
+
+    def unavailable_reason(self) -> str:
+        return ""
+
+    async def fetch(self, url: str) -> runtime.ProviderResult:
+        response, final_url = await _get_guarded(url)
+
+        content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+        textual = any(content_type.startswith(t) for t in _TEXTUAL_TYPES) or not content_type
+        text, truncated = None, False
+        if textual:
+            body = response.text or ""
+            truncated = len(body) > MAX_FETCH_TEXT_CHARS
+            text = body[:MAX_FETCH_TEXT_CHARS]
+
+        return runtime.ProviderResult(
+            value={"url": url, "final_url": final_url, "status": response.status_code,
+                   "content_type": content_type or None, "bytes": len(response.content or b""),
+                   "text": text, "truncated": truncated,
+                   "headers": {k.lower(): v for k, v in response.headers.items()}},
+            # Every status code IS the answer -- a 404 or 500 from the
+            # target is not a failed fetch, it is a completed one.
+            cost_micros=0, cost_measured=True, usage=f"status={response.status_code}")
+
+
+FETCH_PROVIDERS = [_RawFetcher()]

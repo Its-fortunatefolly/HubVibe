@@ -74,6 +74,57 @@ class _CoinbaseMarket:
                    "candles": candles, "count": len(candles)},
             cost_micros=0, cost_measured=True, usage=f"candles={len(candles)}")
 
+    async def rates(self, currency: str) -> runtime.ProviderResult:
+        data = await self._get("/v2/exchange-rates", {"currency": currency})
+        payload = data.get("data") or {}
+        if not payload.get("rates"):
+            raise runtime.InvalidProviderResponse("Coinbase returned no exchange rates.")
+        return runtime.ProviderResult(
+            value={"currency": payload.get("currency") or currency, "rates": payload["rates"]},
+            cost_micros=0, cost_measured=True, usage=f"currency={currency}")
+
+
+class _CoinbaseExchange:
+    """Coinbase's Exchange market-data host -- a different backend from the
+    Advanced Trade API above, which is what makes it a real independent
+    source rather than the same outage twice."""
+
+    id = "coinbase-exchange"
+
+    def available(self) -> bool:
+        return True
+
+    def unavailable_reason(self) -> str:
+        return ""
+
+    async def ticker(self, product_id: str) -> runtime.ProviderResult:
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                response = await client.get(
+                    f"https://api.exchange.coinbase.com/products/{product_id}/ticker",
+                    headers={"User-Agent": USER_AGENT})
+        except httpx.TimeoutException as exc:
+            raise runtime.TransientProviderError(f"Coinbase Exchange timed out: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise runtime.TransientProviderError(f"Coinbase Exchange unreachable: {exc}") from exc
+        if response.status_code in (429, 500, 502, 503, 504):
+            raise runtime.TransientProviderError(f"Coinbase Exchange returned {response.status_code}")
+        if response.status_code == 404:
+            raise runtime.InvalidRequest("Unknown product id (try e.g. BTC-USD, ETH-USD).")
+        if response.status_code >= 400:
+            raise runtime.PermanentProviderError(
+                f"Coinbase Exchange rejected the read ({response.status_code})")
+        data = response.json()
+        if not data.get("price"):
+            raise runtime.InvalidProviderResponse("Coinbase Exchange returned no ticker price.")
+        return runtime.ProviderResult(
+            value={"product_id": product_id, "price": data.get("price"),
+                   "bid": data.get("bid"), "ask": data.get("ask"),
+                   "volume": data.get("volume"), "time": data.get("time")},
+            cost_micros=0, cost_measured=True, usage=f"product={product_id}")
+
 
 PROVIDERS = [_CoinbaseMarket()]
 PROVIDER = PROVIDERS[0]
+RATES_PROVIDERS = [_CoinbaseMarket()]
+TICKER_PROVIDERS = [_CoinbaseExchange()]

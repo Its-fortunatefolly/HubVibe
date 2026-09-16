@@ -568,6 +568,95 @@ CATALOG = [
         skill="security.mcp_inspect", max_seconds=45,
         pricing_basis="Provisional, completed-work tier. Two lightweight requests to the target; provider cost zero.",
         requires=("mcp_probe",)),
+    # --- wave 2a: keyless bees ported from the (now-removed) /svc catalog --
+    Worker(
+        name="fetch.raw", price_usd=0.10, tier="utility",
+        title="Raw HTTP fetch",
+        description=(
+            "Fetch any URL and get back exactly what the server sent: status code, "
+            "headers, and body. Unlike extract.page, every status code is a result, "
+            "not a failure -- a 404 or 500 from the target is delivered as one."),
+        tags=["fetch", "http", "raw", "status", "headers"],
+        input_schema=_URL, output_schema=_RESULT,
+        returns="url, final_url, status, content_type, bytes, text, truncated, headers{}.",
+        skill="fetch.raw", max_seconds=60,
+        pricing_basis="Provisional. Provider cost zero (public HTTP).",
+        requires=("web",)),
+    Worker(
+        name="chain.rpc", price_usd=0.05, tier="utility",
+        title="Base RPC passthrough",
+        description=(
+            "A generic allowlisted read-only JSON-RPC call to Base mainnet: your "
+            "method, your params. A JSON-RPC error (a revert reason, 'block not "
+            "found') comes back as the result, not a failure -- it is the chain's "
+            "own answer to exactly this call."),
+        tags=["base", "blockchain", "rpc", "jsonrpc", "advanced"],
+        input_schema=_obj({
+            "method": {"type": "string", "description": "e.g. eth_call, eth_getLogs."},
+            "params": {"type": "array", "description": "JSON-RPC positional params. Default []."},
+        }, ["method"]),
+        output_schema=_RESULT,
+        returns="method, result or error, endpoint.",
+        skill="chain.rpc", max_seconds=30,
+        pricing_basis="Provisional. Provider cost zero (public RPC).",
+        requires=("base_rpc",)),
+    Worker(
+        name="market.rates", price_usd=0.02, tier="utility",
+        title="Currency exchange rates",
+        description=(
+            "Coinbase's exchange-rate table for one base currency against every "
+            "currency it quotes -- crypto and fiat."),
+        tags=["market", "rates", "currency", "exchange", "coinbase"],
+        input_schema=_obj({"currency": {"type": "string", "description": "e.g. USD, ETH, BTC."}},
+                          ["currency"]),
+        output_schema=_RESULT,
+        returns="currency, rates{}.",
+        skill="market.rates", max_seconds=20,
+        pricing_basis="Provisional. Provider cost zero (public endpoint).",
+        requires=("coinbase_market",)),
+    Worker(
+        name="market.ticker", price_usd=0.02, tier="utility",
+        title="Crypto ticker",
+        description=(
+            "Live bid, ask and volume for one Coinbase product, from an independent "
+            "market-data host to market.quote -- a genuine second source, not the "
+            "same read twice."),
+        tags=["market", "ticker", "bid", "ask", "coinbase"],
+        input_schema=_obj({"product_id": {"type": "string", "description": "e.g. BTC-USD."}},
+                          ["product_id"]),
+        output_schema=_RESULT,
+        returns="product_id, price, bid, ask, volume, time.",
+        skill="market.ticker", max_seconds=20,
+        pricing_basis="Provisional. Provider cost zero (public endpoint).",
+        requires=("coinbase_market",)),
+    Worker(
+        name="prediction.market", price_usd=0.05, tier="utility",
+        title="Prediction market by slug",
+        description=(
+            "One named Polymarket market, looked up by its exact slug, with its "
+            "current implied probabilities."),
+        tags=["prediction", "polymarket", "slug", "market", "odds"],
+        input_schema=_obj({"slug": {"type": "string",
+                                    "description": "The market's Polymarket slug."}},
+                          ["slug"]),
+        output_schema=_RESULT,
+        returns="slug, market{question,implied_probabilities[],...}.",
+        skill="prediction.market", max_seconds=20,
+        pricing_basis="Provisional. Provider cost zero (public API).",
+        requires=("polymarket",)),
+    Worker(
+        name="prediction.events", price_usd=0.05, tier="utility",
+        title="Prediction market events",
+        description=(
+            "Live Polymarket events -- groupings of related markets -- ranked by "
+            "volume."),
+        tags=["prediction", "polymarket", "events", "market", "odds"],
+        input_schema=_obj({"limit": {"type": "integer", "description": "1-50, default 10."}}, []),
+        output_schema=_RESULT,
+        returns="events[{id,title,slug,volume,end_date,market_count}], count.",
+        skill="prediction.events", max_seconds=20,
+        pricing_basis="Provisional. Provider cost zero (public API).",
+        requires=("polymarket",)),
 ]
 
 BY_PATH = {worker.path: worker for worker in CATALOG}
@@ -619,6 +708,9 @@ _EXAMPLE_VALUES = {
     "claims": ["HubVibe sells machine-payable site audits."],
     "sources": ["https://example.com"],
     "company": "Anthropic",
+    "method": "eth_blockNumber",
+    "currency": "USD",
+    "slug": "example-prediction-market-slug",
 }
 
 

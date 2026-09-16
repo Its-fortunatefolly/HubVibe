@@ -107,8 +107,29 @@ async def network_state(ctx, payload: dict) -> dict:
     }
 
 
+async def rpc_passthrough(ctx, payload: dict) -> dict:
+    """A generic allowlisted JSON-RPC read: your method, your params. A
+    JSON-RPC error object (a revert reason, "block not found") comes back
+    as the RESULT, not a failure -- that is the chain's own answer to
+    exactly this call."""
+    method = (payload.get("method") or "").strip()
+    if not method:
+        raise runtime.InvalidRequest("`method` is required.")
+    params = payload.get("params")
+    if params is None:
+        params = []
+    if not isinstance(params, list):
+        raise runtime.InvalidRequest("`params`, when given, must be a list.")
+
+    async def call(provider):
+        return await provider.rpc_raw(method, params)
+
+    return await ctx.run("rpc", base_rpc.PROVIDERS, call, per_attempt_seconds=20)
+
+
 SKILLS = {
     "chain.address": address_report,
     "chain.transaction": transaction,
     "chain.network": network_state,
+    "chain.rpc": rpc_passthrough,
 }

@@ -85,6 +85,13 @@ ROUTES = [
     ("standard", "/work/monitor/snapshot", {"url": "https://example.com"}),
     ("standard", "/work/monitor/check", {"url": "https://example.com"}),
     ("advanced", "/work/security/mcp_inspect", {"url": "https://hubvibe-io.com/mcp"}),
+    # --- wave 2a: keyless bees ported from the (now-removed) /svc catalog ---
+    ("utility", "/work/fetch/raw", {"url": "https://example.com"}),
+    ("utility", "/work/chain/rpc", {"method": "eth_blockNumber", "params": []}),
+    ("utility", "/work/market/rates", {"currency": "USD"}),
+    ("utility", "/work/market/ticker", {"product_id": "BTC-USD"}),
+    ("utility", "/work/prediction/events", {"limit": 3}),
+    ("utility", "/work/prediction/market", {"slug": None}),
     ("svc", "/svc/fetch", {"url": "https://example.com"}),
     ("svc", "/svc/extract", {"url": "https://example.com"}),
     ("svc", "/svc/rpc", {"method": "eth_blockNumber"}),
@@ -123,6 +130,20 @@ def _tiny_wav_base64() -> str:
              struct.pack("<IHHIIHH", 16, 1, 1, rate, byte_rate, block_align, 16) +
              b"data" + struct.pack("<I", len(pcm)))
     return base64.b64encode(header + pcm).decode()
+
+
+def _top_market_slug() -> str:
+    """The slug of Polymarket's current highest-volume active market -- a
+    slug from three weeks ago is as likely to 404 as to still exist."""
+    request = urllib.request.Request(
+        "https://gamma-api.polymarket.com/markets"
+        "?limit=1&active=true&closed=false&order=volume&ascending=false",
+        headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        markets = json.load(response)
+    if not markets or not markets[0].get("slug"):
+        raise RuntimeError("Polymarket returned no active market to seed prediction.market with")
+    return markets[0]["slug"]
 
 
 def _latest_tx_hash():
@@ -192,6 +213,8 @@ def main() -> int:
                 body = {"hash": _latest_tx_hash()}
             if body.get("audio_base64", "") is None:
                 body = {"audio_base64": _tiny_wav_base64()}
+            if body.get("slug", "") is None:
+                body = {"slug": _top_market_slug()}
             price, reason = _quote(session, base, route, body)
             if price is not None and price > MAX_PER_CALL_USD:
                 price, reason = None, "quoted $%.2f, above the $%.2f per-call ceiling" % (
