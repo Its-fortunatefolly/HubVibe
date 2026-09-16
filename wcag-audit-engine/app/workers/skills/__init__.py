@@ -14,8 +14,12 @@ skills -- not by reimplementing them. That is what makes the network compose
 rather than merely coexist.
 """
 
-from . import chain, composites, data, extract, llm, market  # noqa: F401
+from . import (  # noqa: F401
+    chain, code, composites, data, extract, llm, market, media, monitor, search,
+    security, verify,
+)
 
 REGISTRY = {}
-for _module in (extract, llm, chain, market, data, composites):
+for _module in (extract, llm, chain, market, data, composites, search, code,
+                media, security, monitor, verify):
     REGISTRY.update(_module.SKILLS)

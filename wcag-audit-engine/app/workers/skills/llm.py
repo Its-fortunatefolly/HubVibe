@@ -1,7 +1,7 @@
 """Inference workers backed by Gemini on Vertex."""
 
 from .. import runtime
-from ..providers import gemini
+from ..providers import completion, gemini
 
 MAX_INPUT_CHARS = 200_000
 
@@ -87,4 +87,52 @@ async def extract_structured(ctx, payload: dict) -> dict:
     }
 
 
-SKILLS = {"llm.analyze": analyze, "llm.extract": extract_structured}
+async def generate(ctx, payload: dict) -> dict:
+    """Raw text completion: your prompt, your system message, your model
+    choice among what this deployment has configured. Unlike llm.analyze,
+    nothing about the shape of the answer is prescribed."""
+    prompt = payload.get("prompt")
+    if not prompt or not isinstance(prompt, str) or not prompt.strip():
+        raise runtime.InvalidRequest("`prompt` is required.")
+    if len(prompt) > MAX_INPUT_CHARS:
+        raise runtime.InvalidRequest(
+            f"`prompt` is {len(prompt)} characters, over the {MAX_INPUT_CHARS} limit.")
+    system = payload.get("system")
+    if system is not None and (not isinstance(system, str) or len(system) > 2000):
+        raise runtime.InvalidRequest(
+            "`system`, when given, must be a string up to 2000 characters.")
+    try:
+        max_tokens = int(payload.get("max_tokens", 1024))
+    except (TypeError, ValueError):
+        raise runtime.InvalidRequest("`max_tokens` must be a whole number.")
+    if not 1 <= max_tokens <= 4096:
+        raise runtime.InvalidRequest("`max_tokens` must be between 1 and 4096.")
+    try:
+        temperature = float(payload.get("temperature", 0.7))
+    except (TypeError, ValueError):
+        raise runtime.InvalidRequest("`temperature` must be a number.")
+    if not 0 <= temperature <= 2:
+        raise runtime.InvalidRequest("`temperature` must be between 0 and 2.")
+    requested_provider = payload.get("provider")
+    if requested_provider is not None and not isinstance(requested_provider, str):
+        raise runtime.InvalidRequest("`provider`, when given, must be a string.")
+
+    matching = [p for p in completion.PROVIDERS if p.matches(requested_provider)]
+    if not matching:
+        raise runtime.InvalidRequest(
+            "`provider` must be one of: "
+            f"{sorted({p.provider_name for p in completion.PROVIDERS})}.")
+
+    async def call(provider):
+        return await provider.generate(prompt, system, max_tokens, temperature)
+
+    value = await ctx.run("generate", matching, call, per_attempt_seconds=90)
+    return {
+        "text": value["text"], "model": value["model"], "provider": value["provider"],
+        "finish_reason": value.get("finish_reason"),
+        "usage": {"input_tokens": value["prompt_tokens"],
+                  "output_tokens": value["output_tokens"]},
+    }
+
+
+SKILLS = {"llm.analyze": analyze, "llm.extract": extract_structured, "llm.generate": generate}

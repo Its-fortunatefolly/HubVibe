@@ -45,7 +45,8 @@ class JobContext:
     async def run(self, step: str, providers: list, call: Callable,
                   per_attempt_seconds: Optional[float] = None,
                   validate: Optional[Callable] = None,
-                  budget_seconds: Optional[float] = None):
+                  budget_seconds: Optional[float] = None,
+                  max_attempts: Optional[int] = None):
         """Run one step and record it. Returns the step's value."""
         remaining = self.remaining()
         if remaining <= 0:
@@ -57,7 +58,8 @@ class JobContext:
         try:
             execution = await runtime.run_with_policy(
                 providers, call, deadline_seconds=budget,
-                per_attempt_seconds=per_attempt_seconds, validate=validate)
+                per_attempt_seconds=per_attempt_seconds, validate=validate,
+                max_attempts=max_attempts)
         except runtime.WorkerError as exc:
             # Attempts made before the failure still happened, still cost
             # latency, and still belong in the ledger.

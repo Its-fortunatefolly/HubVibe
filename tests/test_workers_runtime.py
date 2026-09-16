@@ -62,6 +62,8 @@ async def _call(provider):
         await asyncio.sleep(30)
     if behaviour == "boom":
         raise RuntimeError("adapter bug")
+    if behaviour == "invalid":
+        raise runtime.InvalidRequest("the caller sent something this cannot use")
     raise AssertionError(behaviour)
 
 
@@ -91,6 +93,29 @@ def test_permanent_failure_is_not_retried_but_does_fall_back():
     assert bad.calls == 1
     assert execution.provider_used == "good"
     assert execution.value == {"from": "good"}
+
+
+def test_invalid_request_is_never_retried_and_never_falls_back():
+    """The CALLER's input is wrong, not the provider's health -- a second
+    provider would refuse the same bad input too, so this must propagate
+    immediately rather than being treated as the generic-exception retry
+    path takes every OTHER unmapped exception through."""
+    bad, good = FakeProvider("bad", "invalid"), FakeProvider("good", "ok")
+    with pytest.raises(runtime.InvalidRequest):
+        asyncio.run(runtime.run_with_policy([bad, good], _call, deadline_seconds=5))
+    assert bad.calls == 1, "must not be retried"
+    assert good.calls == 0, "must not fall back to the next provider"
+
+
+def test_max_attempts_overrides_the_default_when_given():
+    """A retried generative call re-bills the vendor for a second image --
+    image/TTS workers pass max_attempts=1 so a transient failure is refunded
+    to the caller rather than silently regenerated at our own cost."""
+    provider = FakeProvider("a", "transient")
+    with pytest.raises(runtime.WorkerError):
+        asyncio.run(runtime.run_with_policy(
+            [provider], _call, deadline_seconds=5, max_attempts=1))
+    assert provider.calls == 1
 
 
 def test_fallback_reaches_the_second_provider_after_the_first_exhausts_retries():

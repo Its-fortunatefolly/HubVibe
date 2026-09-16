@@ -63,6 +63,28 @@ ROUTES = [
         "url": "https://example.com", "fields": ["purpose", "contact_email"]}),
     ("advanced", "/work/market/intel", {
         "product_id": "BTC-USD", "query": "bitcoin", "limit": 3}),
+    # --- wave 1: bees on live Google credentials -----------------------------
+    ("utility", "/work/search/web", {"query": "x402 payment protocol"}),
+    ("standard", "/work/llm/generate", {"prompt": "In one sentence, what is HubVibe?"}),
+    ("standard", "/work/code/execute", {"code": "print(sum(range(10)))"}),
+    ("standard", "/work/image/generate", {
+        "prompt": "A beehive built from circuit boards, isometric illustration"}),
+    ("standard", "/work/speech/synthesize", {
+        "text": "HubVibe sells machine-payable capabilities."}),
+    ("standard", "/work/speech/transcribe", {"audio_base64": None}),
+    ("premium", "/work/data/forecast", {
+        "table": TEXAS_NAMES, "timestamp_col": "year", "data_col": "number", "horizon": 5}),
+    ("premium", "/work/data/anomalies", {
+        "history_table": TEXAS_NAMES, "target_table": TEXAS_NAMES,
+        "timestamp_col": "year", "data_col": "number"}),
+    ("advanced", "/work/verify/claims", {
+        "claims": ["HubVibe sells machine-payable site audits."],
+        "sources": ["https://example.com"]}),
+    ("advanced", "/work/research/web", {"question": "What is x402?", "max_sources": 2}),
+    ("premium", "/work/research/company", {"company": "Anthropic", "max_sources": 2}),
+    ("standard", "/work/monitor/snapshot", {"url": "https://example.com"}),
+    ("standard", "/work/monitor/check", {"url": "https://example.com"}),
+    ("advanced", "/work/security/mcp_inspect", {"url": "https://hubvibe-io.com/mcp"}),
     ("svc", "/svc/fetch", {"url": "https://example.com"}),
     ("svc", "/svc/extract", {"url": "https://example.com"}),
     ("svc", "/svc/rpc", {"method": "eth_blockNumber"}),
@@ -80,6 +102,27 @@ def select(routes, only):
 def plan_total(priced):
     """Sum of quoted prices for routes that answered a 402, in whole cents."""
     return round(sum(price for _, _, _, price in priced if price is not None), 2)
+
+
+def _tiny_wav_base64() -> str:
+    """A short, genuinely valid PCM WAV (a quarter-second 440Hz tone) so
+    speech.transcribe's real paid call has real audio to decode -- silence
+    or garbage bytes would just fail Speech-to-Text's own validation and
+    list nothing, which is safe but wastes the one paid attempt this script
+    budgets per route."""
+    import base64
+    import math
+    import struct
+
+    rate, seconds, amplitude = 8000, 0.15, 3000
+    samples = [int(amplitude * math.sin(2 * math.pi * 440 * t / rate))
+              for t in range(int(rate * seconds))]
+    pcm = b"".join(struct.pack("<h", s) for s in samples)
+    byte_rate, block_align = rate * 2, 2
+    header = (b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVE" + b"fmt " +
+             struct.pack("<IHHIIHH", 16, 1, 1, rate, byte_rate, block_align, 16) +
+             b"data" + struct.pack("<I", len(pcm)))
+    return base64.b64encode(header + pcm).decode()
 
 
 def _latest_tx_hash():
@@ -147,6 +190,8 @@ def main() -> int:
         for tier, route, body in chosen:
             if body.get("hash", "") is None:
                 body = {"hash": _latest_tx_hash()}
+            if body.get("audio_base64", "") is None:
+                body = {"audio_base64": _tiny_wav_base64()}
             price, reason = _quote(session, base, route, body)
             if price is not None and price > MAX_PER_CALL_USD:
                 price, reason = None, "quoted $%.2f, above the $%.2f per-call ceiling" % (

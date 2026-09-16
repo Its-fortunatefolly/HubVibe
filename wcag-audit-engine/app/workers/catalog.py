@@ -338,6 +338,236 @@ CATALOG = [
         pricing_basis="Provisional, completed-work tier. Three provider calls; usage measured per call.",
         composes=["market.quote", "market.prediction", "llm.analyze"],
         requires=("coinbase_market", "polymarket", "gemini")),
+    # --- wave 1: bees on live Google credentials -----------------------------
+    Worker(
+        name="search.web", price_usd=0.10, tier="utility",
+        title="Web search",
+        description=(
+            "A live web search, answered from current Google Search results with the "
+            "sources it used. Grounded, not the model's own memory."),
+        tags=["search", "web", "google", "grounding", "current"],
+        input_schema=_obj({"query": {"type": "string"}}, ["query"]),
+        output_schema=_RESULT,
+        returns="query, answer, sources[{url,title}], search_queries_used[], model.",
+        skill="search.web", max_seconds=60,
+        pricing_basis="Provisional. Token usage measured; Google's own search-grounding surcharge is not yet measured here.",
+        requires=("search_grounding",)),
+    Worker(
+        name="llm.generate", price_usd=0.25, tier="standard",
+        title="Raw text completion",
+        description=(
+            "A raw completion from a large language model: your prompt, your system "
+            "message, your model choice among what this deployment has configured. "
+            "Unlike llm.analyze, nothing is prescribed about the shape of the answer."),
+        tags=["llm", "generate", "completion", "gemini", "inference"],
+        input_schema=_obj({
+            "prompt": {"type": "string", "description": "The prompt."},
+            "system": {"type": "string", "description": "Optional system message."},
+            "max_tokens": {"type": "integer", "description": "1-4096, default 1024."},
+            "temperature": {"type": "number", "description": "0-2, default 0.7."},
+            "provider": {"type": "string", "description": "Optional: pin a vendor (e.g. gemini)."},
+        }, ["prompt"]),
+        output_schema=_RESULT,
+        returns="text, model, provider, finish_reason, usage{input_tokens,output_tokens}.",
+        skill="llm.generate", max_seconds=120,
+        pricing_basis="Provisional. Token usage measured per call.",
+        requires=("completion",)),
+    Worker(
+        name="code.execute", price_usd=0.25, tier="standard",
+        title="Execute Python",
+        description=(
+            "Run Python code in Google's own hosted sandbox and get the executed code, "
+            "its output, and the outcome back. Not run in this service's own infrastructure."),
+        tags=["code", "execute", "sandbox", "python", "compute"],
+        input_schema=_obj({"code": {"type": "string"}}, ["code"]),
+        output_schema=_RESULT,
+        returns="code, output, outcome, summary, model.",
+        skill="code.execute", max_seconds=90,
+        pricing_basis="Provisional. Token usage measured per call.",
+        requires=("code_exec",)),
+    Worker(
+        name="image.generate", price_usd=0.50, tier="standard",
+        title="Generate an image",
+        description=(
+            "Generate one image from a text prompt using Imagen 4. Returns the image "
+            "as base64-encoded bytes."),
+        tags=["image", "generate", "imagen", "media", "visual"],
+        input_schema=_obj({
+            "prompt": {"type": "string"},
+            "aspect_ratio": {"type": "string",
+                             "description": "1:1, 3:4, 4:3, 16:9 or 9:16. Default 1:1."},
+        }, ["prompt"]),
+        output_schema=_RESULT,
+        returns="prompt, aspect_ratio, image_base64, mime_type, model.",
+        skill="image.generate", max_seconds=100,
+        pricing_basis="Provisional. Flat per-image rate; one attempt only (a retry would re-bill the vendor).",
+        requires=("imagen",)),
+    Worker(
+        name="speech.synthesize", price_usd=0.25, tier="standard",
+        title="Text to speech",
+        description=("Convert text to spoken audio (MP3) using Google Cloud Text-to-Speech."),
+        tags=["speech", "tts", "voice", "audio", "media"],
+        input_schema=_obj({
+            "text": {"type": "string"},
+            "voice": {"type": "string", "description": "e.g. en-US-Standard-C. Optional."},
+        }, ["text"]),
+        output_schema=_RESULT,
+        returns="text_chars, voice, audio_base64, mime_type.",
+        skill="speech.synthesize", max_seconds=60,
+        pricing_basis="Provisional. Priced per character by voice tier; one attempt only.",
+        requires=("tts",)),
+    Worker(
+        name="speech.transcribe", price_usd=0.25, tier="standard",
+        title="Speech to text",
+        description=(
+            "Transcribe up to 60 seconds / 10MB of audio using Google Cloud "
+            "Speech-to-Text. Longer audio is refused before payment; this is the "
+            "synchronous API only."),
+        tags=["speech", "stt", "transcribe", "audio", "media"],
+        input_schema=_obj({
+            "audio_base64": {"type": "string",
+                             "description": "Base64-encoded audio, any common format."},
+            "language_code": {"type": "string", "description": "BCP-47, default en-US."},
+        }, ["audio_base64"]),
+        output_schema=_RESULT,
+        returns="transcript, language_code, confidence, model.",
+        skill="speech.transcribe", max_seconds=75,
+        pricing_basis="Provisional. Cost per minute not yet measured (duration is not reported by the sync API).",
+        requires=("stt",)),
+    Worker(
+        name="data.forecast", price_usd=10.00, tier="premium",
+        title="Forecast a time series",
+        description=(
+            "Forecast a time series in a BigQuery table with Google's pretrained "
+            "TimesFM model (AI.FORECAST) -- no model to train. Point it at the table "
+            "and the timestamp/value columns."),
+        tags=["bigquery", "forecast", "timeseries", "timesfm", "data"],
+        input_schema=_obj({
+            "table": {"type": "string", "description": "project.dataset.table"},
+            "timestamp_col": {"type": "string"},
+            "data_col": {"type": "string"},
+            "horizon": {"type": "integer", "description": "Periods to forecast, default 10."},
+            "id_cols": {"type": "array", "items": {"type": "string"},
+                       "description": "Optional: forecast multiple series at once."},
+            "max_scan_gib": {"type": "number"},
+        }, ["table", "timestamp_col", "data_col"]),
+        output_schema=_RESULT,
+        returns="table, timestamp_col, data_col, horizon, columns[], rows[], row_count, gib_processed.",
+        skill="data.forecast", max_seconds=200,
+        pricing_basis="Provisional, completed-work tier. Bytes scanned measured per call.",
+        requires=("bigquery",)),
+    Worker(
+        name="data.anomalies", price_usd=10.00, tier="premium",
+        title="Detect anomalies in a time series",
+        description=(
+            "Detect anomalies in a target table's time series against a history "
+            "table, using AI.DETECT_ANOMALIES (TimesFM). Both tables share the same "
+            "timestamp and value column names."),
+        tags=["bigquery", "anomaly", "timeseries", "timesfm", "data"],
+        input_schema=_obj({
+            "history_table": {"type": "string", "description": "project.dataset.table"},
+            "target_table": {"type": "string", "description": "project.dataset.table"},
+            "timestamp_col": {"type": "string"},
+            "data_col": {"type": "string"},
+            "anomaly_prob_threshold": {"type": "number",
+                                       "description": "0.5-0.999, default 0.95."},
+            "max_scan_gib": {"type": "number"},
+        }, ["history_table", "target_table", "timestamp_col", "data_col"]),
+        output_schema=_RESULT,
+        returns="history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, columns[], rows[], row_count, gib_processed.",
+        skill="data.anomalies", max_seconds=200,
+        pricing_basis="Provisional, completed-work tier. Bytes scanned measured per call.",
+        requires=("bigquery",)),
+    Worker(
+        name="verify.claims", price_usd=5.00, tier="advanced",
+        title="Verify claims against sources",
+        description=(
+            "Check up to 10 specific claims against up to 4 specific source URLs. "
+            "Each claim comes back SUPPORTED, CONTRADICTED or UNSUPPORTED, with the "
+            "quote the verdict is based on."),
+        tags=["verify", "fact-check", "claims", "sources", "research"],
+        input_schema=_obj({
+            "claims": {"type": "array", "items": {"type": "string"}},
+            "sources": {"type": "array", "items": {"type": "string"}},
+        }, ["claims", "sources"]),
+        output_schema=_RESULT,
+        returns="claims[], verdicts[{claim,verdict,quote,source_n}], sources_read[], sources_unread[], model.",
+        skill="verify.claims", max_seconds=200,
+        pricing_basis="Provisional, completed-work tier. Up to five provider calls; usage measured per call.",
+        composes=["extract.page"],
+        requires=("web", "gemini")),
+    Worker(
+        name="research.web", price_usd=5.00, tier="advanced",
+        title="Research brief from live web search",
+        description=(
+            "Answer a question from a live web search: search, read the top sources, "
+            "and get a cited answer with every claim tied to [n] source numbers."),
+        tags=["research", "search", "web", "citations", "brief"],
+        input_schema=_obj({
+            "question": {"type": "string"},
+            "max_sources": {"type": "integer", "description": "1-4, default 3."},
+        }, ["question"]),
+        output_schema=_RESULT,
+        returns="question, answer, sources[{n,url,title}], partial[], model.",
+        skill="research.web", max_seconds=220,
+        pricing_basis="Provisional, completed-work tier. Up to five provider calls; usage measured per call.",
+        composes=["search.web", "extract.page", "llm.analyze"],
+        requires=("search_grounding", "web", "gemini")),
+    Worker(
+        name="research.company", price_usd=10.00, tier="premium",
+        title="Research and verify a company",
+        description=(
+            "A research brief on a company from live web sources: what it does, its "
+            "products, and anything notable, cited to [n] source numbers, with thin "
+            "or conflicting evidence disclosed rather than papered over."),
+        tags=["research", "company", "kyb", "business-intelligence", "verification"],
+        input_schema=_obj({
+            "company": {"type": "string"},
+            "max_sources": {"type": "integer", "description": "1-4, default 4."},
+        }, ["company"]),
+        output_schema=_RESULT,
+        returns="company, report, sources[{n,url,title}], partial[], model.",
+        skill="research.company", max_seconds=220,
+        pricing_basis="Provisional, completed-work tier. Up to six provider calls; usage measured per call.",
+        composes=["search.web", "extract.page", "llm.analyze"],
+        requires=("search_grounding", "web", "gemini")),
+    Worker(
+        name="monitor.snapshot", price_usd=0.50, tier="standard",
+        title="Save a monitoring baseline",
+        description=(
+            "Fetch a page and save it as the baseline for monitor.check. Call this "
+            "once, then monitor.check later to see what changed."),
+        tags=["monitor", "baseline", "change-detection", "web"],
+        input_schema=_URL, output_schema=_RESULT,
+        returns="url, title, text_chars, content_hash, note.",
+        skill="monitor.snapshot", max_seconds=90,
+        pricing_basis="Provisional. Runs on our own flat-rate browser; marginal provider cost near zero.",
+        requires=("web",)),
+    Worker(
+        name="monitor.check", price_usd=0.50, tier="standard",
+        title="Check a page against its baseline",
+        description=(
+            "Re-fetch a page monitor.snapshot was called on, and get back whether it "
+            "changed and a summary of what changed."),
+        tags=["monitor", "change-detection", "diff", "web"],
+        input_schema=_URL, output_schema=_RESULT,
+        returns="url, title, changed, baseline_age_seconds, change_summary, model.",
+        skill="monitor.check", max_seconds=150,
+        pricing_basis="Provisional. Browser fetch plus one inference call when something changed; usage measured.",
+        requires=("web", "gemini")),
+    Worker(
+        name="security.mcp_inspect", price_usd=5.00, tier="advanced",
+        title="Inspect an MCP endpoint",
+        description=(
+            "Probe a customer-specified MCP server's initialize handshake and "
+            "tools/list: whether it requires authentication, what protocol version "
+            "it speaks, and which of its tools are not marked read-only."),
+        tags=["security", "mcp", "audit", "inspect", "tools"],
+        input_schema=_URL, output_schema=_RESULT,
+        returns="reachable, requires_auth, protocol_version, tool_count, tools[], tools_without_readonly_annotation[].",
+        skill="security.mcp_inspect", max_seconds=45,
+        pricing_basis="Provisional, completed-work tier. Two lightweight requests to the target; provider cost zero.",
+        requires=("mcp_probe",)),
 ]
 
 BY_PATH = {worker.path: worker for worker in CATALOG}
@@ -378,6 +608,17 @@ _EXAMPLE_VALUES = {
             "`bigquery-public-data.usa_names.usa_1910_2013` "
             "GROUP BY name ORDER BY n DESC LIMIT 5"),
     "table": "bigquery-public-data.usa_names.usa_1910_2013",
+    "history_table": "bigquery-public-data.usa_names.usa_1910_2013",
+    "target_table": "bigquery-public-data.usa_names.usa_1910_2013",
+    "timestamp_col": "year",
+    "data_col": "number",
+    "query": "x402 payment protocol",
+    "code": "print(sum(range(10)))",
+    "prompt": "A beehive built from circuit boards, isometric illustration",
+    "audio_base64": "aGVsbG8=",
+    "claims": ["HubVibe sells machine-payable site audits."],
+    "sources": ["https://example.com"],
+    "company": "Anthropic",
 }
 
 
