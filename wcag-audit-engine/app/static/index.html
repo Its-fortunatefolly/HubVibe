@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HubVibe — machine-payable site audits for AI agents</title>
-<meta name="description" content="Machine-payable site compliance audits: accessibility, SEO, security headers, performance. Software pays per call over HTTP 402 -- no account, no subscription.">
+<title>HubVibe — machine-payable services for AI agents</title>
+<meta name="description" content="A machine-service gateway for autonomous agents: site compliance audits, LLM inference, web search and extraction, blockchain and market data, media generation, sandboxed compute. Software pays per call over HTTP 402 -- no account, no subscription.">
 <link rel="canonical" href="https://hubvibe-io.com/">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="theme-color" content="#000000">
@@ -32,16 +32,16 @@
 <meta name="base:app_id" content="6a83832901463168d7e651ca" />
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HubVibe">
-<meta property="og:title" content="HubVibe — machine-payable site audits for AI agents">
-<meta property="og:description" content="A metered API for site compliance audits, paid machine-to-machine over HTTP 402. Deterministic checks, never an LLM guess.">
+<meta property="og:title" content="HubVibe — machine-payable services for AI agents">
+<meta property="og:description" content="A machine-service gateway: audits, AI inference, search, extraction, chain and market data, media, compute -- paid machine-to-machine over HTTP 402.">
 <meta property="og:url" content="https://hubvibe-io.com/">
 <meta property="og:image" content="https://hubvibe-io.com/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="HubVibe — machine-payable site audits: accessibility, SEO, security, performance.">
+<meta property="og:image:alt" content="HubVibe — machine-payable services: audits, AI, search, blockchain, market data, media, compute.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="HubVibe — machine-payable site audits for AI agents">
-<meta name="twitter:description" content="A metered API for site compliance audits, paid machine-to-machine over HTTP 402.">
+<meta name="twitter:title" content="HubVibe — machine-payable services for AI agents">
+<meta name="twitter:description" content="A machine-service gateway for autonomous agents, paid machine-to-machine over HTTP 402.">
 <meta name="twitter:image" content="https://hubvibe-io.com/og-image.png">
 <script type="application/ld+json">
 {
@@ -51,12 +51,19 @@
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Any",
   "url": "https://hubvibe-io.com/",
-  "description": "Metered API for site compliance audits: accessibility (axe-core), SEO, security headers, and performance. Machine-payable per call over HTTP 402.",
+  "description": "Machine-service gateway for autonomous agents: site compliance audits, LLM inference, web search and extraction, blockchain and market data, prediction-market data, media generation and sandboxed compute. Machine-payable per call over HTTP 402.",
   "featureList": [
     "WCAG 2.1 A/AA accessibility audit via axe-core",
     "SEO structure and metadata audit",
     "Security response-header audit",
     "Performance measurement from a real page load",
+    "LLM inference (Claude, Gemini, OpenAI) with failover",
+    "Web search, fetch and content extraction",
+    "Read-only blockchain RPC on Base",
+    "Market and prediction-market data",
+    "Image and voice generation",
+    "Sandboxed code execution",
+    "Composite research jobs with cited sources",
     "HTTP 402 machine payments, no account required"
   ],
   "provider": {"@type": "Organization", "name": "HubVibe", "url": "https://hubvibe-io.com/"}
@@ -284,6 +291,7 @@
     </a>
     <div class="nav-links">
       <a href="#protocol" class="hide-sm">Protocol</a>
+      <a href="#capabilities">Capabilities</a>
       <a href="#audits">Audits</a>
       <a href="#pricing">Pricing</a>
       <a href="/docs">API</a>
@@ -291,14 +299,15 @@
   </nav>
 
   <header>
-    <p class="eyebrow">Agent-to-agent infrastructure</p>
-    <h1>Site audits your software can buy on its own.</h1>
+    <p class="eyebrow">Machine-economy infrastructure</p>
+    <h1>Services your software can buy on its own.</h1>
     <p class="lede">
-      HubVibe is a metered API for site compliance. An agent calls an endpoint,
-      gets an HTTP 402 with the price and how to pay, settles it, and receives a
-      result — <strong>no account, no sales call, no human in the loop</strong>.
-      Every check is a deterministic rule run against the live page, never a
-      language model's opinion.
+      HubVibe is a gateway where autonomous agents discover, use and pay for
+      machine services — compliance audits, AI inference, search and
+      extraction, on-chain and market data, media, compute. An agent calls an
+      endpoint, gets an HTTP 402 with the price and how to pay, settles it,
+      and receives a result — <strong>no account, no sales call, no human in
+      the loop</strong>.
     </p>
     <div class="cta-row">
       <a class="btn btn-primary" href="/.well-known/agent.json">Read the machine manifest</a>
@@ -333,8 +342,63 @@
     </div>
   </section>
 
+  <section id="capabilities">
+    <h2>What agents can buy here</h2>
+    <p class="section-lead">One gateway, one payment flow, a growing repertoire of machine services.</p>
+    <div class="audits">
+      <div class="audit">
+        <h3>AI models</h3>
+        <p>LLM inference routed across Claude, Gemini and OpenAI with automatic failover — the exact model that ran comes back with measured token usage.</p>
+        <div class="route">POST /svc/llm</div>
+      </div>
+      <div class="audit">
+        <h3>Search &amp; research</h3>
+        <p>Web search, guarded page fetch, structured content extraction — and a composite research job that returns one cited answer.</p>
+        <div class="route">POST /svc/search · /svc/fetch · /svc/extract · /svc/research</div>
+      </div>
+      <div class="audit">
+        <h3>Compute</h3>
+        <p>Sandboxed code execution with hard resource limits, a clean environment and disclosed isolation — on deployments that enable it.</p>
+        <div class="route">POST /svc/code</div>
+      </div>
+      <div class="audit">
+        <h3>Blockchain</h3>
+        <p>Read-only JSON-RPC against Base mainnet: balances, blocks, transactions, receipts, logs, contract calls. No broadcasting, by design.</p>
+        <div class="route">POST /svc/rpc</div>
+      </div>
+      <div class="audit">
+        <h3>Market intelligence</h3>
+        <p>Live spot prices, exchange-rate tables and tickers from public Coinbase data — plus prediction-market questions, prices and volumes.</p>
+        <div class="route">POST /svc/market · /svc/prediction</div>
+      </div>
+      <div class="audit">
+        <h3>Media</h3>
+        <p>Image generation and voice synthesis from a text prompt, delivered in the response itself — the only channel a per-call payer needs.</p>
+        <div class="route">POST /svc/image · /svc/tts</div>
+      </div>
+      <div class="audit">
+        <h3>Site audits</h3>
+        <p>The original product: deterministic accessibility, SEO, security-header and performance checks against the live page.</p>
+        <div class="route">POST /audit/*</div>
+      </div>
+      <div class="audit">
+        <h3>Agent network</h3>
+        <p>MCP · A2A · HTTP 402 · USDC · BASE. Discovery via the agent manifest, a live MCP endpoint, and payment challenges that carry the catalog.</p>
+        <div class="route">POST /mcp · GET /.well-known/agent.json</div>
+      </div>
+    </div>
+    <p class="footnote">
+      Which capabilities are live on a given node is deployment state, not a
+      promise: the <a href="/.well-known/agent.json">agent manifest</a> lists
+      exactly what this node sells right now, and
+      <a href="/svc/health">/svc/health</a> reports per-provider availability
+      for free. A capability without a configured provider is omitted, never
+      advertised broken.
+    </p>
+  </section>
+
   <section id="audits">
-    <h2>What it checks</h2>
+    <h2>The audit suite</h2>
     <p class="section-lead">Four dimensions. Run one, or run all four in a single billed call.</p>
     <div class="audits">
       <div class="audit">
@@ -442,7 +506,7 @@
       </svg>
       <span class="brand-name" style="color:var(--dim);">HUBVIBE</span>
     </div>
-    HubVibe — machine-payable site compliance auditing.
+    HubVibe — machine-payable services for autonomous agents.
     <a href="/docs">API reference</a> ·
     <a href="/.well-known/agent.json">Agent manifest</a> ·
     <a href="https://github.com/its-fortunatefolly/hubvibe" target="_blank" rel="noopener">Source</a>

@@ -45,12 +45,35 @@ node is in [`deploy/vps/README.md`](../deploy/vps/README.md).
 - Republish the MCP registry entry: bump `version` in `server.json` and merge;
   the "Publish MCP registry entry" workflow does the rest with OIDC.
 
+## Machine services (/svc/*)
+
+- The service catalog lives in `wcag-audit-engine/app/services.py`; the
+  providers in `service_providers.py`. Same payment gate as the audits,
+  no second payment path.
+- With `.env` untouched, the keyless services are live (fetch, extract,
+  rpc, market, prediction). Keys switch on the rest: `ANTHROPIC_API_KEY` /
+  `GEMINI_API_KEY` / `OPENAI_API_KEY` (llm; the latter two also image+tts),
+  `BRAVE_SEARCH_API_KEY` / `SERPER_API_KEY` (search; search+llm together
+  enable research), `SVC_CODE_EXEC=1` (sandboxed code). `SVC_DISABLED=all`
+  restores the audit-only surface exactly; restart the container after any
+  of these change.
+- The usage/margin ledger is SQLite beside the key store
+  (`/data/hubvibe-services.db` on the box). Read it from anywhere:
+  `curl -H "X-API-Key: $AUDIT_API_KEY" https://hubvibe-io.com/svc/metrics`
+  — per service and provider: calls, success rate, latency, revenue,
+  estimated provider cost, margin. `GET /svc/health` is the free
+  availability/circuit view.
+- After enabling a new capability, re-seed the Bazaar indexes
+  (`refresh-listings.sh`) so agents can find it by capability.
+
 ## Settled decisions
 
 - Software-to-software only. No signup, no plans, no checkout, no free scan.
   The website is an about-page, not a product surface.
-- The price lives in one place, `_CATALOG` in `wcag-audit-engine/app/main.py`;
-  the 402, the agent card, the MCP tools and the Bazaar records derive from it.
+- The price lives in one place per catalog: `_CATALOG` in
+  `wcag-audit-engine/app/main.py` for the audits, `CATALOG` in
+  `wcag-audit-engine/app/services.py` for the machine services; the 402,
+  the agent card, the MCP tools and the Bazaar records derive from them.
   After a price or description change, every index must be re-paid to show it.
 - Never advertise a rail that cannot settle: everything fails closed and
   omits what is not configured.

@@ -111,7 +111,13 @@ def test_mcp_json_served_and_matches_repo_manifest(monkeypatch):
     assert "application/json" in response.headers["content-type"]
     body = response.json()
     tool_names = {tool["name"] for tool in body["tools"]}
-    assert tool_names == {"audit_wcag", "audit_seo", "audit_security", "audit_performance", "audit_bundle"}
+    # The audit tools come from the static file; live machine-service tools
+    # are appended at serve time (deployment state the file cannot know).
+    # Still an exact pin: any tool served that neither source explains, or
+    # missing from either, fails here.
+    expected = {"audit_wcag", "audit_seo", "audit_security", "audit_performance", "audit_bundle"}
+    expected |= {tool["name"] for tool in module.services.mcp_tools()}
+    assert tool_names == expected
 
 
 def test_mcp_json_never_advertises_a_rail_that_cannot_settle(monkeypatch):
@@ -164,6 +170,11 @@ def test_mcp_json_prices_come_from_the_catalog(monkeypatch):
     body = TestClient(module.app).get("/mcp.json").json()
 
     catalog = {entry["path"]: entry["price_usd"] for entry in module._CATALOG}
+    # Service routes obey the same rule from their own single source of
+    # truth: the services catalog is the only place their prices live.
+    catalog.update(
+        {spec["path"]: spec["price_usd"] for spec in module.services.catalog()}
+    )
     served = {
         tool["httpEndpoint"]["path"]: tool["httpEndpoint"]["price_usd"]
         for tool in body["tools"]
@@ -2290,9 +2301,10 @@ def test_mcp_tools_list_is_free_and_complete(monkeypatch):
 
     tools = _rpc(client, "tools/list").json()["result"]["tools"]
     names = {t["name"] for t in tools}
-    assert names == {
+    expected = {
         "audit_wcag", "audit_seo", "audit_security", "audit_performance", "audit_bundle"
-    }
+    } | {t["name"] for t in module.services.mcp_tools()}
+    assert names == expected
     for t in tools:
         assert t["inputSchema"]["type"] == "object"
         assert "$" in t["description"], "tool description must state its price"
@@ -2317,12 +2329,19 @@ def test_mcp_tool_schemas_never_admit_an_empty_call(monkeypatch):
     client = TestClient(module.app)
     tools = _rpc(client, "tools/list").json()["result"]["tools"]
 
+    service_examples = {
+        spec["mcp_name"]: spec["input_example"]
+        for spec in module.services.catalog()
+    }
     for t in tools:
         schema = t["inputSchema"]
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({}, schema)
-        # And the arguments the route genuinely accepts must stay legal.
-        jsonschema.validate({"url": "https://example.com"}, schema)
+        # And the arguments the route genuinely accepts must stay legal --
+        # each tool's own advertised example, which for every audit tool is
+        # the bare-url body.
+        example = service_examples.get(t["name"], {"url": "https://example.com"})
+        jsonschema.validate(example, schema)
 
 
 def test_mcp_tool_call_without_payment_is_an_error_result_not_a_crash(monkeypatch):
@@ -2514,18 +2533,31 @@ def test_every_mcp_tool_declares_what_comes_back_not_just_what_goes_in(monkeypat
     response is a shape its pipeline can consume."""
     module = _load_main(monkeypatch)
 
+    service_names = {tool["name"] for tool in module.services.mcp_tools()}
     for tool in module._mcp_tools():
         assert tool["outputSchema"]["type"] == "object", tool["name"]
+        assert tool["title"], tool["name"]
+        annotations = tool["annotations"]
+        assert annotations["destructiveHint"] is False, tool["name"]
+        assert isinstance(annotations["readOnlyHint"], bool), tool["name"]
+        assert isinstance(annotations["idempotentHint"], bool), tool["name"]
+        assert isinstance(annotations["openWorldHint"], bool), tool["name"]
+        if tool["name"] in service_names:
+            # Services declare their own branch fields; what matters is that
+            # a caller can validate the response shape before paying. Their
+            # hints differ honestly -- a generative tool must NOT claim
+            # idempotence just because the audits could.
+            assert tool["outputSchema"].get("required"), (
+                f"{tool['name']} declares no required response fields"
+            )
+            continue
         assert "pass" in tool["outputSchema"]["properties"], (
             f"{tool['name']} must declare the field callers branch on"
         )
         assert tool["outputSchema"]["required"] == ["pass"]
-        assert tool["title"], tool["name"]
         # Audits read a third-party page and mutate nothing. An orchestrator
         # uses these to decide whether it may retry or parallelise unattended.
-        annotations = tool["annotations"]
         assert annotations["readOnlyHint"] is True, tool["name"]
-        assert annotations["destructiveHint"] is False, tool["name"]
         assert annotations["idempotentHint"] is True, tool["name"]
         assert annotations["openWorldHint"] is True, tool["name"]
 
@@ -2559,7 +2591,18 @@ def test_the_static_mcp_manifest_on_disk_matches_what_is_served(monkeypatch):
         (REPO_ROOT / "wcag-audit-engine" / "app" / "static" / "mcp.json").read_text()
     )
     on_disk = {tool["name"]: tool for tool in static["tools"]}
+    service_names = {tool["name"] for tool in module.services.mcp_tools()}
     for tool in module._mcp_tools():
+        if tool["name"] in service_names:
+            # Service tools are deployment state -- which are live depends on
+            # what a node has configured -- so the raw file deliberately does
+            # not list them (the /mcp.json route appends the live ones).
+            # Listing one here would be the file asserting availability it
+            # cannot know, the exact fault this test exists to prevent.
+            assert tool["name"] not in on_disk, (
+                f"static mcp.json must not pin deployment-dependent tool {tool['name']}"
+            )
+            continue
         for field in ("title", "inputSchema", "outputSchema", "annotations"):
             assert on_disk[tool["name"]][field] == tool[field], (
                 f"static mcp.json {tool['name']}.{field} is stale -- "
@@ -2577,13 +2620,14 @@ def test_agent_manifest_publishes_parseable_schemas_not_only_prose(monkeypatch):
 
     endpoints = client.get("/.well-known/agent.json").json()["endpoints"]
     assert endpoints, "manifest advertises no endpoints"
+    # Same objects the MCP tools advertise -- one contract, not three.
+    advertised = [tool["inputSchema"] for tool in module._mcp_tools()]
     for endpoint in endpoints:
         schema = endpoint["input_schema"]
         assert schema["type"] == "object", endpoint["path"]
         assert "properties" in schema, endpoint["path"]
         assert endpoint["output_schema"]["type"] == "object", endpoint["path"]
-        # Same objects the MCP tools advertise -- one contract, not three.
-        assert schema in (module._MCP_URL_SCHEMA, module._MCP_HTML_OR_URL_SCHEMA), (
+        assert schema in advertised, (
             f"{endpoint['path']} publishes a schema no tool advertises"
         )
 

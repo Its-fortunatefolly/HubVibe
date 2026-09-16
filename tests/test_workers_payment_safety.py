@@ -44,6 +44,8 @@ W = _load_workers()
 @pytest.fixture
 def app_module(monkeypatch, tmp_path):
     """A fresh app with x402 configured and the ledger pointed at tmp."""
+    global W
+    W = _load_workers()
     monkeypatch.setenv("AUDIT_API_KEY", "test-key")
     monkeypatch.setenv("X402_FACILITATOR_URL", "https://facilitator.example")
     monkeypatch.setenv("X402_PAY_TO_ADDRESS", TEST_PAY_TO)
@@ -54,6 +56,8 @@ def app_module(monkeypatch, tmp_path):
     spec = importlib.util.spec_from_file_location("wcag_audit_main_workers", MAIN_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if getattr(module, "workers", None) is not None:
+        W = module.workers
     monkeypatch.setattr(module.x402_payments, "_facilitator_supports",
                         lambda version, network: True)
 
@@ -357,9 +361,10 @@ def test_a_worker_cannot_change_what_an_audit_charges(app_module, monkeypatch):
 
 def test_the_manifest_keeps_workers_out_of_the_audit_endpoint_list(client):
     manifest = client.get("/.well-known/agent.json").json()
-    audit_paths = {entry["path"] for entry in manifest["endpoints"]}
-    assert audit_paths == {"/audit/wcag", "/audit/seo", "/audit/security",
-                           "/audit/performance", "/audit/bundle", "/audit"}
+    endpoint_paths = {entry["path"] for entry in manifest["endpoints"]}
+    assert {"/audit/wcag", "/audit/seo", "/audit/security",
+            "/audit/performance", "/audit/bundle", "/audit"} <= endpoint_paths
+    assert not {path for path in endpoint_paths if path.startswith("/work/")}
     assert manifest["workers"]["available"] is True
     assert manifest["workers"]["count"] == len(W.catalog.live())
 
