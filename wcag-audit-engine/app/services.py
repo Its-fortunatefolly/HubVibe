@@ -1127,6 +1127,13 @@ _RESEARCH_OUTPUT_SCHEMA = {
 # plumbing settles -- with the input caps above keeping the worst-case
 # provider cost under the price. The margin ledger verifies that claim with
 # measurements instead of leaving it asserted.
+#
+# Each price is the worker network's (workers/catalog.py) for the same kind
+# of work, so one capability never carries two prices on this node: chain
+# reads $0.05 like chain.address, spot quotes $0.02 like market.quote,
+# prediction data $0.05, page reads $0.10 like extract.page, inference $0.25
+# like llm.analyze, research $5.00 like research.brief. The audits keep their
+# own prices in _CATALOG and are not affected by anything here.
 # --------------------------------------------------------------------------
 
 _READ_ANNOTATIONS = {
@@ -1144,7 +1151,7 @@ _CODE_ANNOTATIONS = {
 
 CATALOG = [
     {
-        "id": "llm", "path": "/svc/llm", "price_usd": 0.02,
+        "id": "llm", "path": "/svc/llm", "price_usd": 0.25,
         "mcp_name": "llm_generate", "title": "LLM inference (Claude / Gemini / OpenAI)",
         "category": "ai",
         "description": (
@@ -1164,7 +1171,7 @@ CATALOG = [
         "deadline_seconds": 50, "deliver_note": None,
     },
     {
-        "id": "search", "path": "/svc/search", "price_usd": 0.02,
+        "id": "search", "path": "/svc/search", "price_usd": 0.10,
         "mcp_name": "web_search", "title": "Web search",
         "category": "research",
         "description": (
@@ -1182,7 +1189,7 @@ CATALOG = [
         "deadline_seconds": 30, "deliver_note": None,
     },
     {
-        "id": "fetch", "path": "/svc/fetch", "price_usd": 0.01,
+        "id": "fetch", "path": "/svc/fetch", "price_usd": 0.10,
         "mcp_name": "web_fetch", "title": "Web fetch",
         "category": "research",
         "description": (
@@ -1201,7 +1208,7 @@ CATALOG = [
         "deadline_seconds": 30, "deliver_note": None,
     },
     {
-        "id": "extract", "path": "/svc/extract", "price_usd": 0.01,
+        "id": "extract", "path": "/svc/extract", "price_usd": 0.10,
         "mcp_name": "web_extract", "title": "Web content extraction",
         "category": "research",
         "description": (
@@ -1221,7 +1228,7 @@ CATALOG = [
         "deadline_seconds": 30, "deliver_note": None,
     },
     {
-        "id": "rpc", "path": "/svc/rpc", "price_usd": 0.01,
+        "id": "rpc", "path": "/svc/rpc", "price_usd": 0.05,
         "mcp_name": "chain_rpc", "title": "Blockchain RPC (Base, read-only)",
         "category": "blockchain",
         "description": (
@@ -1242,7 +1249,7 @@ CATALOG = [
         "deadline_seconds": 30, "deliver_note": None,
     },
     {
-        "id": "market", "path": "/svc/market", "price_usd": 0.01,
+        "id": "market", "path": "/svc/market", "price_usd": 0.02,
         "mcp_name": "market_data", "title": "Market data (crypto/fiat)",
         "category": "financial",
         "description": (
@@ -1261,7 +1268,7 @@ CATALOG = [
         "deadline_seconds": 25, "deliver_note": None,
     },
     {
-        "id": "prediction", "path": "/svc/prediction", "price_usd": 0.01,
+        "id": "prediction", "path": "/svc/prediction", "price_usd": 0.05,
         "mcp_name": "prediction_markets", "title": "Prediction-market data",
         "category": "financial",
         "description": (
@@ -1280,7 +1287,7 @@ CATALOG = [
         "deadline_seconds": 25, "deliver_note": None,
     },
     {
-        "id": "image", "path": "/svc/image", "price_usd": 0.10,
+        "id": "image", "path": "/svc/image", "price_usd": 0.50,
         "mcp_name": "image_generate", "title": "Image generation",
         "category": "media",
         "description": (
@@ -1299,7 +1306,7 @@ CATALOG = [
         "deadline_seconds": 90, "deliver_note": None,
     },
     {
-        "id": "tts", "path": "/svc/tts", "price_usd": 0.05,
+        "id": "tts", "path": "/svc/tts", "price_usd": 0.25,
         "mcp_name": "speech_synthesize", "title": "Voice synthesis (text-to-speech)",
         "category": "media",
         "description": (
@@ -1317,7 +1324,7 @@ CATALOG = [
         "deadline_seconds": 60, "deliver_note": None,
     },
     {
-        "id": "code", "path": "/svc/code", "price_usd": 0.03,
+        "id": "code", "path": "/svc/code", "price_usd": 0.10,
         "mcp_name": "code_execute", "title": "Sandboxed code execution",
         "category": "compute",
         "description": (
@@ -1338,7 +1345,7 @@ CATALOG = [
         "deadline_seconds": 20, "deliver_note": None,
     },
     {
-        "id": "research", "path": "/svc/research", "price_usd": 0.25,
+        "id": "research", "path": "/svc/research", "price_usd": 5.00,
         "mcp_name": "web_research", "title": "Research job (search + read + synthesize)",
         "category": "research",
         "description": (
