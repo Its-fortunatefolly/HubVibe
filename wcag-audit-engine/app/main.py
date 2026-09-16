@@ -1944,7 +1944,7 @@ def _openapi_with_payment_info() -> dict:
     reverse_aliases: dict = {}
     for alias, target in _CATALOG_ALIASES.items():
         reverse_aliases.setdefault(target, []).append(alias)
-    for entry in _CATALOG + services.discovery_entries():
+    for entry in _CATALOG + services.discovery_entries() + _worker_discovery_entries():
         offers = list(
             mpp_payments.discovery_offers(entry["price_usd"], description=entry["description"])
         )
@@ -1980,6 +1980,15 @@ def _openapi_with_payment_info() -> dict:
                 .get("content", {})
                 .get("application/json")
             )
+            if json_content is None and entry.get("input_schema") is not None:
+                # Worker handlers read their body by hand, so FastAPI documents
+                # none, and a request generator reading this spec would send
+                # nothing. Their catalog schema IS the contract; publish it.
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {"application/json": {"schema": entry["input_schema"]}},
+                }
+                json_content = operation["requestBody"]["content"]["application/json"]
             if json_content is not None:
                 json_content.setdefault(
                     "example", entry.get("input_example") or {"url": "https://example.com"}
@@ -1994,6 +2003,28 @@ def _openapi_with_payment_info() -> dict:
         },
     }
     return doc
+
+
+def _worker_discovery_entries() -> list:
+    """Live workers, shaped like catalog rows for the annotator above.
+
+    Without these, every /work route read as free in openapi.json while its
+    402, agent.json and /work all priced it -- invisible to the crawlers that
+    find paid endpoints by x-payment-info. Only workers this deployment can
+    deliver, by the same rule the manifest follows.
+    """
+    if workers is None or not workers.is_configured():
+        return []
+    return [
+        {
+            "path": worker.path,
+            "price_usd": worker.price_usd,
+            "description": worker.description,
+            "input_schema": worker.input_schema,
+            "input_example": workers.catalog.example_for(worker),
+        }
+        for worker in workers.catalog.live()
+    ]
 
 
 app.openapi = _openapi_with_payment_info

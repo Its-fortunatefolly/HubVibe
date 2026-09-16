@@ -362,6 +362,31 @@ def price_of(path: str) -> Optional[float]:
     return worker.price_usd
 
 
+# One realistic value per input field name, used to build each worker's
+# request example for openapi.json. Keyed by field name rather than per row so
+# a new worker reusing a field gets a valid example for free; a guard test
+# fails if a required field has no value here.
+_EXAMPLE_VALUES = {
+    "url": "https://example.com",
+    "address": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd",
+    "hash": "0x" + "ab" * 32,
+    "product_id": "BTC-USD",
+    "text": "HubVibe sells machine-payable site audits at $0.05 per call.",
+    "question": "What does it sell, and at what price?",
+    "fields": ["title", "pricing"],
+    "sql": ("SELECT name, SUM(number) AS n FROM "
+            "`bigquery-public-data.usa_names.usa_1910_2013` "
+            "GROUP BY name ORDER BY n DESC LIMIT 5"),
+    "table": "bigquery-public-data.usa_names.usa_1910_2013",
+}
+
+
+def example_for(worker: "Worker") -> dict:
+    """A request body carrying every required field of this worker."""
+    required = worker.input_schema.get("required") or []
+    return {field: _EXAMPLE_VALUES[field] for field in required if field in _EXAMPLE_VALUES}
+
+
 def description_of(path: str) -> Optional[str]:
     worker = BY_PATH.get(path)
     return worker.description if worker else None
