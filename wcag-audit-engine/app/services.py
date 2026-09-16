@@ -177,7 +177,7 @@ class _IdempotencyCache:
     @staticmethod
     def _key(api_key: str, path: str, idem_key: str) -> str:
         raw = f"{api_key}\x00{path}\x00{idem_key}".encode("utf-8")
-        return hashlib.sha256(raw).hexdigest()
+        return hashlib.blake2s(raw).hexdigest()
 
     def get(self, api_key: str, path: str, idem_key: str) -> Optional[dict]:
         digest = self._key(api_key, path, idem_key)

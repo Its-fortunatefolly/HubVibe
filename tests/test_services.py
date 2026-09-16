@@ -780,6 +780,30 @@ def test_fetch_and_extract_refuse_targets_the_audit_gate_refuses(monkeypatch, tm
         assert problem is not None and "private" in problem
 
 
+def test_web_fetch_and_extract_pass_the_engine_timeout_to_http(monkeypatch):
+    sp = _load_providers(monkeypatch)
+    captured = []
+    monkeypatch.setattr(sp.audits, "blocked_target_reason", lambda url: None)
+
+    def fake_get(url, headers=None, timeout=None, follow_redirects=None):
+        captured.append((url, timeout))
+        response = _StubResponse(
+            payload={"ok": True},
+            text="<html><body>hello</body></html>",
+            headers={"content-type": "text/html"},
+        )
+        response.url = url
+        return response
+
+    monkeypatch.setattr(sp.httpx, "get", fake_get)
+    sp.call_web_fetch({"url": "https://example.com/fetch"}, timeout=7.5)
+    sp.call_web_extract({"url": "https://example.com/extract"}, timeout=3.25)
+    assert captured == [
+        ("https://example.com/fetch", 7.5),
+        ("https://example.com/extract", 3.25),
+    ]
+
+
 # --------------------------------------------------------------------------
 # The sandbox. Exercised for real where this host can isolate; the refusal
 # path is asserted everywhere else.
