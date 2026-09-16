@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""List the worker network and machine services in the Bazaar index.
+"""List the worker network in the Bazaar index.
 
 A facilitator catalogs a paid route only when a payment carrying that route's
 discovery record settles through it -- there is no registration endpoint. The
-audits are kept listed by refresh-listings.sh; this pays each live /work and
-/svc route ONCE, with a request body known to complete, through whichever
+audits are kept listed by refresh-listings.sh; this pays each live /work
+route ONCE, with a request body known to complete, through whichever
 facilitator the node is on right now.
 
 WHERE THE MONEY GOES: each call pays the route's own price from the payer
@@ -14,11 +14,11 @@ bills nothing and so is not listed -- rerun and it is retried.
 
     DRY_RUN=1 python3 scripts/seed_listings.py    # price the run, pay nothing
     python3 scripts/seed_listings.py              # pay, refused above MAX_TOTAL_USD
-    ONLY=utility,svc python3 scripts/seed_listings.py
+    ONLY=utility,premium python3 scripts/seed_listings.py
 
 Environment: BASE (default https://hubvibe-io.com); HUBVIBE_WALLET_KEY, or
 HUBVIBE_WALLET_FILE (default ~/.hubvibe-wallet-key); MAX_TOTAL_USD (default
-25); ONLY (comma list of utility, standard, advanced, svc); DRY_RUN=1.
+25); ONLY (comma list of utility, standard, advanced, premium); DRY_RUN=1.
 Needs the x402 client (the box's ~/.hubvibe-venv has it).
 """
 
@@ -99,11 +99,6 @@ ROUTES = [
     ("premium", "/work/video/generate", {
         "prompt": "A single bee landing on a circuit-board flower, slow motion",
         "duration_seconds": 4}),
-    ("svc", "/svc/fetch", {"url": "https://example.com"}),
-    ("svc", "/svc/extract", {"url": "https://example.com"}),
-    ("svc", "/svc/rpc", {"method": "eth_blockNumber"}),
-    ("svc", "/svc/market", {"op": "spot", "pair": "BTC-USD"}),
-    ("svc", "/svc/prediction", {"op": "markets", "limit": 5}),
 ]
 
 

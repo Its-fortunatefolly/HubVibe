@@ -3,11 +3,11 @@
 **Machine-payable services for autonomous agents.** The core product is the
 site compliance audit suite — WCAG 2.1 A/AA, SEO, security headers, and
 performance, deterministic rules against the real rendered page — and beside
-it a catalog of per-call machine services (`/svc/*`): LLM inference, web
-search and extraction, read-only blockchain RPC, market and prediction-market
-data, media generation, sandboxed compute, and a composite research job.
-Everything is priced per call and payable by software with no account and no
-human in the loop.
+it a worker network (`/work/*`): LLM inference, web search and extraction,
+read-only blockchain RPC, market and prediction-market data, BigQuery
+analysis and forecasting, media generation, sandboxed code execution, maps,
+and composite research jobs. Everything is priced per call and payable by
+software with no account and no human in the loop.
 
 Live: **https://hubvibe-io.com**
 
@@ -148,47 +148,48 @@ price is the charged price by construction.
 
 Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
 
-### Machine services (`/svc/*`)
+### Worker network (`/work/*`)
 
-The same payment gate sells a wider catalog beside the audits — each route
+The same payment gate sells a wider catalog beside the audits — each worker
 validated for free before any payment is read, never billed for a call that
 produced no result, with per-provider retries, exponential backoff, failover
-and a circuit breaker behind it:
+and a circuit breaker behind it. Keyless workers (chain, market, prediction,
+fetch, extract) are live on any deployment with outbound HTTPS; Google-backed
+workers light up once the box's own credentials resolve; a few need one more
+operator step (noted below) and stay off, with a specific reason, until then.
 
-| Route | Capability | Providers |
+| Worker | Price | Capability |
 |---|---|---|
-| `POST /svc/llm` | LLM inference (capped, cheap-tier models) | Anthropic Claude · Google Gemini · OpenAI |
-| `POST /svc/search` | Web search | Brave · Serper |
-| `POST /svc/fetch` | Guarded fetch of one public URL | built in |
-| `POST /svc/extract` | Structured content extraction | built in |
-| `POST /svc/rpc` | Read-only JSON-RPC on Base mainnet | public Base RPC, with failover |
-| `POST /svc/market` | Spot prices, exchange rates, tickers | Coinbase public data APIs |
-| `POST /svc/prediction` | Prediction-market data | Polymarket Gamma (public) |
-| `POST /svc/image` | Image generation | Gemini · OpenAI |
-| `POST /svc/tts` | Voice synthesis | OpenAI · Gemini |
-| `POST /svc/code` | Sandboxed Python execution | local sandbox (operator opt-in) |
-| `POST /svc/research` | Search → read → cited synthesis, one call | composite |
+| `chain.network` / `chain.address` / `chain.transaction` | $0.02–0.05 | Base mainnet reads: block/gas, address report, transaction + receipt |
+| `chain.rpc` | $0.05 | Generic allowlisted JSON-RPC passthrough on Base |
+| `market.quote` / `market.rates` / `market.ticker` | $0.02 | Coinbase spot price, exchange rates, bid/ask/volume |
+| `market.prediction` / `prediction.market` / `prediction.events` | $0.05 | Polymarket odds — top-volume, by slug, or by event |
+| `extract.page` / `fetch.raw` | $0.10 | Rendered-page extraction, or raw status/headers/body |
+| `search.web` | $0.10 | Live web search, grounded via Gemini's Google Search tool |
+| `llm.analyze` / `llm.extract` | $0.25 | Gemini: answer-from-material / structured-field extraction |
+| `llm.generate` | $0.25 | Raw completion — Gemini, or Claude via Vertex Model Garden |
+| `code.execute` | $0.25 | Python, run in Google's own hosted sandbox |
+| `image.generate` | $0.50 | Imagen 4 |
+| `speech.synthesize` / `speech.transcribe` | $0.25 | Cloud Text-to-Speech / Speech-to-Text v2 (sync, ≤60s) |
+| `data.query` | $0.50 | Read-only BigQuery SQL, dry-run cost-gated |
+| `data.question` / `data.forecast` / `data.anomalies` | $5–10 | BigQuery: NL→SQL→answer, `AI.FORECAST`, `AI.DETECT_ANOMALIES` |
+| `market.intel` | $5.00 | Spot + prediction odds, reconciled by Gemini |
+| `research.brief` / `research.page_facts` | $5.00 | One URL → cited brief / caller-named fields |
+| `research.web` / `verify.claims` / `security.mcp_inspect` | $5.00 | Web-search brief with citations; claims-vs-sources fact check; MCP endpoint audit |
+| `research.company` | $10.00 | Company research brief from live web sources, cited |
+| `monitor.snapshot` / `monitor.check` | $0.50 | Baseline a page, then get a diff summary later |
+| `maps.places` / `maps.route` / `maps.weather` | $0.10 | Google's managed Maps Grounding Lite MCP server — needs `MAPS_GROUNDING_LITE_API_KEY` |
+| `video.generate` | $10.00 | Veo — needs `WORKER_VEO_ENABLED=1`, set once the operator confirms the model resolves on the project |
 
-**A capability whose provider is not configured is absent** — no route, no
+**A worker whose provider is not configured is absent** — no route, no
 price, no tool, no manifest entry — the same rule the payment rails follow.
-The keyless services (fetch, extract, rpc, market, prediction) are live on
-any deployment with outbound HTTPS; the rest appear when the operator sets
-the provider key (see `deploy/vps/.env.example`). `SVC_DISABLED=all` turns
-the whole catalog off and restores the audit-only surface exactly.
+See `deploy/vps/.env.example` for every provider key. `GET /work` (free)
+lists what is live on this deployment and why anything else is not.
 
 Prices are flat per call and published where the audits' are: the 402
 challenge, `/.well-known/agent.json`, `/openapi.json`, and the MCP tool
-list. `GET /svc/health` (free) reports per-provider availability and
-circuit state; `GET /svc/metrics` (internal key required) is the revenue /
-provider-cost / margin ledger, per service and per provider, from measured
-usage. Keyed callers can send `X-Idempotency-Key` to make retries of one
-request return the first delivery instead of buying the work twice.
-
-Video generation is deliberately not in the catalog: Veo-class APIs are
-long-running polled operations, and this service settles payment only after
-delivery inside one synchronous call — an honest video capability needs an
-async job rail first, and claiming one without it is the kind of fabricated
-integration this repo refuses.
+list. Callers can send `Idempotency-Key` to make retries of one request
+return the first delivery instead of buying the work twice.
 
 ## Paying
 

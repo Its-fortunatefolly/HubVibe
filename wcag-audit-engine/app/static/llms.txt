@@ -79,67 +79,77 @@ what it returns; a worker whose provider is not configured is listed as
 unavailable and never quoted. Send an Idempotency-Key header to make a retry
 safe: a repeated key returns the stored result and is not charged again.
 
-Utility (one live read):
+Utility (one live read, $0.02-$0.10):
 - POST /work/chain/network -- Base mainnet block height and gas price
 - POST /work/chain/address -- one Base address: balance, transaction count,
   contract or wallet
 - POST /work/chain/transaction -- one Base transaction with its receipt
+- POST /work/chain/rpc -- generic allowlisted read-only JSON-RPC on Base
 - POST /work/market/quote -- live Coinbase spot price and 24h change
+- POST /work/market/rates -- Coinbase exchange-rate table for one currency
+- POST /work/market/ticker -- live bid/ask/volume from Coinbase's Exchange
+  data host (independent of market/quote)
 - POST /work/market/prediction -- live Polymarket markets as implied
   probabilities
+- POST /work/prediction/market -- one Polymarket market by slug
+- POST /work/prediction/events -- live Polymarket events by volume
 - POST /work/extract/page -- readable text, title and links from any page,
   rendered in a real browser
+- POST /work/fetch/raw -- raw HTTP fetch: status, headers, body, any status
+  code (unlike extract/page, a 404/500 from the target is a result)
+- POST /work/search/web -- live web search, grounded via Gemini's Google
+  Search tool
+- POST /work/maps/places -- search places via Google's managed Maps
+  Grounding Lite MCP server (needs an operator-set key)
+- POST /work/maps/route -- directions between two places (same server)
+- POST /work/maps/weather -- weather at a named place (same server)
 
-Standard (inference and data):
+Standard (inference and data, $0.25-$0.50):
 - POST /work/llm/analyze -- answer a question from text you supply, saying
   so when the text does not contain the answer (Gemini)
 - POST /work/llm/extract -- named fields from text as JSON, null when not
   stated (Gemini)
+- POST /work/llm/generate -- raw completion, your prompt and model choice
+  (Gemini; Claude via Vertex Model Garden once enabled)
+- POST /work/code/execute -- run Python in Google's own hosted sandbox
+- POST /work/image/generate -- one image from a text prompt (Imagen 4)
+- POST /work/speech/synthesize -- text to speech (Cloud Text-to-Speech)
+- POST /work/speech/transcribe -- speech to text, up to 60s/10MB (STT v2)
 - POST /work/data/query -- read-only BigQuery SQL, including Google's public
   datasets, under a scan ceiling
+- POST /work/monitor/snapshot -- save a page as a baseline to check later
+- POST /work/monitor/check -- re-fetch a baselined page and get a change
+  summary
 
-Advanced (several providers, one completed result):
+Advanced (several providers, one completed result, $5.00):
 - POST /work/data/question -- a plain-language question about a BigQuery
   table, answered with the SQL and the rows behind it
 - POST /work/research/brief -- read a web page and answer a question about it
 - POST /work/research/page_facts -- the fields you name from a web page, as
   JSON
+- POST /work/research/web -- a live web search, read, and a cited answer
+- POST /work/verify/claims -- specific claims checked against specific
+  sources: supported / contradicted / unsupported, with the quote
 - POST /work/market/intel -- a live spot quote and prediction-market
   probabilities on one subject, analysed together (market data, not advice)
+- POST /work/security/mcp_inspect -- probe a customer's MCP endpoint's
+  handshake: auth posture, protocol version, tools not marked read-only
 
-## Machine services (/svc/*)
-
-Beside the audits, this node sells a catalog of per-call machine services
-under /svc/*. WHICH of them are live is deployment-specific -- a capability
-whose provider is not configured on a node is absent from that node's
-manifest, routes and tools rather than advertised broken -- so read
-/.well-known/agent.json (the `endpoints` array) for the live list and
-GET /svc/health (free) for per-provider availability. The full catalog:
-
-- POST /svc/llm -- LLM inference (Anthropic Claude / Google Gemini /
-  OpenAI, cheap-tier models, capped output, automatic failover)
-- POST /svc/search -- web search with ranked results
-- POST /svc/fetch -- fetch one public URL (status, headers, body text)
-- POST /svc/extract -- extract readable content from one public HTML page
-  (title, metadata, plain text, links)
-- POST /svc/rpc -- read-only blockchain JSON-RPC against Base mainnet
-  (balances, blocks, transactions, receipts, logs, eth_call)
-- POST /svc/market -- current market data (spot price, exchange-rate
-  table, exchange ticker) from Coinbase's public data APIs
-- POST /svc/prediction -- prediction-market data (markets, prices,
-  events) from Polymarket's public Gamma API
-- POST /svc/image -- image generation from a text prompt
-- POST /svc/tts -- voice synthesis (text-to-speech, playable audio)
-- POST /svc/code -- sandboxed Python execution (operator-enabled
-  deployments only)
-- POST /svc/research -- one completed research job: search, read the top
-  sources, synthesize a cited answer
+Premium ($10.00):
+- POST /work/data/forecast -- forecast a BigQuery time series (AI.FORECAST,
+  TimesFM, no training)
+- POST /work/data/anomalies -- detect anomalies in a BigQuery time series
+  (AI.DETECT_ANOMALIES)
+- POST /work/research/company -- a cited research brief on a company from
+  live web sources
+- POST /work/video/generate -- a short video from a text prompt (Veo, once
+  the operator has verified the model on this deployment)
 
 Same payment gate and the same guarantees as the audits: an
 unauthenticated call answers HTTP 402 with the price, requests are
 validated before any payment is read, and a call no provider could
 complete returns HTTP 502 with per-provider reasons and bills nothing.
-Input schemas and prices for every live service are in
+Input schemas and prices for every live worker are in
 /.well-known/agent.json and the /mcp tools/list.
 
 ## Payment and auth
