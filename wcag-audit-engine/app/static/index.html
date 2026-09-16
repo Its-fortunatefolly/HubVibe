@@ -349,27 +349,27 @@
       <div class="audit">
         <h3>AI models</h3>
         <p>LLM inference routed across Claude, Gemini and OpenAI with automatic failover — the exact model that ran comes back with measured token usage.</p>
-        <div class="route">POST /svc/llm</div>
+        <div class="route">POST /work/llm/analyze · /work/llm/extract · /svc/llm</div>
       </div>
       <div class="audit">
         <h3>Search &amp; research</h3>
         <p>Web search, guarded page fetch, structured content extraction — and a composite research job that returns one cited answer.</p>
-        <div class="route">POST /svc/search · /svc/fetch · /svc/extract · /svc/research</div>
+        <div class="route">POST /work/research/brief · /work/research/page_facts · /work/extract/page · /svc/search</div>
       </div>
       <div class="audit">
-        <h3>Compute</h3>
-        <p>Sandboxed code execution with hard resource limits, a clean environment and disclosed isolation — on deployments that enable it.</p>
-        <div class="route">POST /svc/code</div>
+        <h3>Compute &amp; data</h3>
+        <p>BigQuery queries and plain-language questions answered from a dataset, plus sandboxed code execution on deployments that enable it.</p>
+        <div class="route">POST /work/data/query · /work/data/question · /svc/code</div>
       </div>
       <div class="audit">
         <h3>Blockchain</h3>
         <p>Read-only JSON-RPC against Base mainnet: balances, blocks, transactions, receipts, logs, contract calls. No broadcasting, by design.</p>
-        <div class="route">POST /svc/rpc</div>
+        <div class="route">POST /work/chain/address · /work/chain/transaction · /svc/rpc</div>
       </div>
       <div class="audit">
         <h3>Market intelligence</h3>
         <p>Live spot prices, exchange-rate tables and tickers from public Coinbase data — plus prediction-market questions, prices and volumes.</p>
-        <div class="route">POST /svc/market · /svc/prediction</div>
+        <div class="route">POST /work/market/intel · /work/market/quote · /work/market/prediction</div>
       </div>
       <div class="audit">
         <h3>Media</h3>
@@ -390,8 +390,8 @@
     <p class="footnote">
       Which capabilities are live on a given node is deployment state, not a
       promise: the <a href="/.well-known/agent.json">agent manifest</a> lists
-      exactly what this node sells right now, and
-      <a href="/svc/health">/svc/health</a> reports per-provider availability
+      exactly what this node sells right now, <a href="/work">/work</a> indexes
+      the worker network, and <a href="/svc/health">/svc/health</a> reports per-provider availability
       for free. A capability without a configured provider is omitted, never
       advertised broken.
     </p>

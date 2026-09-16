@@ -413,3 +413,35 @@ def test_an_unavailable_worker_answers_503_and_never_quotes_a_price(client, monk
     assert body["billed"] is False
     assert body["reason"] == "capability_unavailable"
     assert "price_usd" not in body, "an unavailable worker must not quote a price"
+
+
+def test_every_worker_has_a_request_example_carrying_its_required_fields():
+    missing = {
+        worker.name: sorted(set(worker.input_schema.get("required") or [])
+                            - set(W.catalog.example_for(worker)))
+        for worker in W.catalog.CATALOG
+    }
+    missing = {name: fields for name, fields in missing.items() if fields}
+    assert not missing, f"add example values for: {missing}"
+
+
+def test_openapi_marks_every_live_worker_route_payable(client):
+    """Crawlers find paid endpoints by x-payment-info. Without it every /work
+    route read as free in openapi.json while its own 402 priced it."""
+    doc = client.get("/openapi.json").json()
+    live = W.catalog.live()
+    assert live, "no live workers -- this guard is checking nothing"
+    for worker in live:
+        operation = doc["paths"][worker.path]["post"]
+        assert operation.get("x-payment-info", {}).get("offers"), worker.path
+        assert "402" in operation["responses"], worker.path
+        body = operation["requestBody"]["content"]["application/json"]
+        assert body["schema"] == worker.input_schema, worker.path
+        assert set(worker.input_schema.get("required") or []) <= set(body["example"]), worker.path
+
+
+def test_audit_routes_openapi_bodies_are_untouched_by_the_worker_entries(client):
+    doc = client.get("/openapi.json").json()
+    body = doc["paths"]["/audit/wcag"]["post"]["requestBody"]["content"]["application/json"]
+    assert body["example"] == {"url": "https://example.com"}
+    assert "$ref" in body["schema"] or body["schema"].get("title"), "audit schema must stay FastAPI's own"

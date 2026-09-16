@@ -71,6 +71,42 @@ costs a real browser page load, so every audit is paid for.
 
 - POST /audit -- $0.05 -- Alias of /audit/wcag, kept for backward compatibility.
 
+## Worker network (/work/*) -- completed work
+
+Priced per call on the same HTTP 402 rail as the audits. GET /work (free)
+lists every worker live on this node with its price, tier, input schema and
+what it returns; a worker whose provider is not configured is listed as
+unavailable and never quoted. Send an Idempotency-Key header to make a retry
+safe: a repeated key returns the stored result and is not charged again.
+
+Utility (one live read):
+- POST /work/chain/network -- Base mainnet block height and gas price
+- POST /work/chain/address -- one Base address: balance, transaction count,
+  contract or wallet
+- POST /work/chain/transaction -- one Base transaction with its receipt
+- POST /work/market/quote -- live Coinbase spot price and 24h change
+- POST /work/market/prediction -- live Polymarket markets as implied
+  probabilities
+- POST /work/extract/page -- readable text, title and links from any page,
+  rendered in a real browser
+
+Standard (inference and data):
+- POST /work/llm/analyze -- answer a question from text you supply, saying
+  so when the text does not contain the answer (Gemini)
+- POST /work/llm/extract -- named fields from text as JSON, null when not
+  stated (Gemini)
+- POST /work/data/query -- read-only BigQuery SQL, including Google's public
+  datasets, under a scan ceiling
+
+Advanced (several providers, one completed result):
+- POST /work/data/question -- a plain-language question about a BigQuery
+  table, answered with the SQL and the rows behind it
+- POST /work/research/brief -- read a web page and answer a question about it
+- POST /work/research/page_facts -- the fields you name from a web page, as
+  JSON
+- POST /work/market/intel -- a live spot quote and prediction-market
+  probabilities on one subject, analysed together (market data, not advice)
+
 ## Machine services (/svc/*)
 
 Beside the audits, this node sells a catalog of per-call machine services
