@@ -375,10 +375,10 @@ def test_ledger_records_execution_and_billing_outcome(monkeypatch, tmp_path):
     summary = svc.metrics_summary()
     market = summary["services"]["market"]
     assert market["calls"] == 1 and market["ok"] == 1
-    assert market["revenue_usd"] == 0.01
+    assert market["revenue_usd"] == 0.02
     assert market["est_provider_cost_usd"] == pytest.approx(0.00012)
     # The summary rounds margins to whole hundredths of a cent.
-    assert market["est_margin_usd"] == round(0.01 - 0.00012, 4)
+    assert market["est_margin_usd"] == round(0.02 - 0.00012, 4)
     assert summary["providers"]["market:stub"]["calls"] == 1
 
 
@@ -442,19 +442,19 @@ def test_idempotent_retry_over_http_returns_the_first_delivery_without_rechargin
             timeout=5.0, attempts=1)
     ]
     client = TestClient(module.app)
-    key = module.billing.issue_prepaid_key(2)  # two calls' worth at $0.01
+    key = module.billing.issue_prepaid_key(4)  # two calls' worth at $0.02
 
     headers = {"X-API-Key": key, "X-Idempotency-Key": "job-7"}
     first = client.post("/svc/market", json={"op": "spot", "pair": "BTC-USD"}, headers=headers)
     assert first.status_code == 200, first.text
-    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 1
+    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 2
 
     second = client.post("/svc/market", json={"op": "spot", "pair": "BTC-USD"}, headers=headers)
     assert second.status_code == 200
     assert second.json()["idempotent_replay"] is True
     assert second.json()["amount"] == "9"
     assert len(calls) == 1, "the provider must not run twice for one idempotency key"
-    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 1, (
+    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 2, (
         "the replay must not spend the key again"
     )
 
@@ -484,7 +484,7 @@ def test_a_prepaid_key_is_refunded_when_no_provider_could_answer(monkeypatch, tm
             timeout=5.0, attempts=1)
     ]
     client = TestClient(module.app)
-    key = module.billing.issue_prepaid_key(1)
+    key = module.billing.issue_prepaid_key(2)
     response = client.post(
         "/svc/market", json={"op": "spot", "pair": "BTC-USD"}, headers={"X-API-Key": key}
     )
@@ -493,7 +493,7 @@ def test_a_prepaid_key_is_refunded_when_no_provider_could_answer(monkeypatch, tm
     assert body["billed"] is False
     assert "Nothing was charged" in body["detail"]
     assert body["failed_providers"] == ["market:dead: upstream answered HTTP 503"]
-    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 1, (
+    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 2, (
         "the debit taken at authentication was not handed back"
     )
 
@@ -507,7 +507,7 @@ def test_a_successful_service_call_spends_exactly_its_price(monkeypatch, tmp_pat
             timeout=5.0, attempts=1)
     ]
     client = TestClient(module.app)
-    key = module.billing.issue_prepaid_key(5)
+    key = module.billing.issue_prepaid_key(6)
     response = client.post(
         "/svc/rpc", json={"method": "eth_blockNumber"}, headers={"X-API-Key": key}
     )
@@ -515,14 +515,14 @@ def test_a_successful_service_call_spends_exactly_its_price(monkeypatch, tmp_pat
     body = response.json()
     assert body["status"] == "ok" and body["result"] == "0x1"
     assert body["provider"] == "rpc:stub"
-    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 4
+    assert module.billing.lookup_key(key)["prepaid_balance_cents"] == 1
 
 
 class _FakePending:
     def __init__(self):
         self.settle_state = None
         self.settle_error = None
-        self.price = "$0.01"
+        self.price = "$0.02"
 
 
 def test_x402_settlement_refused_withholds_the_service_result(monkeypatch, tmp_path):
@@ -589,7 +589,7 @@ def test_mcp_service_tool_unpaid_call_returns_the_priced_challenge(monkeypatch, 
     })
     result = response.json()["result"]
     assert result["isError"] is True
-    assert result["structuredContent"]["price_usd"] == 0.01
+    assert result["structuredContent"]["price_usd"] == 0.02
 
 
 def test_mcp_service_tool_paid_call_returns_structured_content(monkeypatch, tmp_path):
@@ -992,3 +992,33 @@ def test_research_with_no_grounded_answer_bills_nothing(monkeypatch, tmp_path):
     with pytest.raises(svc.ServiceFailure) as excinfo:
         svc.execute_route("/svc/research", {"query": "anything"})
     assert "no results" in excinfo.value.detail
+
+
+def test_each_service_is_priced_like_the_worker_doing_the_same_job():
+    """One capability, one price on this node. A service and a worker that
+    sell the same kind of work must quote the same number, so a buying agent
+    never has to choose between two prices for one job -- and neither family
+    can undercut the other."""
+    svc = _load_module("services", "svc_price_parity")
+    by_id = {spec["id"]: spec["price_usd"] for spec in svc.CATALOG}
+    workers_catalog = importlib.util.spec_from_file_location(
+        "svc_price_parity_workers_catalog", APP_DIR / "workers" / "catalog.py")
+    wc = importlib.util.module_from_spec(workers_catalog)
+    workers_catalog.loader.exec_module(wc)
+    worker = {w.name: w.price_usd for w in wc.CATALOG}
+
+    same_job = {
+        "rpc": "chain.address",
+        "market": "market.quote",
+        "prediction": "market.prediction",
+        "fetch": "extract.page",
+        "extract": "extract.page",
+        "llm": "llm.analyze",
+        "research": "research.brief",
+    }
+    mismatched = {
+        service: (by_id[service], worker[name])
+        for service, name in same_job.items()
+        if by_id[service] != worker[name]
+    }
+    assert not mismatched, f"service vs worker price for the same job: {mismatched}"
