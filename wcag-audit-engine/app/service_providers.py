@@ -382,20 +382,37 @@ _TEXTUAL_TYPES = ("text/", "application/json", "application/xml", "application/x
                   "application/atom")
 
 
-def _guarded_fetch(url: str, timeout_note: str = "fetch") -> "httpx.Response":
-    try:
-        response = audits.fetch_once(url)
-    except audits.TargetNotFetchable as exc:
-        raise ProviderError(str(exc))
-    except httpx.TimeoutException:
-        raise ProviderError(f"{timeout_note} timed out", transient=True)
-    except httpx.HTTPError as exc:
-        raise ProviderError(f"{timeout_note} failed: {type(exc).__name__}", transient=True)
-    return response
+def _guarded_fetch(url: str, timeout: float, timeout_note: str = "fetch") -> "httpx.Response":
+    seen = url
+    for _ in range(audits._MAX_REDIRECTS + 1):
+        problem = audits.blocked_target_reason(seen)
+        if problem is not None:
+            raise ProviderError(f"redirected to a URL that {problem}")
+        try:
+            response = httpx.get(
+                seen,
+                timeout=timeout,
+                follow_redirects=False,
+                headers={"User-Agent": audits.USER_AGENT},
+            )
+        except httpx.TimeoutException:
+            raise ProviderError(f"{timeout_note} timed out", transient=True)
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"{timeout_note} failed: {type(exc).__name__}", transient=True)
+        if getattr(response, "status_code", None) not in (301, 302, 303, 307, 308):
+            return response
+        try:
+            location = response.headers.get("location")
+        except Exception:
+            location = None
+        if not location:
+            return response
+        seen = str(httpx.URL(seen).join(location))
+    raise ProviderError(f"followed more than {audits._MAX_REDIRECTS} redirects")
 
 
 def call_web_fetch(args: dict, timeout: float) -> dict:
-    response = _guarded_fetch(args["url"])
+    response = _guarded_fetch(args["url"], timeout=timeout)
     content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
     textual = any(content_type.startswith(t) for t in _TEXTUAL_TYPES) or not content_type
     text = None
@@ -516,7 +533,7 @@ def extract_from_html(html: str, url: str, final_url: str) -> dict:
 
 
 def call_web_extract(args: dict, timeout: float) -> dict:
-    response = _guarded_fetch(args["url"], timeout_note="extract fetch")
+    response = _guarded_fetch(args["url"], timeout=timeout, timeout_note="extract fetch")
     if response.status_code >= 400:
         raise ProviderError(
             f"target answered HTTP {response.status_code}, so there is no page to extract"

@@ -34,6 +34,8 @@ _SVC_VARS = ("SVC_DISABLED", "SVC_CODE_EXEC", "SVC_LEDGER_PATH", "SVC_RPC_URLS")
 
 def _forget_service_modules():
     for name in list(sys.modules):
+        if name == "wcag_audit_engine_workers" or name.startswith("wcag_audit_engine_workers."):
+            continue
         if name.startswith("wcag_audit_engine_"):
             sys.modules.pop(name)
 
@@ -776,6 +778,30 @@ def test_fetch_and_extract_refuse_targets_the_audit_gate_refuses(monkeypatch, tm
     for path in ("/svc/fetch", "/svc/extract"):
         problem = svc.validate_route(path, {"url": "http://169.254.169.254/latest"})
         assert problem is not None and "private" in problem
+
+
+def test_web_fetch_and_extract_pass_the_engine_timeout_to_http(monkeypatch):
+    sp = _load_providers(monkeypatch)
+    captured = []
+    monkeypatch.setattr(sp.audits, "blocked_target_reason", lambda url: None)
+
+    def fake_get(url, headers=None, timeout=None, follow_redirects=None):
+        captured.append((url, timeout))
+        response = _StubResponse(
+            payload={"ok": True},
+            text="<html><body>hello</body></html>",
+            headers={"content-type": "text/html"},
+        )
+        response.url = url
+        return response
+
+    monkeypatch.setattr(sp.httpx, "get", fake_get)
+    sp.call_web_fetch({"url": "https://example.com/fetch"}, timeout=7.5)
+    sp.call_web_extract({"url": "https://example.com/extract"}, timeout=3.25)
+    assert captured == [
+        ("https://example.com/fetch", 7.5),
+        ("https://example.com/extract", 3.25),
+    ]
 
 
 # --------------------------------------------------------------------------

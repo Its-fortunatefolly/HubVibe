@@ -54,6 +54,35 @@ except ImportError:
     x402_payments = _load_sibling_module("x402_payments")  # type: ignore
     services = _load_sibling_module("services")  # type: ignore
 
+# The worker network: additional machine-payable capabilities that run BESIDE
+# the audits. Kept in its own import block so the audit imports above are
+# untouched, and wrapped so that a fault anywhere in it can never stop the
+# audits from serving -- the audits are the working business, and a new
+# capability failing to load must cost us the capability, not the revenue.
+try:
+    try:
+        from . import workers  # type: ignore
+    except ImportError:
+        # Same by-file-path fallback the siblings use, adapted for a package:
+        # a package needs its own submodule_search_locations so that the
+        # relative imports inside it resolve.
+        import importlib.util
+        import sys
+
+        _workers_dir = Path(__file__).resolve().parent / "workers"
+        _workers_spec = importlib.util.spec_from_file_location(
+            "wcag_audit_engine_workers",
+            _workers_dir / "__init__.py",
+            submodule_search_locations=[str(_workers_dir)],
+        )
+        workers = importlib.util.module_from_spec(_workers_spec)  # type: ignore
+        sys.modules["wcag_audit_engine_workers"] = workers
+        _workers_spec.loader.exec_module(workers)
+except Exception as _workers_import_error:  # pragma: no cover - defensive
+    workers = None  # type: ignore
+    logging.getLogger("hubvibe").warning(
+        "worker network unavailable, audits unaffected: %s", _workers_import_error)
+
 PUBLIC_BASE_URL = os.environ.get(
     "PUBLIC_BASE_URL", "https://hubvibe-io.com"
 )
@@ -309,6 +338,14 @@ def _paid_route_price(path: Optional[str]) -> Optional[float]:
     # The machine-service catalog prices its own routes by the same rule:
     # only a service that is live right now answers with a price, so an
     # unconfigured capability 404s instead of quoting a sale it cannot make.
+    #
+    # The worker network, too, prices only its own routes from its own
+    # catalog, and only after the audit catalog, so neither family can shadow
+    # or alter what an audit route charges.
+    if workers is not None:
+        worker_price = workers.catalog.price_of(resolved)
+        if worker_price is not None:
+            return worker_price
     return services.price_of_path(resolved)
 
 
@@ -609,6 +646,31 @@ class AuthContext:
         self.challenge_path = challenge_path
 
 
+def _worker_input_example(worker) -> dict:
+    """A plausible body for a worker, built from its own JSON Schema.
+
+    The Bazaar record carries an example an agent may generate its first
+    request from, so the example has to satisfy the route's required fields --
+    an example the route would 400 on is worse than none.
+    """
+    example = {}
+    properties = worker.input_schema.get("properties") or {}
+    for field in worker.input_schema.get("required") or []:
+        spec = properties.get(field) or {}
+        kind = spec.get("type")
+        if kind == "array":
+            example[field] = ["example"]
+        elif kind == "integer":
+            example[field] = 10
+        elif kind == "number":
+            example[field] = 1.0
+        elif field in ("url", "final_url"):
+            example[field] = "https://example.com"
+        else:
+            example[field] = "example"
+    return example
+
+
 def _bazaar_extension_for_path(path: Optional[str]) -> dict:
     """Bazaar discovery data for the route this 402 is answering for.
 
@@ -629,6 +691,18 @@ def _bazaar_extension_for_path(path: Optional[str]) -> dict:
     path = _CATALOG_ALIASES.get(path, path)
     entry = next((e for e in _CATALOG if e["path"] == path), None)
     if entry is None:
+        # A worker route. It needs Bazaar discovery data for exactly the same
+        # reason an audit does: a paid route with none is payable but
+        # invisible to capability search, which is indistinguishable from
+        # nobody wanting to buy it.
+        if workers is not None:
+            worker = workers.catalog.get(path)
+            if worker is not None:
+                return x402_payments.bazaar_extension_for_body(
+                    input_example=_worker_input_example(worker),
+                    input_schema=worker.input_schema,
+                    output_example={"status": "ok"},
+                )
         # Service routes carry their own schemas; same Bazaar builder, so a
         # facilitator indexes /svc routes exactly as it indexes the audits.
         svc = services.schema_for_path(path)
@@ -662,6 +736,10 @@ def _route_description(path: Optional[str]) -> str:
         entry = next((e for e in _CATALOG if e["path"] == resolved), None)
         if entry is not None:
             return entry["description"]
+        if workers is not None:
+            worker_description = workers.catalog.description_of(resolved)
+            if worker_description:
+                return worker_description
         svc = services.route_description(resolved)
         if svc is not None:
             return svc
@@ -1724,6 +1802,15 @@ async def health_check():
         "service": "wcag-audit-engine",
         "browser": browser,
     }
+    # The worker network reports beside the audits, never into them: its
+    # status is informational and CANNOT change this endpoint's status code.
+    # A wedged provider must not restart-loop a container that is still
+    # selling audits perfectly well.
+    if workers is not None:
+        try:
+            body["workers"] = workers.health()
+        except Exception as exc:  # pragma: no cover - defensive
+            body["workers"] = {"configured": False, "error": f"{type(exc).__name__}"}
     return JSONResponse(status_code=200 if browser["ok"] else 503, content=body)
 
 
@@ -2070,6 +2157,62 @@ async def agent_manifest(request: Request):
         # right now, by the same rule the payment rails follow. See
         # /svc/health for provider-level state.
         + services.agent_endpoints(base, live_methods, _AUTH_DESCRIPTION),
+        # The worker network is listed SEPARATELY from `endpoints`, not folded
+        # into it. These are not audits: an audit is a deterministic rule
+        # check against a page, while a worker is a task carried out against
+        # somebody's live API or model. Mixing them in one array would tell a
+        # buying agent that a market quote carries the audits' determinism
+        # guarantee, which it does not.
+        "workers": _worker_manifest_entries(live_methods),
+    }
+
+
+def _worker_manifest_entries(live_methods: list) -> dict:
+    """The worker network as its own section of the manifest.
+
+    Empty and clearly marked when the network is not configured, rather than
+    absent: an agent that read this manifest yesterday should be able to tell
+    "turned off here" apart from "this node is too old to have it".
+    """
+    if workers is None or not workers.is_configured():
+        return {"available": False, "count": 0, "capabilities": []}
+    # Only workers this deployment can actually deliver. A capability whose
+    # provider has no credential here is omitted rather than listed, for the
+    # same reason `payment.methods` lists only rails that can settle.
+    live_workers = workers.catalog.live()
+    return {
+        "available": True,
+        "count": len(live_workers),
+        "index": f"{PUBLIC_BASE_URL}/work",
+        "note": (
+            "Machine-payable tasks carried out against live providers, priced "
+            "per call on the same x402 rail as the audits. Unlike the audits, "
+            "these are not deterministic rule checks -- each states its own "
+            "sources in the result."
+        ),
+        "idempotency": (
+            "Send an Idempotency-Key header to make a retry safe: a repeated "
+            "key returns the stored result and is not charged again."
+        ),
+        "capabilities": [
+            {
+                "path": worker.path,
+                "method": "POST",
+                "name": worker.name,
+                "title": worker.title,
+                "payment_required": True,
+                "price_usd": worker.price_usd,
+                "tier": worker.tier,
+                "description": worker.description,
+                "tags": worker.tags,
+                "input_schema": worker.input_schema,
+                "returns": worker.returns,
+                "max_seconds": worker.max_seconds,
+                "composes": worker.composes,
+                "payment_methods": live_methods,
+            }
+            for worker in live_workers
+        ],
     }
 
 
@@ -3415,3 +3558,36 @@ async def services_metrics(request: Request, days: Optional[float] = None):
     ):
         raise HTTPException(status_code=404, detail="Not Found")
     return services.metrics_summary(days=days)
+
+
+# --- worker network ---------------------------------------------------------
+#
+# Mounted LAST, after every audit route is registered, so nothing here can
+# shadow a path the audits already serve.
+#
+# The four functions handed over are this module's OWN payment gate -- the
+# same ones every audit route calls, in the same order. The worker package
+# imports no payment code of its own and cannot reach x402_payments; there is
+# one settlement implementation in this service and this is it.
+#
+# browser_pool.with_page and audits.goto_guarded are passed too, so a worker
+# that needs a rendered page reuses the warm Chromium the audits already keep
+# (and the same SSRF/redirect guard), rather than launching a second browser.
+if workers is not None:
+    try:
+        workers.configure(
+            authorize_and_rate_limit=_authorize_and_rate_limit,
+            bill=_bill,
+            deliver=_deliver,
+            failed_response=_failed_audit_response,
+            with_page=browser_pool.with_page,
+            goto_guarded=getattr(audits, "goto_guarded", None),
+            # The SAME rule the audit routes refuse targets with. Injected
+            # rather than reimplemented so a worker can never fetch something
+            # an audit would refuse -- one guard, one place to fix it.
+            blocked_target_reason=audits.blocked_target_reason,
+        )
+        app.include_router(workers.router.router)
+    except Exception as _workers_mount_error:  # pragma: no cover - defensive
+        logging.getLogger("hubvibe").warning(
+            "worker network not mounted, audits unaffected: %s", _workers_mount_error)
