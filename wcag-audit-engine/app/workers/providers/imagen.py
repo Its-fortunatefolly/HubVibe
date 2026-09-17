@@ -1,13 +1,18 @@
-"""Image generation via Imagen 4 on Vertex.
+"""Image generation via Gemini on Vertex.
 
-Connected, not rebuilt: this speaks the same `:predict` REST surface the
-Vertex SDKs call, with the same ADC this package already resolves for
-Gemini and BigQuery.
+Connected, not rebuilt: this speaks the same `:generateContent` REST surface
+`completion.py` and `gemini.py` already use for text, with the same ADC this
+package resolves for every other Google-backed worker. Only two things differ
+from a text call -- `responseModalities` asks for an image, and the bytes come
+back in a part's `inlineData` instead of its `text`.
 
-COST: unlike token-priced inference, Imagen bills a FLAT rate per image at a
-given tier -- there is no usage number to measure per call, the rate itself
-is the fact. Default matches Google's published Imagen 4 standard-tier price
-(verified 2026-09-16); overridable because that price is Google's to change.
+Imagen is deliberately NOT used: Google listed every `imagen-4.0-*` endpoint
+as discontinued after 2026-06-30 and named a Gemini image model as the
+replacement, so an Imagen call is a paid 404 waiting to happen.
+
+COST: unlike token-priced inference, image generation bills a FLAT rate per
+image -- there is no usage number to measure per call, the rate itself is the
+fact. Overridable because the rate is Google's to change.
 """
 
 import os
@@ -19,20 +24,32 @@ from .. import runtime
 from . import google_auth
 
 DEFAULT_REGION = os.environ.get("WORKER_VERTEX_REGION", "us-central1")
-_MODEL = os.environ.get("WORKER_IMAGEN_MODEL", "imagen-4.0-generate-001")
-_TIMEOUT = float(os.environ.get("WORKER_IMAGEN_TIMEOUT_SECONDS", "90"))
+# Google's own named migration target off the discontinued imagen-4.0-* line.
+# Override once the box has confirmed a newer image model resolves there --
+# scripts/smoke-bees.py prints which candidates the project actually serves.
+_MODEL = os.environ.get("WORKER_IMAGE_MODEL", "gemini-2.5-flash-image")
+_TIMEOUT = float(os.environ.get("WORKER_IMAGE_TIMEOUT_SECONDS", "90"))
 _ASPECT_RATIOS = {"1:1", "3:4", "4:3", "16:9", "9:16"}
 
 
 def _price_per_image() -> Optional[float]:
-    raw = os.environ.get("WORKER_IMAGEN_PRICE_USD", "0.04")
+    raw = os.environ.get("WORKER_IMAGE_PRICE_USD", "0.04")
     try:
         return float(raw)
     except ValueError:
         return None
 
 
-class _Imagen:
+def _first_image(data: dict) -> Optional[dict]:
+    for candidate in data.get("candidates") or []:
+        for part in (candidate.get("content") or {}).get("parts") or []:
+            inline = part.get("inlineData") or part.get("inline_data")
+            if inline and inline.get("data"):
+                return inline
+    return None
+
+
+class _GeminiImage:
     id = f"vertex:{_MODEL}"
 
     def available(self) -> bool:
@@ -50,44 +67,57 @@ class _Imagen:
 
         project = google_auth.project()
         url = (f"https://{DEFAULT_REGION}-aiplatform.googleapis.com/v1/projects/{project}"
-               f"/locations/{DEFAULT_REGION}/publishers/google/models/{_MODEL}:predict")
+               f"/locations/{DEFAULT_REGION}/publishers/google/models/{_MODEL}"
+               f":generateContent")
         body = {
-            "instances": [{"prompt": prompt}],
-            "parameters": {"sampleCount": 1, "aspectRatio": aspect_ratio,
-                           "personGeneration": "allow_adult"},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseModalities": ["TEXT", "IMAGE"],
+                "imageConfig": {"aspectRatio": aspect_ratio},
+            },
         }
         try:
             headers = await google_auth.headers()
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 response = await client.post(url, headers=headers, json=body)
         except httpx.TimeoutException as exc:
-            raise runtime.TransientProviderError(f"Imagen timed out: {exc}") from exc
+            raise runtime.TransientProviderError(
+                f"Image generation timed out: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise runtime.TransientProviderError(f"Imagen unreachable: {exc}") from exc
+            raise runtime.TransientProviderError(
+                f"Image generation unreachable: {exc}") from exc
 
         if response.status_code in (429, 500, 502, 503, 504):
             raise runtime.TransientProviderError(
-                f"Imagen returned {response.status_code}", reason="provider_overloaded")
+                f"Image generation returned {response.status_code}",
+                reason="provider_overloaded")
         if response.status_code >= 400:
-            # A prompt Imagen's own safety filter refuses is the CALLER's
-            # input being wrong for this provider, not a bug worth retrying.
+            # A prompt the safety filter refuses is the CALLER's input being
+            # wrong for this provider, not a bug worth retrying.
             raise runtime.PermanentProviderError(
-                f"Imagen rejected the request ({response.status_code}): "
+                f"Image generation rejected the request ({response.status_code}): "
                 f"{response.text[:200]}")
 
         data = response.json()
-        predictions = data.get("predictions") or []
-        if not predictions or not predictions[0].get("bytesBase64Encoded"):
+        image = _first_image(data)
+        if image is None:
+            # A filtered prompt comes back 200 with a finishReason and no image
+            # part; say which, so the caller learns something from the failure.
+            reason = ""
+            for candidate in data.get("candidates") or []:
+                if candidate.get("finishReason"):
+                    reason = f" (finishReason: {candidate['finishReason']})"
+                    break
             raise runtime.InvalidProviderResponse(
-                "Imagen returned no image (commonly a safety filter with no error body).")
-        image = predictions[0]
+                f"Image generation returned no image{reason}.")
 
         rate = _price_per_image()
         cost = int(round(rate * 1_000_000)) if rate is not None else None
         return runtime.ProviderResult(
-            value={"image_base64": image["bytesBase64Encoded"],
-                   "mime_type": image.get("mimeType", "image/png"), "model": _MODEL},
+            value={"image_base64": image["data"],
+                   "mime_type": image.get("mimeType") or image.get("mime_type", "image/png"),
+                   "model": _MODEL},
             cost_micros=cost, cost_measured=rate is not None, usage="images=1")
 
 
-PROVIDERS = [_Imagen()]
+PROVIDERS = [_GeminiImage()]
