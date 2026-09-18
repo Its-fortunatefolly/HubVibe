@@ -118,8 +118,13 @@ class _MapsGroundingLite:
 
     async def compute_routes(self, origin: str, destination: str,
                              travel_mode: str = "DRIVE") -> runtime.ProviderResult:
+        # origin/destination are Waypoints, not strings: the tool takes an
+        # object carrying ONE OF address / lat_lng / place_id. Sending the bare
+        # string 400s every call. `lookup_weather` below already nests the same
+        # way -- this one was simply never brought in line with it.
         result = await self._call_tool("compute_routes", {
-            "origin": origin, "destination": destination, "travel_mode": travel_mode})
+            "origin": {"address": origin}, "destination": {"address": destination},
+            "travel_mode": travel_mode})
         return runtime.ProviderResult(value=result, cost_micros=0, cost_measured=False,
                                       usage=f"{origin[:20]}->{destination[:20]}")
 

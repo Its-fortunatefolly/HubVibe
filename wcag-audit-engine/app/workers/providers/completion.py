@@ -26,10 +26,16 @@ class _VertexGeminiCompletion:
     answer-from-material shape `llm.analyze` uses."""
 
     provider_name = "gemini"
+    # `gemini-flash-latest` is Google's auto-updating alias: hot-swapped to the
+    # current Flash release, two weeks' notice before a breaking change. The
+    # pinned GA model stays in the accepted set so a caller can still name a
+    # specific version, and so there is something to fall back to if Vertex
+    # does not resolve the alias (Google documents it for the Developer API
+    # and is silent on Vertex).
     models = {m.strip() for m in os.environ.get(
-        "WORKER_LLM_GENERATE_GEMINI_MODELS", "gemini-2.5-flash,gemini-2.5-pro"
+        "WORKER_LLM_GENERATE_GEMINI_MODELS", "gemini-flash-latest,gemini-3.5-flash"
     ).split(",") if m.strip()}
-    default_model = os.environ.get("WORKER_LLM_GENERATE_GEMINI_MODEL", "gemini-2.5-flash")
+    default_model = os.environ.get("WORKER_LLM_GENERATE_GEMINI_MODEL", "gemini-flash-latest")
     id = f"vertex:{default_model}"
     _timeout = float(os.environ.get("WORKER_LLM_GENERATE_TIMEOUT_SECONDS", "60"))
 
@@ -107,6 +113,10 @@ _ANTHROPIC_RATES = {
     "claude-opus-5": (5.0, 25.0),
 }
 
+# Models that still accept a sampling parameter. Everything else on the current
+# generation rejects `temperature` outright, so it is omitted for them.
+_CLAUDE_ACCEPTS_TEMPERATURE = {"claude-haiku-4-5"}
+
 
 def _anthropic_cost_micros(model: str, input_tokens: int, output_tokens: int):
     rate_in = os.environ.get(f"WORKER_ANTHROPIC_PRICE_PER_MTOK_IN_{model.upper().replace('-', '_')}")
@@ -167,8 +177,14 @@ class _ClaudeOnVertex:
                f"/locations/global/publishers/anthropic/models/{model}:rawPredict")
         body = {
             "anthropic_version": self._anthropic_version, "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}], "temperature": temperature,
+            "messages": [{"role": "user", "content": prompt}],
         }
+        # Sampling parameters were REMOVED on the current Claude generation:
+        # `temperature` is a 400 on Sonnet 5 and Opus 5, not a nudge. Haiku 4.5
+        # still accepts it. Sending it unconditionally 400s two of the three
+        # models this worker advertises, on every call.
+        if model in _CLAUDE_ACCEPTS_TEMPERATURE:
+            body["temperature"] = temperature
         if system:
             body["system"] = system
 

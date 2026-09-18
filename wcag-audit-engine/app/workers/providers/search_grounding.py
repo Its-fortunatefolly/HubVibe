@@ -16,7 +16,11 @@ from .gemini import DEFAULT_REGION, _cost_micros
 
 log = __import__("logging").getLogger("hubvibe.workers.search_grounding")
 
-_MODEL = os.environ.get("WORKER_SEARCH_MODEL", "gemini-2.5-flash")
+# Auto-updating alias rather than a pinned version: Google hot-swaps it to the
+# current Flash release with two weeks' notice, so this does not need re-chasing
+# every time a version retires (gemini-2.5-flash, which used to sit here, dies
+# 2026-10-20). Override if the box's smoke test shows Vertex not resolving it.
+_MODEL = os.environ.get("WORKER_SEARCH_MODEL", "gemini-flash-latest")
 _TIMEOUT = float(os.environ.get("WORKER_SEARCH_TIMEOUT_SECONDS", "45"))
 
 

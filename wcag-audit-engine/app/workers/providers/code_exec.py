@@ -15,7 +15,8 @@ from .. import runtime
 from . import google_auth
 from .gemini import DEFAULT_REGION, _cost_micros
 
-_MODEL = os.environ.get("WORKER_CODE_EXEC_MODEL", "gemini-2.5-flash")
+# Auto-updating alias rather than a pinned version -- see search_grounding.py.
+_MODEL = os.environ.get("WORKER_CODE_EXEC_MODEL", "gemini-flash-latest")
 _TIMEOUT = float(os.environ.get("WORKER_CODE_EXEC_TIMEOUT_SECONDS", "60"))
 
 
@@ -67,16 +68,29 @@ class _GeminiCodeExecution:
             raise runtime.InvalidProviderResponse("Code execution returned no candidate.")
         parts = (candidates[0].get("content") or {}).get("parts") or []
 
-        ran_code, output, outcome, summary_bits = None, None, None, []
+        # One response can carry SEVERAL code/result pairs -- the model may run
+        # code, read the output, then run more. Assigning instead of collecting
+        # kept only the last pair, so the caller paid for the whole chain and
+        # was shown the tail of it.
+        code_blocks, output_blocks, outcome, summary_bits = [], [], None, []
         for part in parts:
             if "executableCode" in part:
-                ran_code = (part["executableCode"] or {}).get("code")
+                block = (part["executableCode"] or {}).get("code")
+                if block:
+                    code_blocks.append(block)
             elif "codeExecutionResult" in part:
                 result = part["codeExecutionResult"] or {}
-                outcome = result.get("outcome")
-                output = result.get("output")
+                # Last non-OK outcome wins: if any step failed, say so.
+                step_outcome = result.get("outcome")
+                if step_outcome and (outcome is None or step_outcome != "OUTCOME_OK"):
+                    outcome = step_outcome
+                if result.get("output"):
+                    output_blocks.append(result["output"])
             elif part.get("text"):
                 summary_bits.append(part["text"])
+
+        ran_code = "\n\n".join(code_blocks) if code_blocks else None
+        output = "\n".join(output_blocks) if output_blocks else None
 
         if ran_code is None and output is None:
             raise runtime.InvalidProviderResponse(

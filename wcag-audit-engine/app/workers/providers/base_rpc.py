@@ -73,11 +73,27 @@ class _BaseRpc:
         if method == "eth_getLogs" and params and isinstance(params[0], dict):
             try:
                 from_block, to_block = params[0].get("fromBlock"), params[0].get("toBlock")
-                if (isinstance(from_block, str) and from_block.startswith("0x")
-                        and isinstance(to_block, str) and to_block.startswith("0x")
-                        and int(to_block, 16) - int(from_block, 16) > LOG_RANGE_CAP_BLOCKS):
-                    raise runtime.InvalidRequest(
-                        f"eth_getLogs block range exceeds the {LOG_RANGE_CAP_BLOCKS}-block limit.")
+                # A blockHash filter addresses exactly one block, so no range
+                # applies and nothing needs capping.
+                if not params[0].get("blockHash"):
+                    hex_bounds = (
+                        isinstance(from_block, str) and from_block.startswith("0x")
+                        and isinstance(to_block, str) and to_block.startswith("0x"))
+                    if not hex_bounds:
+                        # A tag ("latest", "earliest") or an omitted bound makes
+                        # the span uncomputable, so the old check SKIPPED it --
+                        # meaning {"fromBlock":"0x0","toBlock":"latest"} asked the
+                        # node for all of chain history and timed out after the
+                        # caller had paid. Refuse it for free instead.
+                        raise runtime.InvalidRequest(
+                            "eth_getLogs needs explicit hex fromBlock and toBlock "
+                            f"(a tag like 'latest' cannot be bounded against the "
+                            f"{LOG_RANGE_CAP_BLOCKS}-block limit), or a blockHash.")
+                    # Inclusive range: from..to spans (to - from + 1) blocks.
+                    if int(to_block, 16) - int(from_block, 16) + 1 > LOG_RANGE_CAP_BLOCKS:
+                        raise runtime.InvalidRequest(
+                            f"eth_getLogs block range exceeds the "
+                            f"{LOG_RANGE_CAP_BLOCKS}-block limit.")
             except ValueError:
                 raise runtime.InvalidRequest(
                     "eth_getLogs fromBlock/toBlock are not parseable hex quantities.")

@@ -27,11 +27,21 @@ log = logging.getLogger("hubvibe.workers.gemini")
 
 DEFAULT_REGION = os.environ.get("WORKER_VERTEX_REGION", "us-central1")
 
-# Verified callable on this project 2026-09-15 by a free :countTokens probe
-# (HTTP 200). Order is the fallback order: flash first because it is the
-# cheaper and faster of the two, pro second for when flash fails.
+# Order is the fallback order, and the first entry is deliberately an ALIAS.
+#
+# `gemini-flash-latest` is hot-swapped by Google to the current Flash release,
+# with two weeks' email notice before a breaking change. Pinning a version
+# instead means re-chasing a retirement every few months -- `gemini-2.5-flash`
+# and `gemini-2.5-pro`, which used to sit here, both retire 2026-10-20.
+#
+# The alias is documented on the Gemini Developer API; Google's docs do not
+# state whether Vertex resolves it. That uncertainty is harmless HERE and
+# nowhere else: this list is a fallback chain, so if Vertex rejects the alias
+# the next entry -- a pinned, currently-GA model with no retirement before
+# May 2027 -- answers instead and the worker still completes. Whichever one
+# actually serves is recorded per call in the ledger.
 _TEXT_MODELS = os.environ.get(
-    "WORKER_GEMINI_MODELS", "gemini-2.5-flash,gemini-2.5-pro"
+    "WORKER_GEMINI_MODELS", "gemini-flash-latest,gemini-3.5-flash"
 ).split(",")
 
 _TIMEOUT = float(os.environ.get("WORKER_GEMINI_TIMEOUT_SECONDS", "120"))

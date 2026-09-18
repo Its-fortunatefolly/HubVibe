@@ -107,7 +107,10 @@ class _Polymarket:
 
 
     async def by_slug(self, slug: str) -> runtime.ProviderResult:
-        markets = await self._get("/markets", {"slug": slug})
+        # `closed` must be sent explicitly: without it the list endpoint can
+        # return a stale closed market for a slug that has since been reused,
+        # so the caller is billed for the wrong market's prices.
+        markets = await self._get("/markets", {"slug": slug, "closed": "false"})
         shaped = [self._shape(m) for m in markets if isinstance(m, dict)]
         if not shaped:
             raise runtime.InvalidRequest(f"No market found for slug '{slug}'.")

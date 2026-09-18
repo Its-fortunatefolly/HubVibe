@@ -21,7 +21,12 @@ from . import google_auth
 
 _TIMEOUT = float(os.environ.get("WORKER_TTS_TIMEOUT_SECONDS", "45"))
 _DEFAULT_VOICE = os.environ.get("WORKER_TTS_DEFAULT_VOICE", "en-US-Standard-C")
-_VOICE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z0-9]+-?[A-Za-z0-9]*$")
+# Language subtag is 2 OR 3 letters (fil-PH, yue-HK are real served voices),
+# and the name after the region can carry several hyphenated segments --
+# "en-US-Chirp3-HD-Aoede" is Google's current flagship tier. The old pattern
+# allowed one optional segment and two-letter languages only, so it rejected
+# every Chirp 3 HD voice and every 3-letter language before a call was made.
+_VOICE_RE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}(?:-[A-Za-z0-9]+){1,3}$")
 
 
 def _price_per_mchar(voice: str) -> Optional[float]:

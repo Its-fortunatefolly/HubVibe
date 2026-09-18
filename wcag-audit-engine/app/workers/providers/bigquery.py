@@ -146,6 +146,17 @@ class _BigQuery:
             "timeoutMs": int(_TIMEOUT * 1000),
         })
 
+        # jobs.query returns jobComplete:false when the job outlives timeoutMs --
+        # with NO rows and no error. Unchecked, that reads as a successful empty
+        # result and the caller is billed for "no data" when the truth is "we
+        # stopped waiting". Raising instead means the gate never settles: the
+        # caller gets a 502 and pays nothing.
+        if data.get("jobComplete") is False:
+            raise runtime.TransientProviderError(
+                f"BigQuery did not finish within {_TIMEOUT:.0f}s; no rows were "
+                f"returned. The query is still running server-side.",
+                reason="provider_timeout")
+
         schema = [f.get("name") for f in (data.get("schema") or {}).get("fields", [])]
         rows = []
         for row in (data.get("rows") or [])[:_MAX_ROWS]:
