@@ -129,6 +129,19 @@ async def answer_question(ctx, payload: dict) -> dict:
     }
 
 
+def _id_cols_sql(payload: dict) -> str:
+    """`, id_cols => [...]` for a table holding several series at once (one
+    row per series per timestamp), or "" when the caller names none."""
+    id_cols = payload.get("id_cols")
+    if id_cols is None:
+        return ""
+    if not isinstance(id_cols, list) or not id_cols or \
+            not all(isinstance(c, str) and _IDENT.match(c) for c in id_cols):
+        raise runtime.InvalidRequest(
+            "`id_cols`, when given, must be a non-empty list of column names.")
+    return ", id_cols => [" + ", ".join(f"'{c}'" for c in id_cols) + "]"
+
+
 async def forecast(ctx, payload: dict) -> dict:
     """Forecast a time series in a BigQuery table using AI.FORECAST.
 
@@ -152,14 +165,7 @@ async def forecast(ctx, payload: dict) -> dict:
     if not 1 <= horizon <= 1000:
         raise runtime.InvalidRequest("`horizon` must be between 1 and 1000.")
 
-    id_cols = payload.get("id_cols")
-    id_cols_sql = ""
-    if id_cols is not None:
-        if not isinstance(id_cols, list) or not id_cols or \
-                not all(isinstance(c, str) and _IDENT.match(c) for c in id_cols):
-            raise runtime.InvalidRequest(
-                "`id_cols`, when given, must be a non-empty list of column names.")
-        id_cols_sql = ", id_cols => [" + ", ".join(f"'{c}'" for c in id_cols) + "]"
+    id_cols_sql = _id_cols_sql(payload)
 
     sql = (
         f"SELECT * FROM AI.FORECAST((SELECT * FROM `{table}`), "
@@ -209,7 +215,7 @@ async def detect_anomalies(ctx, payload: dict) -> dict:
     sql = (
         f"SELECT * FROM AI.DETECT_ANOMALIES(TABLE `{history_table}`, TABLE `{target_table}`, "
         f"data_col => '{data_col}', timestamp_col => '{timestamp_col}', "
-        f"anomaly_prob_threshold => {threshold})")
+        f"anomaly_prob_threshold => {threshold}{_id_cols_sql(payload)})")
 
     async def call(provider):
         return await provider.query(sql, max_gib=payload.get("max_scan_gib"))

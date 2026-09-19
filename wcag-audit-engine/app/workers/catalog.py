@@ -474,6 +474,8 @@ CATALOG = [
             "data_col": {"type": "string"},
             "anomaly_prob_threshold": {"type": "number",
                                        "description": "0.5-0.999, default 0.95."},
+            "id_cols": {"type": "array", "items": {"type": "string"},
+                       "description": "Optional: one series per value of these columns."},
             "max_scan_gib": {"type": "number"},
         }, ["history_table", "target_table", "timestamp_col", "data_col"]),
         output_schema=_RESULT,
@@ -787,11 +789,20 @@ _EXAMPLE_VALUES = {
     "location": "San Francisco, CA",
 }
 
+_DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
+
 _EXAMPLE_OVERRIDES = {
     # llm.generate and image.generate both take a required "prompt", but
     # sharing one example would make one of the two look like a mistake.
     "image.generate": {"prompt": "A beehive built from circuit boards, isometric illustration"},
     "video.generate": {"prompt": "A single bee landing on a circuit-board flower, slow motion"},
+    # AI.FORECAST / AI.DETECT_ANOMALIES need a DATE/TIMESTAMP column (the
+    # usa_names `year` is INT64 and is refused); this is a real daily series.
+    "data.forecast": {"table": _DAILY_SERIES, "timestamp_col": "date",
+                      "data_col": "confirmed_cases", "id_cols": ["state_name"]},
+    "data.anomalies": {"history_table": _DAILY_SERIES, "target_table": _DAILY_SERIES,
+                       "timestamp_col": "date", "data_col": "confirmed_cases",
+                       "id_cols": ["state_name"]},
 }
 
 
