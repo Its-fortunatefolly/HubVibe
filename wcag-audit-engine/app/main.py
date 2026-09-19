@@ -1930,6 +1930,11 @@ def _openapi_with_payment_info() -> dict:
             if operation is None:
                 continue
             operation["x-payment-info"] = {"offers": offers}
+            if entry.get("buyer_note"):
+                # Workers above the x402 clients' $1 default cap: see
+                # workers.catalog.buyer_note. A standard extension key, kept
+                # out of x-payment-info so mppx's offer validation is untouched.
+                operation["x-buyer-note"] = entry["buyer_note"]
             # The discovery spec requires a declared 402 on any operation
             # carrying x-payment-info; mppx validate fails the document
             # without it ("Operation with x-payment-info MUST have a 402
