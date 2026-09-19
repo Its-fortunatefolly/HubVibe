@@ -309,3 +309,31 @@ def test_bigquery_is_costed_at_list_price_by_default(monkeypatch):
     bigquery = _provider("bigquery")
     monkeypatch.delenv("BQ_PRICE_PER_TIB", raising=False)
     assert bigquery._cost_micros(1024 ** 4) == (6_250_000, True)
+
+
+def test_veo_refreshes_its_token_on_every_poll(monkeypatch):
+    """A generation can outlive the access token fetched at submit time; a
+    poll sent with the stale one is a 401 mid-job (seen live 2026-09-19)."""
+    veo = _provider("veo")
+    _fake_google(monkeypatch, veo.google_auth)
+    monkeypatch.setattr(veo, "_POLL_INTERVAL", 0)
+    calls = {"headers": 0, "polls": 0}
+
+    async def headers():
+        calls["headers"] += 1
+        return {"Authorization": f"Bearer t{calls['headers']}"}
+
+    async def post(self, url, hdrs, body):
+        if url.endswith(":predictLongRunning"):
+            return {"name": "op-1"}
+        calls["polls"] += 1
+        assert hdrs["Authorization"] == f"Bearer t{calls['headers']}", "poll sent a stale token"
+        done = calls["polls"] >= 3
+        return {"done": done, "response": {"videos": [{"bytesBase64Encoded": "AAAA",
+                                                        "mimeType": "video/mp4"}]}} if done else {"done": False}
+
+    monkeypatch.setattr(veo.google_auth, "headers", headers)
+    monkeypatch.setattr(type(veo.PROVIDERS[0]), "_post", post)
+    asyncio.run(veo.PROVIDERS[0].generate("a bee", deadline_seconds=30))
+    assert calls["polls"] == 3
+    assert calls["headers"] == 1 + calls["polls"]
