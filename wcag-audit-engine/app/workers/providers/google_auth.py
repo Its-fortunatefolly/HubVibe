@@ -184,7 +184,7 @@ def _scoped_token_blocking(scope: str) -> str:
     """A token for ONE extra OAuth scope, from the same credential.
 
     The shared credential is minted for `cloud-platform`, which some Google
-    APIs do not accept (Maps Grounding Lite wants `maps-platform.mcp`). A
+    APIs do not accept (Maps Grounding Lite wants `maps-platform.mapstools`). A
     service-account credential can be re-scoped without a second key; ambient
     Compute/Cloud Shell credentials ignore requested scopes, which is why a
     worker relying on this must be proven on the deployment that serves it.
