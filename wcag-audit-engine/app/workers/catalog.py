@@ -814,6 +814,30 @@ def example_for(worker: "Worker") -> dict:
     return example
 
 
+# Both official x402 client libraries (Python >= 2.22, TypeScript >= 2.26)
+# refuse any single payment over $1.00 unless the BUYER raises its spend cap
+# -- a wallet guard, and rightly the buyer's to lift. A stock agent hits that
+# guard locally, before we ever see it, and reads "no matching requirements".
+# So every surface that quotes a price above $1 also says, in the agent's own
+# library's words, exactly how to lift it. Nothing here changes the price.
+SPEND_CAP_USD = 1.00
+
+
+def buyer_note(worker: "Worker") -> Optional[str]:
+    """How a stock x402 client buys this worker, or None when the default
+    $1 per-payment cap already covers it."""
+    if worker.price_usd <= SPEND_CAP_USD:
+        return None
+    return (
+        f"This call costs ${worker.price_usd:.2f}, above the $1.00 per-payment "
+        "default spend cap in the x402 client libraries. Raise the cap before "
+        "paying -- Python: client.set_spend_controls({'max_amount_per_payment': "
+        f"'${worker.price_usd:.2f}'}}); TypeScript: new x402Client({{ spendControls: "
+        f"{{ maxAmountPerPayment: '${worker.price_usd:.2f}' }} }}). "
+        "Coinbase's x402_pay tool takes max_amount per call instead."
+    )
+
+
 def description_of(path: str) -> Optional[str]:
     worker = BY_PATH.get(path)
     return worker.description if worker else None
