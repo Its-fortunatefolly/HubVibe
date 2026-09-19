@@ -96,6 +96,12 @@ class _Veo:
         operation = None
         while time.monotonic() < deadline:
             await asyncio.sleep(_POLL_INTERVAL)
+            # Fresh headers per poll: a generation can outlive the access
+            # token fetched at submit time, and a poll sent with the stale
+            # one is a 401 on a job the caller has already been waiting on
+            # (seen live 2026-09-19, 34s in). headers() refreshes only when
+            # the token has actually expired, so this costs nothing otherwise.
+            headers = await google_auth.headers()
             operation = await self._post(f"{base}:fetchPredictOperation", headers,
                                          {"operationName": operation_name})
             if operation.get("done"):
