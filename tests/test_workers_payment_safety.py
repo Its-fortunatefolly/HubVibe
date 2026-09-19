@@ -256,6 +256,9 @@ def test_a_provider_failure_returns_502_and_bills_nothing(app_module, client, mo
     assert response.status_code == 502
     assert response.json()["billed"] is False
     assert billed == [], "a job that produced no result must never be billed"
+    # The test client forgives a stale Content-Length; uvicorn does not, and
+    # a copied one made every failed worker call die mid-response in prod.
+    assert int(response.headers["content-length"]) == len(response.content)
 
 
 def test_unconfigured_provider_is_503_not_502(app_module, client, monkeypatch):
