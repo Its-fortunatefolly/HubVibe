@@ -380,10 +380,16 @@ async def work_index():
                 "max_seconds": worker.max_seconds,
                 "pricing_basis": worker.pricing_basis,
                 "composes": worker.composes,
+                **({"buyer_note": catalog.buyer_note(worker)}
+                   if catalog.buyer_note(worker) else {}),
             }
             for worker in live
         ],
         "count": len(live),
+        "spend_cap": (
+            f"x402 client libraries cap a single payment at ${catalog.SPEND_CAP_USD:.2f} "
+            "by default. Workers priced above that carry a buyer_note saying how to "
+            "raise the cap; the price itself is fixed."),
         # Named, but NOT sold: an agent that saw this node yesterday can tell
         # "switched off here" apart from "never existed", without us quoting a
         # price for something we cannot run.

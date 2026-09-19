@@ -448,3 +448,30 @@ def test_audit_routes_openapi_bodies_are_untouched_by_the_worker_entries(client)
     body = doc["paths"]["/audit/wcag"]["post"]["requestBody"]["content"]["application/json"]
     assert body["example"] == {"url": "https://example.com"}
     assert "$ref" in body["schema"] or body["schema"].get("title"), "audit schema must stay FastAPI's own"
+
+
+def test_a_worker_above_the_client_cap_tells_the_buyer_how_to_lift_it(client):
+    """Stock x402 clients refuse any payment over $1.00 locally. The 402 for a
+    dearer worker must say so in the body (the header the library signs is
+    untouched), and a cheap worker must not carry the note."""
+    dear = next(w for w in W.catalog.CATALOG if w.price_usd > 1.00 and w.available())
+    cheap = next(w for w in W.catalog.CATALOG if w.price_usd <= 1.00 and w.available())
+
+    response = client.post(dear.path, json=W.catalog.example_for(dear))
+    assert response.status_code == 402
+    body = response.json()
+    assert "buyer_note" in body and f"${dear.price_usd:.2f}" in body["buyer_note"]
+    assert "max_amount_per_payment" in body["buyer_note"]
+    assert body.get("accepts"), "the payable accepts[] list must survive the rewrite"
+    assert int(response.headers["content-length"]) == len(response.content)
+    assert "payment-required" in {k.lower() for k in response.headers}
+
+    response = client.post(cheap.path, json=W.catalog.example_for(cheap))
+    assert response.status_code == 402
+    assert "buyer_note" not in response.json()
+
+    index = client.get("/work").json()
+    by_name = {w["name"]: w for w in index["workers"]}
+    assert "buyer_note" in by_name[dear.name]
+    assert "buyer_note" not in by_name[cheap.name]
+    assert "spend_cap" in index

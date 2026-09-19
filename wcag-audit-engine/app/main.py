@@ -885,6 +885,15 @@ def _payment_required_response(
     bazaar = _bazaar_extension_for_path(path)
     if bazaar:
         body["extensions"] = bazaar
+    # Workers priced above the x402 client libraries' default $1 per-payment
+    # cap: a stock agent refuses these locally and reads THIS body to learn
+    # why, so it says how to lift the cap. Every 402 for a /work route is
+    # built here (the probe path answers before the router runs), which is
+    # why the note lives here and nowhere else. The price is unchanged.
+    worker = workers.catalog.get(path) if workers is not None and path else None
+    note = workers.catalog.buyer_note(worker) if worker is not None else None
+    if note:
+        body["buyer_note"] = note
 
     response = JSONResponse(status_code=402, content=body)
 
@@ -1981,6 +1990,8 @@ def _worker_discovery_entries() -> list:
             "description": worker.description,
             "input_schema": worker.input_schema,
             "input_example": workers.catalog.example_for(worker),
+            **({"buyer_note": workers.catalog.buyer_note(worker)}
+               if workers.catalog.buyer_note(worker) else {}),
         }
         for worker in workers.catalog.live()
     ]
@@ -2195,6 +2206,8 @@ def _worker_manifest_entries(live_methods: list) -> dict:
                 "max_seconds": worker.max_seconds,
                 "composes": worker.composes,
                 "payment_methods": live_methods,
+                **({"buyer_note": workers.catalog.buyer_note(worker)}
+                   if workers.catalog.buyer_note(worker) else {}),
             }
             for worker in live_workers
         ],
