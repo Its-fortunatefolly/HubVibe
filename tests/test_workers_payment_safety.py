@@ -475,3 +475,7 @@ def test_a_worker_above_the_client_cap_tells_the_buyer_how_to_lift_it(client):
     assert "buyer_note" in by_name[dear.name]
     assert "buyer_note" not in by_name[cheap.name]
     assert "spend_cap" in index
+
+    paths = client.get("/openapi.json").json()["paths"]
+    assert paths[dear.path]["post"]["x-buyer-note"] == by_name[dear.name]["buyer_note"]
+    assert "x-buyer-note" not in paths[cheap.path]["post"]
