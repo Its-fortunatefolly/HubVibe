@@ -30,7 +30,7 @@ LAYOUT
     router      the /work/* routes, using the core's payment gate
 """
 
-from . import catalog, context, ledger, router, runtime  # noqa: F401
+from . import catalog, context, ledger, providers, router, runtime, skills  # noqa: F401
 
 configure = router.configure
 is_configured = router.is_configured

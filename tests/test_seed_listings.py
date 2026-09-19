@@ -20,20 +20,19 @@ SEED = _load("seed_listings_under_test", REPO_ROOT / "scripts" / "seed_listings.
 
 def test_only_selects_tiers_and_empty_selects_everything():
     assert SEED.select(SEED.ROUTES, "") == SEED.ROUTES
-    chosen = SEED.select(SEED.ROUTES, "utility, svc")
-    assert chosen and {tier for tier, _, _ in chosen} == {"utility", "svc"}
+    chosen = SEED.select(SEED.ROUTES, "utility, premium")
+    assert chosen and {tier for tier, _, _ in chosen} == {"utility", "premium"}
 
 
 def test_plan_total_counts_only_routes_that_quoted_a_price():
-    priced = [("utility", "/a", {}, 0.02), ("advanced", "/b", {}, 5.0), ("svc", "/c", {}, None)]
+    priced = [("utility", "/a", {}, 0.02), ("advanced", "/b", {}, 5.0), ("premium", "/c", {}, None)]
     assert SEED.plan_total(priced) == 5.02
 
 
 def test_every_seeded_route_is_a_route_the_node_sells():
     """A path renamed in a catalog must not leave this script paying a 404."""
     workers = _load("seed_workers_catalog", APP / "workers" / "catalog.py")
-    services = _load("seed_services", APP / "services.py")
-    sold = {w.path for w in workers.CATALOG} | {s["path"] for s in services.CATALOG}
+    sold = {w.path for w in workers.CATALOG}
     unknown = [route for _, route, _ in SEED.ROUTES if route not in sold]
     assert not unknown, unknown
 

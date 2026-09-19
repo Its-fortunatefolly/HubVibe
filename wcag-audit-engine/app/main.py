@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 try:
-    from . import audits, billing, browser_pool, mpp_payments, services, x402_payments
+    from . import audits, billing, browser_pool, mpp_payments, x402_payments
 except ImportError:
     # Loaded directly by file path (e.g. by tooling/tests) rather than as
     # part of the `app` package -- fall back to loading each sibling module
@@ -52,7 +52,6 @@ except ImportError:
     billing = _load_sibling_module("billing")  # type: ignore
     mpp_payments = _load_sibling_module("mpp_payments")  # type: ignore
     x402_payments = _load_sibling_module("x402_payments")  # type: ignore
-    services = _load_sibling_module("services")  # type: ignore
 
 # The worker network: additional machine-payable capabilities that run BESIDE
 # the audits. Kept in its own import block so the audit imports above are
@@ -96,7 +95,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.3.0"
+SERVICE_VERSION = "1.4.0"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -335,18 +334,14 @@ def _paid_route_price(path: Optional[str]) -> Optional[float]:
     for entry in _CATALOG:
         if entry["path"] == resolved:
             return entry["price_usd"]
-    # The machine-service catalog prices its own routes by the same rule:
-    # only a service that is live right now answers with a price, so an
-    # unconfigured capability 404s instead of quoting a sale it cannot make.
-    #
-    # The worker network, too, prices only its own routes from its own
-    # catalog, and only after the audit catalog, so neither family can shadow
-    # or alter what an audit route charges.
+    # The worker network prices its own routes from its own catalog, and
+    # only after the audit catalog, so it can never shadow or alter what an
+    # audit route charges.
     if workers is not None:
         worker_price = workers.catalog.price_of(resolved)
         if worker_price is not None:
             return worker_price
-    return services.price_of_path(resolved)
+    return None
 
 
 _CREDENTIAL_HEADERS = ("x-api-key", "x-payment", "payment-signature", "authorization")
@@ -703,17 +698,7 @@ def _bazaar_extension_for_path(path: Optional[str]) -> dict:
                     input_schema=worker.input_schema,
                     output_example={"status": "ok"},
                 )
-        # Service routes carry their own schemas; same Bazaar builder, so a
-        # facilitator indexes /svc routes exactly as it indexes the audits.
-        svc = services.schema_for_path(path)
-        if svc is None:
-            return {}
-        input_schema, input_example, output_example = svc
-        return x402_payments.bazaar_extension_for_body(
-            input_example=input_example,
-            input_schema=input_schema,
-            output_example=output_example,
-        )
+        return {}
     schema = (
         _MCP_URL_SCHEMA if entry["input"] is _URL_INPUT_SCHEMA else _MCP_HTML_OR_URL_SCHEMA
     )
@@ -740,9 +725,6 @@ def _route_description(path: Optional[str]) -> str:
             worker_description = workers.catalog.description_of(resolved)
             if worker_description:
                 return worker_description
-        svc = services.route_description(resolved)
-        if svc is not None:
-            return svc
     return "HubVibe site audit"
 
 
@@ -1718,28 +1700,6 @@ async def mcp_manifest():
             for field in ("title", "inputSchema", "outputSchema", "annotations"):
                 tool[field] = live[field]
 
-    # Machine-service tools are deployment state -- which are live depends on
-    # what this node has configured -- so the static file cannot list them
-    # without asserting availability it cannot know (the exact fault the
-    # auth.methods fix above exists to prevent). Append the live ones here,
-    # from the same _mcp_tools() the /mcp endpoint answers with, each mapped
-    # to its REST route like every audit tool above.
-    known_names = {tool.get("name") for tool in manifest.get("tools", [])}
-    service_prices = services.mcp_tool_prices()
-    for live in _mcp_tools():
-        name = live.get("name")
-        if name in known_names or name not in service_prices:
-            continue
-        entry = dict(live)
-        service_path = services.tool_call_id_of(name)
-        if service_path:
-            entry["httpEndpoint"] = {
-                "path": service_path,
-                "method": "POST",
-                "price_usd": service_prices[name],
-            }
-        manifest.setdefault("tools", []).append(entry)
-
     return JSONResponse(content=manifest, media_type="application/json")
 
 
@@ -1944,7 +1904,7 @@ def _openapi_with_payment_info() -> dict:
     reverse_aliases: dict = {}
     for alias, target in _CATALOG_ALIASES.items():
         reverse_aliases.setdefault(target, []).append(alias)
-    for entry in _CATALOG + services.discovery_entries() + _worker_discovery_entries():
+    for entry in _CATALOG + _worker_discovery_entries():
         offers = list(
             mpp_payments.discovery_offers(entry["price_usd"], description=entry["description"])
         )
@@ -1994,8 +1954,7 @@ def _openapi_with_payment_info() -> dict:
                     "example", entry.get("input_example") or {"url": "https://example.com"}
                 )
     doc["x-service-info"] = {
-        "categories": ["accessibility", "seo", "security", "performance"]
-        + sorted({e["category"] for e in services.catalog()}),
+        "categories": ["accessibility", "seo", "security", "performance"],
         "docs": {
             "apiReference": "/docs",
             "homepage": "/",
@@ -2037,7 +1996,6 @@ def _max_catalog_price_cents() -> int:
     could settle here.
     """
     prices = [round(entry["price_usd"] * 100) for entry in _CATALOG]
-    prices += services.price_cents_list()
     return max(prices)
 
 
@@ -2183,11 +2141,7 @@ async def agent_manifest(request: Request):
                 "payment_methods": live_methods,
                 "note": "Alias of /audit/wcag, kept for backward compatibility.",
             },
-        ]
-        # The machine-service catalog: each entry is live on this deployment
-        # right now, by the same rule the payment rails follow. See
-        # /svc/health for provider-level state.
-        + services.agent_endpoints(base, live_methods, _AUTH_DESCRIPTION),
+        ],
         # The worker network is listed SEPARATELY from `endpoints`, not folded
         # into it. These are not audits: an audit is a deterministic rule
         # check against a page, while a worker is a task carried out against
@@ -2603,9 +2557,6 @@ def _mcp_tools() -> list:
                 "annotations": dict(_MCP_AUDIT_ANNOTATIONS, title=_MCP_TOOL_TITLES[path]),
             }
         )
-    # Live machine-service tools ride the same list, from the same rule:
-    # only capabilities that can actually run are advertised.
-    tools.extend(services.mcp_tools())
     return tools
 
 
@@ -2616,12 +2567,6 @@ _MCP_TOOL_PRICES = {
 
 def _mcp_run_tool(name: str, args: dict) -> dict:
     """Execute one audit tool. Assumes payment has already been authorised."""
-    if services.is_service_tool(name):
-        result, call_id = services.execute_tool(name, args)
-        # The ledger row waits for the billing outcome; _mcp_tools_call pops
-        # this and finalizes once _bill has decided what actually happened.
-        result["_ledger_call_id"] = call_id
-        return result
     url = args.get("url")
     html = args.get("html")
 
@@ -2841,33 +2786,23 @@ def _mcp_tools_call(
 
     price = _MCP_TOOL_PRICES.get(name)
     if price is None:
-        price = services.tool_price(name)
-    if price is None:
         return _mcp_tool_error(request_id, f"Unknown tool: {name}")
-    if services.is_service_tool(name):
-        # Service tools carry their own validators -- including the same
-        # target-URL gate for the ones that fetch -- run here for free,
-        # before any payment is read, exactly like the audit gates below.
-        problem = services.validate_tool_args(name, args)
-        if problem is not None:
-            return _mcp_tool_error(request_id, f"{problem}. Nothing was charged.")
-    else:
-        if not args.get("url") and not args.get("html"):
-            return _mcp_tool_error(request_id, "Provide 'url' (or 'html' for wcag/seo).")
-        # Same gates as the REST routes, before any payment is read: a URL
-        # this service will not fetch, or a body no browser would render.
-        html_arg = args.get("html")
-        if isinstance(html_arg, str) and len(html_arg) > MAX_HTML_BYTES:
-            return _mcp_tool_error(
-                request_id,
-                f"'html' is {len(html_arg)} bytes; the limit is {MAX_HTML_BYTES}. "
-                "Nothing was charged.",
-            )
-        url_problem = _target_url_problem(args.get("url"))
-        if url_problem is not None:
-            return _mcp_tool_error(
-                request_id, f"'url' {url_problem}. Nothing was charged."
-            )
+    if not args.get("url") and not args.get("html"):
+        return _mcp_tool_error(request_id, "Provide 'url' (or 'html' for wcag/seo).")
+    # Same gates as the REST routes, before any payment is read: a URL
+    # this service will not fetch, or a body no browser would render.
+    html_arg = args.get("html")
+    if isinstance(html_arg, str) and len(html_arg) > MAX_HTML_BYTES:
+        return _mcp_tool_error(
+            request_id,
+            f"'html' is {len(html_arg)} bytes; the limit is {MAX_HTML_BYTES}. "
+            "Nothing was charged.",
+        )
+    url_problem = _target_url_problem(args.get("url"))
+    if url_problem is not None:
+        return _mcp_tool_error(
+            request_id, f"'url' {url_problem}. Nothing was charged."
+        )
 
     # The x402 MCP transport carries the payment INSIDE the JSON-RPC
     # call, as `params._meta["x402/payment"]` -- an MCP client has no
@@ -2901,18 +2836,6 @@ def _mcp_tools_call(
 
     try:
         result = _mcp_run_tool(name, args)
-    except services.ServiceFailure as exc:
-        # Every eligible provider failed: not billed, and the payer learns
-        # per provider what went wrong -- retryable outage or refused input.
-        _unbill_failed_audit(auth)
-        services.finalize_call(exc.call_id, auth.payment_method, billed=False)
-        details = {"billed": False, "failed_providers": exc.failures}
-        _attach_issued_key(details, auth)
-        return _mcp_tool_error(
-            request_id,
-            f"Service could not complete: {exc.detail}. Nothing was charged.",
-            details,
-        )
     except Exception as exc:
         # Not billed: _bill only runs on success, same as the REST routes,
         # and whatever authentication already took is handed back.
@@ -2925,9 +2848,6 @@ def _mcp_tools_call(
 
     warning = _bill(auth, price_usd=price)
     refused = _settlement_refused(auth)
-    ledger_call_id = result.pop("_ledger_call_id", None)
-    if ledger_call_id is not None:
-        services.finalize_call(ledger_call_id, auth.payment_method, billed=refused is None)
     if refused is not None:
         # Same rule as the REST routes: a refused settle withholds the audit
         # and re-issues the paywall, here in the shape the MCP client pays.
@@ -3452,143 +3372,6 @@ def audit_bundle(
     if warning:
         result["billing_warning"] = warning
     return _deliver(result, auth)
-
-
-# ---------------------------------------------------------------------------
-# Machine-service routes (/svc/*).
-#
-# The audits above are one capability; these are the rest of the catalog --
-# LLM inference, search, extraction, chain/market/prediction data, media,
-# sandboxed compute, composite research -- defined in services.py and sold
-# through the SAME payment gate: validate for free, authorise with
-# _authorize_and_rate_limit, execute, settle with _bill, deliver with
-# _deliver. No second payment path exists; a service route and an audit
-# route are indistinguishable to the money.
-#
-# Routes are registered from the live catalog, so a capability whose
-# providers are not configured has no route at all -- matching every other
-# surface (price middleware, MCP tools, agent.json), which all answer from
-# the same catalog() call.
-# ---------------------------------------------------------------------------
-
-
-def _failed_service_response(auth, exc: "services.ServiceFailure") -> JSONResponse:
-    """The 502 for a service call no provider could complete: nothing
-    charged (same unbilling as a failed audit), the per-provider reasons on
-    the body so the payer can tell an outage from a refusal, and anything
-    the payer is owed regardless still delivered."""
-    _unbill_failed_audit(auth)
-    services.finalize_call(exc.call_id, getattr(auth, "payment_method", None), billed=False)
-    content = {
-        "status": "error",
-        "detail": f"Service could not complete: {exc.detail}. "
-                  "Nothing was charged for this request.",
-        "failed_providers": exc.failures,
-        "billed": False,
-    }
-    _attach_issued_key(content, auth)
-    return JSONResponse(status_code=502, content=content)
-
-
-def _make_service_route(entry: dict):
-    path = entry["path"]
-    price_usd = entry["price_usd"]
-
-    def service_route(
-        request: Request,
-        payload: Any = Body(...),
-        x_api_key: Optional[str] = Header(None),
-        x_payment: Optional[str] = Header(None),
-        authorization: Optional[str] = Header(None),
-        x_idempotency_key: Optional[str] = Header(None),
-    ):
-        # Free refusal first, same order as the audit routes: a request this
-        # service cannot act on must cost nothing and burn no nonce.
-        problem = services.validate_route(path, payload)
-        if problem is not None:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "status": "error",
-                    "detail": f"{problem}. Nothing was charged for this request.",
-                    "billed": False,
-                },
-            )
-
-        # Duplicate suppression for keyed callers: a retried request with
-        # the same X-Idempotency-Key returns the first delivery before any
-        # payment is read. Scoped to the presented key, so nobody can read
-        # a result someone else paid for. x402 payers are excluded on
-        # purpose -- their replay protection is the protocol's nonce ledger.
-        replay = services.idempotent_replay(x_api_key, x_idempotency_key, path)
-        if replay is not None:
-            return replay
-
-        auth, err = _authorize_and_rate_limit(
-            x_api_key, x_payment, authorization, request, price_usd=price_usd
-        )
-        if err:
-            return err
-
-        try:
-            result, call_id = services.execute_route(path, payload)
-        except services.ServiceFailure as exc:
-            return _failed_service_response(auth, exc)
-        except Exception as exc:  # an engine bug must still bill nothing
-            failure = services.ServiceFailure(entry["id"], [f"internal: {type(exc).__name__}"])
-            logging.getLogger(__name__).exception("service route %s crashed", path)
-            return _failed_service_response(auth, failure)
-
-        warning = _bill(auth, price_usd=price_usd)
-        if warning:
-            result["billing_warning"] = warning
-        settle_refused = (
-            getattr(getattr(auth, "pending_payment", None), "settle_state", None) == "refused"
-        )
-        services.finalize_call(call_id, auth.payment_method, billed=not settle_refused)
-        if not settle_refused:
-            services.idempotent_store(x_api_key, x_idempotency_key, path, result)
-        return _deliver(result, auth)
-
-    service_route.__name__ = f"svc_{entry['id']}"
-    service_route.__doc__ = entry["description"]
-    return service_route
-
-
-for _service_entry in services.catalog():
-    app.post(
-        _service_entry["path"],
-        tags=["services"],
-        summary=_service_entry["title"],
-    )(_make_service_route(_service_entry))
-
-
-@app.get("/svc/health", tags=["discovery"])
-async def services_health():
-    """Which machine services are live and each provider's circuit state.
-
-    Free, like every discovery surface: an agent deciding whether to route
-    paid work here should not have to spend to learn the answer. Names and
-    booleans only -- no configuration values, no keys, no addresses.
-    """
-    return services.health_snapshot()
-
-
-@app.get("/svc/metrics")
-async def services_metrics(request: Request, days: Optional[float] = None):
-    """The operator's revenue/margin ledger: per service and provider --
-    calls, success rate, latency, revenue, estimated provider cost, margin.
-
-    Gated on the internal API key because it is business telemetry, not a
-    discovery surface. Absent that key being configured, the route reveals
-    nothing (404), including whether a ledger exists.
-    """
-    presented = request.headers.get("x-api-key") or ""
-    if not API_KEY or not secrets.compare_digest(
-        presented.encode("utf-8"), API_KEY.encode("utf-8")
-    ):
-        raise HTTPException(status_code=404, detail="Not Found")
-    return services.metrics_summary(days=days)
 
 
 # --- worker network ---------------------------------------------------------

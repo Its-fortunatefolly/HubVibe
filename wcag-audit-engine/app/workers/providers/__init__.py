@@ -13,9 +13,14 @@ Every adapter exposes:
 and one or more async methods returning runtime.ProviderResult.
 """
 
-from . import base_rpc, bigquery, coinbase_market, gemini, polymarket, web  # noqa: F401
+from . import (  # noqa: F401
+    base_rpc, bigquery, code_exec, coinbase_market, completion, gemini, imagen,
+    maps_grounding, mcp_probe, polymarket, search_grounding, stt, tts, veo, web,
+)
 
-ALL = (gemini, bigquery, base_rpc, coinbase_market, polymarket, web)
+ALL = (gemini, bigquery, base_rpc, coinbase_market, polymarket, web,
+      search_grounding, code_exec, imagen, tts, stt, mcp_probe, completion,
+      maps_grounding, veo)
 
 
 def health() -> dict:

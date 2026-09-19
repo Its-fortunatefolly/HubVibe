@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe-site-audit",
   "description": "Rule-based, verifiable site compliance audits -- accessibility (axe-core), SEO, security headers, and performance. Every result is a deterministic check against the actual page, never an LLM guess, and a check that couldn't run is never reported as a false pass.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {

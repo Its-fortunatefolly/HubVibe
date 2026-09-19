@@ -106,5 +106,33 @@ class _Polymarket:
             cost_micros=0, cost_measured=True, usage=f"markets={len(shaped)}")
 
 
+    async def by_slug(self, slug: str) -> runtime.ProviderResult:
+        # `closed` must be sent explicitly: without it the list endpoint can
+        # return a stale closed market for a slug that has since been reused,
+        # so the caller is billed for the wrong market's prices.
+        markets = await self._get("/markets", {"slug": slug, "closed": "false"})
+        shaped = [self._shape(m) for m in markets if isinstance(m, dict)]
+        if not shaped:
+            raise runtime.InvalidRequest(f"No market found for slug '{slug}'.")
+        return runtime.ProviderResult(
+            value={"slug": slug, "market": shaped[0]},
+            cost_micros=0, cost_measured=True, usage=f"slug={slug}")
+
+    async def events(self, limit: int = 10, active_only: bool = True) -> runtime.ProviderResult:
+        params = {"limit": max(1, min(int(limit), 50)), "order": "volume", "ascending": "false"}
+        if active_only:
+            params.update({"active": "true", "closed": "false"})
+        data = await self._get("/events", params)
+        events = [
+            {"id": e.get("id"), "title": e.get("title"), "slug": e.get("slug"),
+             "volume": e.get("volume"), "end_date": e.get("endDate"),
+             "market_count": len(e.get("markets") or [])}
+            for e in data if isinstance(e, dict)
+        ]
+        return runtime.ProviderResult(
+            value={"events": events, "count": len(events)},
+            cost_micros=0, cost_measured=True, usage=f"events={len(events)}")
+
+
 PROVIDERS = [_Polymarket()]
 PROVIDER = PROVIDERS[0]

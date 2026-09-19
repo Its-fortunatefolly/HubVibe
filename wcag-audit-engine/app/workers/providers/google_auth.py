@@ -139,6 +139,7 @@ def reset_for_tests() -> None:
     with _lock:
         _creds = _project = _error = None
         _resolved = False
+        _scoped.clear()
 
 
 def _token_blocking() -> str:
@@ -171,6 +172,43 @@ async def headers() -> dict:
     """
     return {
         "Authorization": f"Bearer {await token()}",
+        "X-Goog-User-Project": project() or "",
+        "Content-Type": "application/json",
+    }
+
+
+_scoped = {}
+
+
+def _scoped_token_blocking(scope: str) -> str:
+    """A token for ONE extra OAuth scope, from the same credential.
+
+    The shared credential is minted for `cloud-platform`, which some Google
+    APIs do not accept (Maps Grounding Lite wants `maps-platform.mcp`). A
+    service-account credential can be re-scoped without a second key; ambient
+    Compute/Cloud Shell credentials ignore requested scopes, which is why a
+    worker relying on this must be proven on the deployment that serves it.
+    """
+    creds, _ = _resolve()
+    if creds is None:
+        raise RuntimeError(unavailable_reason())
+    with _lock:
+        scoped = _scoped.get(scope)
+        if scoped is None:
+            scoped = (creds.with_scopes([_SCOPE, scope])
+                      if hasattr(creds, "with_scopes") else creds)
+            _scoped[scope] = scoped
+    if not scoped.valid:
+        from google.auth.transport.requests import Request
+
+        scoped.refresh(Request())
+    return scoped.token
+
+
+async def scoped_headers(scope: str) -> dict:
+    """`headers()`, but with a token carrying `scope` as well."""
+    return {
+        "Authorization": f"Bearer {await asyncio.to_thread(_scoped_token_blocking, scope)}",
         "X-Goog-User-Project": project() or "",
         "Content-Type": "application/json",
     }

@@ -19,6 +19,7 @@ from .. import runtime
 from ..providers import bigquery, gemini
 
 _TABLE = re.compile(r"^[A-Za-z0-9_\-]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$")
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _SQL_AUTHOR = (
     "You write BigQuery Standard SQL. Return ONLY the SQL, with no markdown "
@@ -128,4 +129,106 @@ async def answer_question(ctx, payload: dict) -> dict:
     }
 
 
-SKILLS = {"data.query": run_sql, "data.question": answer_question}
+def _id_cols_sql(payload: dict) -> str:
+    """`, id_cols => [...]` for a table holding several series at once (one
+    row per series per timestamp), or "" when the caller names none."""
+    id_cols = payload.get("id_cols")
+    if id_cols is None:
+        return ""
+    if not isinstance(id_cols, list) or not id_cols or \
+            not all(isinstance(c, str) and _IDENT.match(c) for c in id_cols):
+        raise runtime.InvalidRequest(
+            "`id_cols`, when given, must be a non-empty list of column names.")
+    return ", id_cols => [" + ", ".join(f"'{c}'" for c in id_cols) + "]"
+
+
+async def forecast(ctx, payload: dict) -> dict:
+    """Forecast a time series in a BigQuery table using AI.FORECAST.
+
+    Google's own pretrained TimesFM model, called directly -- no model to
+    train, no model to own. Point it at a table and the columns to read.
+    """
+    table = (payload.get("table") or "").strip()
+    if not _TABLE.match(table):
+        raise runtime.InvalidRequest(
+            "`table` must be a fully qualified BigQuery table: project.dataset.table.")
+    timestamp_col = (payload.get("timestamp_col") or "").strip()
+    data_col = (payload.get("data_col") or "").strip()
+    if not timestamp_col or not data_col:
+        raise runtime.InvalidRequest("`timestamp_col` and `data_col` are required.")
+    if not _IDENT.match(timestamp_col) or not _IDENT.match(data_col):
+        raise runtime.InvalidRequest("`timestamp_col`/`data_col` must be plain column names.")
+    try:
+        horizon = int(payload.get("horizon", 10))
+    except (TypeError, ValueError):
+        raise runtime.InvalidRequest("`horizon` must be a whole number.")
+    if not 1 <= horizon <= 1000:
+        raise runtime.InvalidRequest("`horizon` must be between 1 and 1000.")
+
+    id_cols_sql = _id_cols_sql(payload)
+
+    sql = (
+        f"SELECT * FROM AI.FORECAST((SELECT * FROM `{table}`), "
+        f"data_col => '{data_col}', timestamp_col => '{timestamp_col}', "
+        f"horizon => {horizon}{id_cols_sql})")
+
+    async def call(provider):
+        return await provider.query(sql, max_gib=payload.get("max_scan_gib"))
+
+    value = await ctx.run("forecast", bigquery.PROVIDERS, call, per_attempt_seconds=150)
+    return {
+        "table": table, "timestamp_col": timestamp_col, "data_col": data_col,
+        "horizon": horizon, "columns": value["columns"], "rows": value["rows"],
+        "row_count": value["row_count"], "gib_processed": value["gib_processed"],
+    }
+
+
+async def detect_anomalies(ctx, payload: dict) -> dict:
+    """Detect anomalies in a target table's time series, forecast against a
+    history table, using AI.DETECT_ANOMALIES.
+
+    Two tables because that is the function's own contract: TimesFM forecasts
+    from the history table and flags where the target table's actual values
+    depart from that forecast. Both must share the same column names.
+    """
+    history_table = (payload.get("history_table") or "").strip()
+    target_table = (payload.get("target_table") or "").strip()
+    if not _TABLE.match(history_table):
+        raise runtime.InvalidRequest(
+            "`history_table` must be a fully qualified BigQuery table: project.dataset.table.")
+    if not _TABLE.match(target_table):
+        raise runtime.InvalidRequest(
+            "`target_table` must be a fully qualified BigQuery table: project.dataset.table.")
+    timestamp_col = (payload.get("timestamp_col") or "").strip()
+    data_col = (payload.get("data_col") or "").strip()
+    if not timestamp_col or not data_col:
+        raise runtime.InvalidRequest("`timestamp_col` and `data_col` are required.")
+    if not _IDENT.match(timestamp_col) or not _IDENT.match(data_col):
+        raise runtime.InvalidRequest("`timestamp_col`/`data_col` must be plain column names.")
+    try:
+        threshold = float(payload.get("anomaly_prob_threshold", 0.95))
+    except (TypeError, ValueError):
+        raise runtime.InvalidRequest("`anomaly_prob_threshold` must be a number.")
+    if not 0.5 <= threshold <= 0.999:
+        raise runtime.InvalidRequest("`anomaly_prob_threshold` must be between 0.5 and 0.999.")
+
+    sql = (
+        f"SELECT * FROM AI.DETECT_ANOMALIES(TABLE `{history_table}`, TABLE `{target_table}`, "
+        f"data_col => '{data_col}', timestamp_col => '{timestamp_col}', "
+        f"anomaly_prob_threshold => {threshold}{_id_cols_sql(payload)})")
+
+    async def call(provider):
+        return await provider.query(sql, max_gib=payload.get("max_scan_gib"))
+
+    value = await ctx.run("detect_anomalies", bigquery.PROVIDERS, call, per_attempt_seconds=150)
+    return {
+        "history_table": history_table, "target_table": target_table,
+        "timestamp_col": timestamp_col, "data_col": data_col,
+        "anomaly_prob_threshold": threshold, "columns": value["columns"],
+        "rows": value["rows"], "row_count": value["row_count"],
+        "gib_processed": value["gib_processed"],
+    }
+
+
+SKILLS = {"data.query": run_sql, "data.question": answer_question,
+          "data.forecast": forecast, "data.anomalies": detect_anomalies}

@@ -45,26 +45,31 @@ node is in [`deploy/vps/README.md`](../deploy/vps/README.md).
 - Republish the MCP registry entry: bump `version` in `server.json` and merge;
   the "Publish MCP registry entry" workflow does the rest with OIDC.
 
-## Machine services (/svc/*)
+## Worker network (/work/*)
 
-- The service catalog lives in `wcag-audit-engine/app/services.py`; the
-  providers in `service_providers.py`. Same payment gate as the audits,
-  no second payment path.
-- With `.env` untouched, the keyless services are live (fetch, extract,
-  rpc, market, prediction). Keys switch on the rest: `ANTHROPIC_API_KEY` /
-  `GEMINI_API_KEY` / `OPENAI_API_KEY` (llm; the latter two also image+tts),
-  `BRAVE_SEARCH_API_KEY` / `SERPER_API_KEY` (search; search+llm together
-  enable research), `SVC_CODE_EXEC=1` (sandboxed code). `SVC_DISABLED=all`
-  restores the audit-only surface exactly; restart the container after any
-  of these change.
+- The catalog lives in `wcag-audit-engine/app/workers/catalog.py`; provider
+  adapters in `workers/providers/`, the jobs themselves in `workers/skills/`.
+  Same payment gate as the audits (`workers/router.py` is handed the core's
+  own `_authorize_and_rate_limit`/`_bill`/`_deliver` functions at startup;
+  it imports no payment code of its own), no second payment path.
+- With `.env` untouched, the keyless workers are live (`chain.*`,
+  `market.quote/rates/ticker`, `prediction.*`, `extract.page`,
+  `fetch.raw`). Every Vertex/BigQuery-backed worker (LLM inference, search,
+  code execution, image/speech, BigQuery, research, monitoring) shares one
+  Google credential (`GOOGLE_APPLICATION_CREDENTIALS`, ADC) — already live
+  on the box. Three workers need one more step: `llm.generate`'s Claude
+  option needs Model Garden access enabled for Claude in this project;
+  `maps.*` needs `MAPS_GROUNDING_LITE_API_KEY`; `video.generate` needs
+  `WORKER_VEO_ENABLED=1`, set only after confirming the configured Veo
+  model resolves here (see `workers/providers/veo.py`). Restart the
+  container after any env change.
 - The usage/margin ledger is SQLite beside the key store
-  (`/data/hubvibe-services.db` on the box). Read it from anywhere:
-  `curl -H "X-API-Key: $AUDIT_API_KEY" https://hubvibe-io.com/svc/metrics`
-  — per service and provider: calls, success rate, latency, revenue,
-  estimated provider cost, margin. `GET /svc/health` is the free
-  availability/circuit view.
+  (`/data/hubvibe-workers.db` on the box, `WORKER_LEDGER_PATH`) — read via
+  `scripts/worker-ledger.sh`. `GET /work` (free) lists what is live and,
+  for anything not, exactly why.
 - After enabling a new capability, re-seed the Bazaar indexes
-  (`refresh-listings.sh`) so agents can find it by capability.
+  (`refresh-listings.sh`, or `python3 scripts/seed_listings.py` for
+  `/work/*` specifically) so agents can find it by capability.
 
 ## Settled decisions
 
@@ -72,8 +77,8 @@ node is in [`deploy/vps/README.md`](../deploy/vps/README.md).
   The website is an about-page, not a product surface.
 - The price lives in one place per catalog: `_CATALOG` in
   `wcag-audit-engine/app/main.py` for the audits, `CATALOG` in
-  `wcag-audit-engine/app/services.py` for the machine services; the 402,
-  the agent card, the MCP tools and the Bazaar records derive from them.
+  `wcag-audit-engine/app/workers/catalog.py` for the worker network; the
+  402, the agent card, the MCP tools and the Bazaar records derive from them.
   After a price or description change, every index must be re-paid to show it.
 - Never advertise a rail that cannot settle: everything fails closed and
   omits what is not configured.

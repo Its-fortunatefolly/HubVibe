@@ -287,8 +287,12 @@ def _make_handler(worker):
                 body = json.loads(bytes(response.body).decode())
                 body["reason"] = exc.reason
                 body["worker"] = worker.name
-                return JSONResponse(status_code=status, content=body,
-                                    headers=dict(response.headers))
+                # The core's headers minus the ones describing ITS body: the
+                # body just grew, and a copied Content-Length made every
+                # failed worker call die mid-response instead of a clean 502.
+                headers = {k: v for k, v in response.headers.items()
+                           if k.lower() not in ("content-length", "content-type")}
+                return JSONResponse(status_code=status, content=body, headers=headers)
             except Exception:  # pragma: no cover
                 return response
         except Exception as exc:  # pragma: no cover - unexpected adapter bug

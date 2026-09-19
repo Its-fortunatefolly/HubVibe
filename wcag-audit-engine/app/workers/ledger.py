@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS worker_results (
     worker TEXT NOT NULL, stored_at REAL NOT NULL, state TEXT NOT NULL,
     result_json TEXT
 );
+
+CREATE TABLE IF NOT EXISTS monitor_snapshots (
+    url TEXT PRIMARY KEY, content_hash TEXT NOT NULL, text TEXT,
+    title TEXT, saved_at REAL NOT NULL
+);
 """
 
 
@@ -372,6 +377,49 @@ def repeat_payers(since_seconds: Optional[float] = None) -> list:
         except Exception as exc:
             _note(exc)
             return []
+
+
+# --- monitor.snapshot / monitor.check state ---------------------------------
+#
+# The only piece of state in this service that OUTLIVES a single call: two
+# separate paid purchases (snapshot, then check) share one row per URL so
+# the second purchase can say what changed since the first.
+
+def save_monitor_snapshot(url: str, content_hash: str, text: str,
+                          title: Optional[str]) -> None:
+    with _lock:
+        conn = _safe_connect()
+        if conn is None:
+            return
+        try:
+            conn.execute(
+                "INSERT INTO monitor_snapshots (url, content_hash, text, title, saved_at) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET "
+                "content_hash=excluded.content_hash, text=excluded.text, "
+                "title=excluded.title, saved_at=excluded.saved_at",
+                (url, content_hash, text, title, time.time()))
+            conn.commit()
+        except Exception as exc:
+            _note(exc)
+
+
+def get_monitor_snapshot(url: str) -> Optional[dict]:
+    with _lock:
+        conn = _safe_connect()
+        if conn is None:
+            return None
+        try:
+            row = conn.execute(
+                "SELECT content_hash, text, title, saved_at FROM monitor_snapshots "
+                "WHERE url=?", (url,)).fetchone()
+            if row is None:
+                return None
+            return {"content_hash": row["content_hash"], "text": row["text"] or "",
+                    "title": row["title"],
+                    "age_seconds": round(time.time() - row["saved_at"], 1)}
+        except Exception as exc:
+            _note(exc)
+            return None
 
 
 def provider_health(since_seconds: Optional[float] = None) -> list:

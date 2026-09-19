@@ -186,7 +186,8 @@ class Execution:
 
 async def run_with_policy(providers: list, call: Callable, deadline_seconds: float,
                           per_attempt_seconds: Optional[float] = None,
-                          validate: Optional[Callable] = None) -> Execution:
+                          validate: Optional[Callable] = None,
+                          max_attempts: Optional[int] = None) -> Execution:
     """Run `call(provider)` across `providers` in order until one succeeds.
 
     Order is the fallback order. Within a provider, transient failures retry
@@ -217,7 +218,8 @@ async def run_with_policy(providers: list, call: Callable, deadline_seconds: flo
 
         execution.providers_tried.append(provider.id)
 
-        for n in range(1, _MAX_ATTEMPTS + 1):
+        attempt_cap = max_attempts if max_attempts is not None else _MAX_ATTEMPTS
+        for n in range(1, attempt_cap + 1):
             remaining = ends_at - time.monotonic()
             if remaining <= 0:
                 raise DeadlineExceeded(
@@ -239,6 +241,12 @@ async def run_with_policy(providers: list, call: Callable, deadline_seconds: flo
                 last_error = TransientProviderError(
                     f"{provider.id} did not answer within {window:.0f}s.",
                     reason="provider_timeout")
+            except InvalidRequest:
+                # The CALLER's input is wrong, not any provider's fault -- no
+                # retry, no fallback to the next provider (it would refuse
+                # the same input too), straight out to the 400 the router
+                # already maps `invalid_request` to.
+                raise
             except ProviderUnavailable as exc:
                 # Not a health signal: it was never there. Leave its breaker alone.
                 attempt.latency_ms = int((time.monotonic() - t0) * 1000)
@@ -278,7 +286,7 @@ async def run_with_policy(providers: list, call: Callable, deadline_seconds: flo
                 execution.latency_ms = int((time.monotonic() - started) * 1000)
                 return execution
 
-            if n < _MAX_ATTEMPTS:
+            if n < attempt_cap:
                 delay = _backoff_delay(n)
                 if (time.monotonic() + delay) >= ends_at:
                     break

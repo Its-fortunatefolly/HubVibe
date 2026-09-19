@@ -348,23 +348,23 @@
     <div class="audits">
       <div class="audit">
         <h3>AI models</h3>
-        <p>LLM inference routed across Claude, Gemini and OpenAI with automatic failover — the exact model that ran comes back with measured token usage.</p>
-        <div class="route">POST /work/llm/analyze · /work/llm/extract · /svc/llm</div>
+        <p>LLM inference across Gemini and Claude (via Vertex Model Garden), with provider and model choice — the exact model that ran comes back with measured token usage.</p>
+        <div class="route">POST /work/llm/analyze · /work/llm/extract · /work/llm/generate</div>
       </div>
       <div class="audit">
         <h3>Search &amp; research</h3>
-        <p>Web search, guarded page fetch, structured content extraction — and a composite research job that returns one cited answer.</p>
-        <div class="route">POST /work/research/brief · /work/research/page_facts · /work/extract/page · /svc/search</div>
+        <p>Grounded web search, guarded page fetch, structured extraction — and composite research jobs that return one cited answer, on a page, a question, or a company.</p>
+        <div class="route">POST /work/search/web · /work/research/web · /work/research/company</div>
       </div>
       <div class="audit">
         <h3>Compute &amp; data</h3>
-        <p>BigQuery queries and plain-language questions answered from a dataset, plus sandboxed code execution on deployments that enable it.</p>
-        <div class="route">POST /work/data/query · /work/data/question · /svc/code</div>
+        <p>BigQuery queries, plain-language questions, forecasting and anomaly detection against a dataset, plus code execution in Google's own hosted sandbox.</p>
+        <div class="route">POST /work/data/query · /work/data/forecast · /work/code/execute</div>
       </div>
       <div class="audit">
         <h3>Blockchain</h3>
         <p>Read-only JSON-RPC against Base mainnet: balances, blocks, transactions, receipts, logs, contract calls. No broadcasting, by design.</p>
-        <div class="route">POST /work/chain/address · /work/chain/transaction · /svc/rpc</div>
+        <div class="route">POST /work/chain/address · /work/chain/transaction · /work/chain/rpc</div>
       </div>
       <div class="audit">
         <h3>Market intelligence</h3>
@@ -373,8 +373,8 @@
       </div>
       <div class="audit">
         <h3>Media</h3>
-        <p>Image generation and voice synthesis from a text prompt, delivered in the response itself — the only channel a per-call payer needs.</p>
-        <div class="route">POST /svc/image · /svc/tts</div>
+        <p>Image generation (Imagen), voice synthesis and transcription (Cloud Speech), delivered in the response itself — the only channel a per-call payer needs.</p>
+        <div class="route">POST /work/image/generate · /work/speech/synthesize</div>
       </div>
       <div class="audit">
         <h3>Site audits</h3>
@@ -390,9 +390,9 @@
     <p class="footnote">
       Which capabilities are live on a given node is deployment state, not a
       promise: the <a href="/.well-known/agent.json">agent manifest</a> lists
-      exactly what this node sells right now, <a href="/work">/work</a> indexes
-      the worker network, and <a href="/svc/health">/svc/health</a> reports per-provider availability
-      for free. A capability without a configured provider is omitted, never
+      exactly what this node sells right now, and <a href="/work">/work</a>
+      indexes the worker network for free, including why anything unavailable
+      is off. A capability without a configured provider is omitted, never
       advertised broken.
     </p>
   </section>
