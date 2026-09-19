@@ -6,11 +6,13 @@ shape mcp_probe.py already speaks to inspect a THIRD PARTY's server.
 
 TWO WAYS TO AUTHENTICATE, NEITHER ASSUMED. Google documents both an API key
 (`X-Goog-Api-Key`, MAPS_GROUNDING_LITE_API_KEY) and OAuth with the scope
-`maps-platform.mcp`. The OAuth path reuses this package's one Google
-credential re-scoped (google_auth.scoped_headers), so no second secret is
-needed -- but `cloud-platform` alone is refused ("insufficient authentication
-scopes", verified 2026-09-19), and ambient Cloud Shell credentials cannot be
-re-scoped at all. So the OAuth path is used only when the operator sets
+`https://www.googleapis.com/auth/maps-platform.mapstools`
+(developers.google.com/maps/ai/grounding-lite). The OAuth path reuses this
+package's one Google credential re-scoped (google_auth.scoped_headers), so no
+second secret is needed. Verified on the box's service account 2026-09-19:
+`cloud-platform` alone lists tools but every tools/call is 403 "insufficient
+authentication scopes"; with the mapstools scope all three tools answer.
+Ambient Cloud Shell credentials cannot be re-scoped at all. So the OAuth path is used only when the operator sets
 WORKER_MAPS_ADC=1 after a real call succeeded on that deployment. Until one
 of the two is set, these workers stay unavailable and are never advertised.
 """
@@ -27,7 +29,7 @@ from .base_rpc import USER_AGENT
 
 _ENDPOINT = os.environ.get("WORKER_MAPS_GROUNDING_URL", "https://mapstools.googleapis.com/mcp")
 _TIMEOUT = float(os.environ.get("WORKER_MAPS_TIMEOUT_SECONDS", "30"))
-_MAPS_SCOPE = "https://www.googleapis.com/auth/maps-platform.mcp"
+_MAPS_SCOPE = "https://www.googleapis.com/auth/maps-platform.mapstools"
 
 
 def _api_key() -> str:
@@ -78,7 +80,7 @@ class _MapsGroundingLite:
         if response.status_code in (401, 403):
             raise runtime.ProviderUnavailable(
                 "Maps Grounding Lite refused the credential (API key restriction, or "
-                "an OAuth token without the maps-platform.mcp scope).")
+                "an OAuth token without the maps-platform.mapstools scope).")
         if response.status_code in (429, 500, 502, 503, 504):
             raise runtime.TransientProviderError(
                 f"Maps Grounding Lite returned {response.status_code}",

@@ -278,7 +278,7 @@ def test_maps_sends_a_maps_scoped_token_on_adc_and_the_key_when_set(monkeypatch)
     monkeypatch.setenv("WORKER_MAPS_ADC", "1")
     headers = asyncio.run(maps.PROVIDERS[0]._auth_headers())
     assert headers == {"Authorization": "Bearer scoped", "X-Goog-User-Project": "test-project"}
-    assert scopes == ["https://www.googleapis.com/auth/maps-platform.mcp"]
+    assert scopes == ["https://www.googleapis.com/auth/maps-platform.mapstools"]
 
     monkeypatch.setenv("MAPS_GROUNDING_LITE_API_KEY", "k")
     assert asyncio.run(maps.PROVIDERS[0]._auth_headers()) == {"X-Goog-Api-Key": "k"}
