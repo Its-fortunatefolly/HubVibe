@@ -4,12 +4,15 @@ this is an MCP client for the three tools it exposes (search_places,
 compute_routes, lookup_weather), the same "one call, one JSON-RPC method"
 shape mcp_probe.py already speaks to inspect a THIRD PARTY's server.
 
-KEYED SEPARATELY FROM EVERYTHING ELSE GOOGLE HERE. Maps Grounding Lite is
-billed and enabled per its own API (Maps Grounding Lite API), not part of
-the Vertex/BigQuery `cloud-platform` ADC scope this package's other Google
-providers share -- so this needs its own key
-(MAPS_GROUNDING_LITE_API_KEY), set once by the operator after enabling that
-API, and stays unavailable (never advertised) until it is.
+TWO WAYS TO AUTHENTICATE, NEITHER ASSUMED. Google documents both an API key
+(`X-Goog-Api-Key`, MAPS_GROUNDING_LITE_API_KEY) and OAuth with the scope
+`maps-platform.mcp`. The OAuth path reuses this package's one Google
+credential re-scoped (google_auth.scoped_headers), so no second secret is
+needed -- but `cloud-platform` alone is refused ("insufficient authentication
+scopes", verified 2026-09-19), and ambient Cloud Shell credentials cannot be
+re-scoped at all. So the OAuth path is used only when the operator sets
+WORKER_MAPS_ADC=1 after a real call succeeded on that deployment. Until one
+of the two is set, these workers stay unavailable and are never advertised.
 """
 
 import json
@@ -19,38 +22,54 @@ from typing import Optional
 import httpx
 
 from .. import runtime
+from . import google_auth
 from .base_rpc import USER_AGENT
 
 _ENDPOINT = os.environ.get("WORKER_MAPS_GROUNDING_URL", "https://mapstools.googleapis.com/mcp")
 _TIMEOUT = float(os.environ.get("WORKER_MAPS_TIMEOUT_SECONDS", "30"))
+_MAPS_SCOPE = "https://www.googleapis.com/auth/maps-platform.mcp"
 
 
 def _api_key() -> str:
     return os.environ.get("MAPS_GROUNDING_LITE_API_KEY", "").strip()
 
 
+def _adc_enabled() -> bool:
+    return os.environ.get("WORKER_MAPS_ADC") == "1"
+
+
 class _MapsGroundingLite:
     id = "maps-grounding-lite"
 
     def available(self) -> bool:
-        return bool(_api_key())
+        if _api_key():
+            return True
+        return _adc_enabled() and google_auth.configured()
 
     def unavailable_reason(self) -> str:
-        return ("MAPS_GROUNDING_LITE_API_KEY is not set (enable the Maps Grounding Lite "
-                "API and create a key restricted to it)")
+        if _adc_enabled():
+            return google_auth.unavailable_reason()
+        return ("neither MAPS_GROUNDING_LITE_API_KEY nor WORKER_MAPS_ADC=1 is set "
+                "(the Maps Grounding Lite API is enabled on the project)")
+
+    async def _auth_headers(self) -> dict:
+        if _api_key():
+            return {"X-Goog-Api-Key": _api_key()}
+        scoped = await google_auth.scoped_headers(_MAPS_SCOPE)
+        return {"Authorization": scoped["Authorization"],
+                "X-Goog-User-Project": scoped["X-Goog-User-Project"]}
 
     async def _call_tool(self, tool: str, arguments: dict) -> dict:
         if not self.available():
             raise runtime.ProviderUnavailable(self.unavailable_reason())
         body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                "params": {"name": tool, "arguments": arguments}}
+        headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json",
+                   "Accept": "application/json, text/event-stream"}
+        headers.update(await self._auth_headers())
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                response = await client.post(
-                    _ENDPOINT, json=body,
-                    headers={"User-Agent": USER_AGENT, "Content-Type": "application/json",
-                            "Accept": "application/json, text/event-stream",
-                            "X-Goog-Api-Key": _api_key()})
+                response = await client.post(_ENDPOINT, json=body, headers=headers)
         except httpx.TimeoutException as exc:
             raise runtime.TransientProviderError(f"Maps Grounding Lite timed out: {exc}") from exc
         except httpx.HTTPError as exc:
@@ -58,8 +77,8 @@ class _MapsGroundingLite:
 
         if response.status_code in (401, 403):
             raise runtime.ProviderUnavailable(
-                "Maps Grounding Lite refused the key (check it is restricted to the "
-                "Maps Grounding Lite API and the API is enabled).")
+                "Maps Grounding Lite refused the credential (API key restriction, or "
+                "an OAuth token without the maps-platform.mcp scope).")
         if response.status_code in (429, 500, 502, 503, 504):
             raise runtime.TransientProviderError(
                 f"Maps Grounding Lite returned {response.status_code}",
@@ -118,10 +137,9 @@ class _MapsGroundingLite:
 
     async def compute_routes(self, origin: str, destination: str,
                              travel_mode: str = "DRIVE") -> runtime.ProviderResult:
-        # origin/destination are Waypoints, not strings: the tool takes an
-        # object carrying ONE OF address / lat_lng / place_id. Sending the bare
-        # string 400s every call. `lookup_weather` below already nests the same
-        # way -- this one was simply never brought in line with it.
+        # origin/destination are Waypoints -- an object carrying one of
+        # address / lat_lng / place_id -- exactly as lookup_weather's location
+        # below. A bare string 400s every call (Google's MCP reference).
         result = await self._call_tool("compute_routes", {
             "origin": {"address": origin}, "destination": {"address": destination},
             "travel_mode": travel_mode})

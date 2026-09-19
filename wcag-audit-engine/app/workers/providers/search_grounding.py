@@ -6,22 +6,19 @@ sources it used. No separate search API, no separate key.
 """
 
 import os
-from typing import Optional
 
 import httpx
 
 from .. import runtime
 from . import google_auth
-from .gemini import DEFAULT_REGION, _cost_micros
+from .gemini import _cost_micros, model_url, output_tokens_of
 
 log = __import__("logging").getLogger("hubvibe.workers.search_grounding")
 
-# Auto-updating alias rather than a pinned version: Google hot-swaps it to the
-# current Flash release with two weeks' notice, so this does not need re-chasing
-# every time a version retires (gemini-2.5-flash, which used to sit here, dies
-# 2026-10-20). Override if the box's smoke test shows Vertex not resolving it.
+# Auto-updating alias; generated real output on `global` 2026-09-18.
 _MODEL = os.environ.get("WORKER_SEARCH_MODEL", "gemini-flash-latest")
 _TIMEOUT = float(os.environ.get("WORKER_SEARCH_TIMEOUT_SECONDS", "45"))
+_SEARCH_QUERY_USD = float(os.environ.get("WORKER_SEARCH_PRICE_PER_QUERY_USD", "0.014"))
 
 
 class _GeminiGroundedSearch:
@@ -38,9 +35,7 @@ class _GeminiGroundedSearch:
             raise runtime.ProviderUnavailable(google_auth.unavailable_reason())
 
         project = google_auth.project()
-        url = (f"https://{DEFAULT_REGION}-aiplatform.googleapis.com/v1/projects/{project}"
-               f"/locations/{DEFAULT_REGION}/publishers/google/models/{_MODEL}"
-               ":generateContent")
+        url = model_url(project, _MODEL, "generateContent")
         body = {
             "contents": [{"role": "user", "parts": [{"text": (
                 "Answer this from current web search results, concisely and "
@@ -88,14 +83,20 @@ class _GeminiGroundedSearch:
 
         usage = data.get("usageMetadata") or {}
         prompt_tokens = int(usage.get("promptTokenCount") or 0)
-        output_tokens = int(usage.get("candidatesTokenCount") or 0)
-        cost, measured = _cost_micros(prompt_tokens, output_tokens)
+        output_tokens = output_tokens_of(usage)
+        cost, measured = _cost_micros(prompt_tokens, output_tokens, _MODEL)
+        # Gemini 3 grounding bills each web query Google runs, not the prompt:
+        # $14 per 1,000 past 5,000 free a month (Vertex pricing, 2026-09-19).
+        # Charged at list price so the free allowance never flatters margins.
+        queries = grounding.get("webSearchQueries") or []
+        if cost is not None:
+            cost += int(round(len(queries) * _SEARCH_QUERY_USD * 1_000_000))
 
         return runtime.ProviderResult(
             value={"answer": answer, "sources": sources, "model": _MODEL,
-                   "queries": grounding.get("webSearchQueries") or []},
+                   "queries": queries},
             cost_micros=cost, cost_measured=measured,
-            usage=f"in={prompt_tokens} out={output_tokens} sources={len(sources)}")
+            usage=f"in={prompt_tokens} out={output_tokens} queries={len(queries)} sources={len(sources)}")
 
 
 PROVIDERS = [_GeminiGroundedSearch()]

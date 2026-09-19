@@ -13,7 +13,7 @@ import httpx
 
 from .. import runtime
 from . import google_auth
-from .gemini import DEFAULT_REGION, _cost_micros
+from .gemini import _cost_micros, model_url, output_tokens_of
 
 # Auto-updating alias rather than a pinned version -- see search_grounding.py.
 _MODEL = os.environ.get("WORKER_CODE_EXEC_MODEL", "gemini-flash-latest")
@@ -34,9 +34,7 @@ class _GeminiCodeExecution:
             raise runtime.ProviderUnavailable(google_auth.unavailable_reason())
 
         project = google_auth.project()
-        url = (f"https://{DEFAULT_REGION}-aiplatform.googleapis.com/v1/projects/{project}"
-               f"/locations/{DEFAULT_REGION}/publishers/google/models/{_MODEL}"
-               ":generateContent")
+        url = model_url(project, _MODEL, "generateContent")
         body = {
             "contents": [{"role": "user", "parts": [{"text": (
                 "Run exactly this Python code using the code execution tool and report "
@@ -99,8 +97,8 @@ class _GeminiCodeExecution:
 
         usage = data.get("usageMetadata") or {}
         prompt_tokens = int(usage.get("promptTokenCount") or 0)
-        output_tokens = int(usage.get("candidatesTokenCount") or 0)
-        cost, measured = _cost_micros(prompt_tokens, output_tokens)
+        output_tokens = output_tokens_of(usage)
+        cost, measured = _cost_micros(prompt_tokens, output_tokens, _MODEL)
 
         return runtime.ProviderResult(
             value={"code": ran_code or code, "output": output or "",

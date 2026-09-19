@@ -22,11 +22,10 @@ import httpx
 
 from .. import runtime
 from . import google_auth
+from .gemini import model_url
 
-DEFAULT_REGION = os.environ.get("WORKER_VERTEX_REGION", "us-central1")
 # Google's own named migration target off the discontinued imagen-4.0-* line.
-# Override once the box has confirmed a newer image model resolves there --
-# scripts/smoke-bees.py prints which candidates the project actually serves.
+# Generated a real 1:1 PNG on `global` 2026-09-18; retires 2027-03-15.
 _MODEL = os.environ.get("WORKER_IMAGE_MODEL", "gemini-2.5-flash-image")
 _TIMEOUT = float(os.environ.get("WORKER_IMAGE_TIMEOUT_SECONDS", "90"))
 _ASPECT_RATIOS = {"1:1", "3:4", "4:3", "16:9", "9:16"}
@@ -66,9 +65,7 @@ class _GeminiImage:
                 f"`aspect_ratio` must be one of {sorted(_ASPECT_RATIOS)}.")
 
         project = google_auth.project()
-        url = (f"https://{DEFAULT_REGION}-aiplatform.googleapis.com/v1/projects/{project}"
-               f"/locations/{DEFAULT_REGION}/publishers/google/models/{_MODEL}"
-               f":generateContent")
+        url = model_url(project, _MODEL, "generateContent")
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {

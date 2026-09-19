@@ -14,8 +14,11 @@ estimate were wrong, BigQuery itself kills the job rather than billing us.
 Two independent brakes, because this is the one worker that can lose real
 money on a single malformed request.
 
-Bytes are measured exactly; the PRICE per byte is configuration
-(BQ_PRICE_PER_TIB), not an assumption baked into this file.
+Bytes are measured exactly. The price defaults to Google's published
+on-demand rate, $6.25 per TiB (cloud.google.com/bigquery/pricing, read
+2026-09-19; AI.FORECAST's TimesFM is billed on the same rate), charged at
+list even inside the 1 TiB monthly free tier so the ledger never flatters a
+margin. BQ_PRICE_PER_TIB overrides it.
 """
 
 import logging
@@ -45,9 +48,7 @@ _FORBIDDEN = re.compile(
 
 
 def _price_per_tib() -> Optional[float]:
-    raw = os.environ.get("BQ_PRICE_PER_TIB")
-    if not raw:
-        return None
+    raw = os.environ.get("BQ_PRICE_PER_TIB", "6.25")
     try:
         return float(raw)
     except ValueError:
@@ -146,15 +147,13 @@ class _BigQuery:
             "timeoutMs": int(_TIMEOUT * 1000),
         })
 
-        # jobs.query returns jobComplete:false when the job outlives timeoutMs --
-        # with NO rows and no error. Unchecked, that reads as a successful empty
-        # result and the caller is billed for "no data" when the truth is "we
-        # stopped waiting". Raising instead means the gate never settles: the
-        # caller gets a 502 and pays nothing.
+        # jobs.query answers jobComplete:false -- with no rows and no error --
+        # when the job outlives timeoutMs. Unchecked, that reads as a successful
+        # empty result and the caller is billed for "no data" when the truth is
+        # "we stopped waiting". Raising means the gate never settles.
         if data.get("jobComplete") is False:
             raise runtime.TransientProviderError(
-                f"BigQuery did not finish within {_TIMEOUT:.0f}s; no rows were "
-                f"returned. The query is still running server-side.",
+                f"BigQuery did not finish within {_TIMEOUT:.0f}s; no rows came back.",
                 reason="provider_timeout")
 
         schema = [f.get("name") for f in (data.get("schema") or {}).get("fields", [])]

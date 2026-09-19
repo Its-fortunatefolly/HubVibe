@@ -138,34 +138,40 @@ def test_maps_weather_requires_a_location():
         asyncio.run(W.skills.maps.weather(None, {}))
 
 
-# --- video.generate: fail-closed past credentials, and its own validation --
+# --- video.generate: advertised exactly when credentials resolve ----------
+#
+# The old WORKER_VEO_ENABLED gate existed only because the model id was
+# unverified. A real call to veo-3.1-fast-generate-001 on resolver-time
+# (2026-09-18) returned a 4s mp4 in ~30s, so the gate is gone. What stays
+# pinned is the part that protects a paying caller: never advertised without
+# credentials, and the request shape refused before any call is made.
 
-def test_video_generate_is_unavailable_with_credentials_but_not_enabled(monkeypatch):
-    """WORKER_VEO_ENABLED defaults unset -- this must stay off even once
-    Google credentials resolve, because the model id has not been
-    confirmed on this project."""
+def test_video_generate_is_unavailable_without_credentials(monkeypatch):
     import importlib
 
     google_auth = importlib.import_module(W.__name__ + ".providers.google_auth")
     veo = importlib.import_module(W.__name__ + ".providers.veo")
     monkeypatch.setattr(google_auth, "_resolved", True)
-    monkeypatch.setattr(google_auth, "_creds", object())
-    monkeypatch.setattr(google_auth, "_project", "test-project")
-    monkeypatch.setattr(veo, "_ENABLED", False)
+    monkeypatch.setattr(google_auth, "_creds", None)
     provider = veo.PROVIDERS[0]
     assert provider.available() is False
-    assert "WORKER_VEO_ENABLED" in provider.unavailable_reason()
+    assert provider.unavailable_reason()
 
 
-def test_video_generate_rejects_a_bad_aspect_ratio_before_any_call(monkeypatch):
-    """Checked once the worker WOULD otherwise run -- same ordering
-    imagen.py already uses (availability first, then shape), so this
-    fakes both credentials and the enable flag to reach that check."""
+def test_video_generate_is_available_once_credentials_resolve(monkeypatch):
     import importlib
 
     _fake_google_credentials(monkeypatch)
     veo = importlib.import_module(W.__name__ + ".providers.veo")
-    monkeypatch.setattr(veo, "_ENABLED", True)
+    assert veo.PROVIDERS[0].available() is True
+    assert veo._MODEL == "veo-3.1-fast-generate-001"
+
+
+def test_video_generate_rejects_a_bad_aspect_ratio_before_any_call(monkeypatch):
+    import importlib
+
+    _fake_google_credentials(monkeypatch)
+    veo = importlib.import_module(W.__name__ + ".providers.veo")
     with pytest.raises(W.runtime.InvalidRequest):
         asyncio.run(veo.PROVIDERS[0].generate("a bee", aspect_ratio="1:1"))
 
@@ -175,7 +181,6 @@ def test_video_generate_rejects_a_bad_duration(monkeypatch):
 
     _fake_google_credentials(monkeypatch)
     veo = importlib.import_module(W.__name__ + ".providers.veo")
-    monkeypatch.setattr(veo, "_ENABLED", True)
     with pytest.raises(W.runtime.InvalidRequest):
         asyncio.run(veo.PROVIDERS[0].generate("a bee", duration_seconds=5))
 

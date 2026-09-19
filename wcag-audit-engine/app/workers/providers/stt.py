@@ -99,15 +99,24 @@ class _SpeechToText:
                 "No speech was recognized in this audio (silence, or an unsupported "
                 "encoding/language).")
 
+        # v2 reports what Google bills ("15s"); measured, never guessed from
+        # byte count. Cost is measured when the operator states the rate.
+        billed = (data.get("metadata") or {}).get("totalBilledDuration")
+        billed_seconds = None
+        if isinstance(billed, str) and billed.endswith("s"):
+            try:
+                billed_seconds = float(billed[:-1])
+            except ValueError:
+                billed_seconds = None
         rate = _price_per_min()
-        # Duration is not returned by sync recognize; cost is measured only
-        # when the caller states the audio's length so this stays honest
-        # rather than estimating minutes from byte count.
+        cost = (int(round(billed_seconds / 60 * rate * 1_000_000))
+                if billed_seconds is not None and rate is not None else None)
         return runtime.ProviderResult(
             value={"transcript": transcript, "language_code": language_code,
                    "confidence": (sum(confidences) / len(confidences)) if confidences else None,
-                   "model": _MODEL},
-            cost_micros=None, cost_measured=False, usage=f"bytes={len(raw)}")
+                   "model": _MODEL, "billed_seconds": billed_seconds},
+            cost_micros=cost, cost_measured=cost is not None,
+            usage=f"bytes={len(raw)} billed_s={billed_seconds}")
 
 
 PROVIDERS = [_SpeechToText()]

@@ -5,7 +5,6 @@ Where extract.page answers "what does this page say", fetch.raw answers
 4xx or 5xx from the target, is a completed result, not a failure.
 """
 
-from .. import runtime
 from ..providers import web
 from .extract import validate_url
 

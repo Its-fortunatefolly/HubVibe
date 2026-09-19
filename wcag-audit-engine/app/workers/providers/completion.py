@@ -18,7 +18,7 @@ import httpx
 
 from .. import runtime
 from . import google_auth
-from .gemini import DEFAULT_REGION, _cost_micros
+from .gemini import _cost_micros, model_url, output_tokens_of
 
 
 class _VertexGeminiCompletion:
@@ -26,14 +26,11 @@ class _VertexGeminiCompletion:
     answer-from-material shape `llm.analyze` uses."""
 
     provider_name = "gemini"
-    # `gemini-flash-latest` is Google's auto-updating alias: hot-swapped to the
-    # current Flash release, two weeks' notice before a breaking change. The
-    # pinned GA model stays in the accepted set so a caller can still name a
-    # specific version, and so there is something to fall back to if Vertex
-    # does not resolve the alias (Google documents it for the Developer API
-    # and is silent on Vertex).
+    # The auto-updating alias plus the pinned GA models a caller may name
+    # explicitly. All generated real output on `global` 2026-09-18.
     models = {m.strip() for m in os.environ.get(
-        "WORKER_LLM_GENERATE_GEMINI_MODELS", "gemini-flash-latest,gemini-3.5-flash"
+        "WORKER_LLM_GENERATE_GEMINI_MODELS",
+        "gemini-flash-latest,gemini-flash-lite-latest,gemini-3.5-flash,gemini-3.5-flash-lite"
     ).split(",") if m.strip()}
     default_model = os.environ.get("WORKER_LLM_GENERATE_GEMINI_MODEL", "gemini-flash-latest")
     id = f"vertex:{default_model}"
@@ -57,9 +54,7 @@ class _VertexGeminiCompletion:
         model = model or self.default_model
 
         project = google_auth.project()
-        url = (f"https://{DEFAULT_REGION}-aiplatform.googleapis.com/v1/projects/{project}"
-               f"/locations/{DEFAULT_REGION}/publishers/google/models/{model}"
-               ":generateContent")
+        url = model_url(project, model, "generateContent")
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
@@ -94,8 +89,8 @@ class _VertexGeminiCompletion:
 
         usage = data.get("usageMetadata") or {}
         prompt_tokens = int(usage.get("promptTokenCount") or 0)
-        output_tokens = int(usage.get("candidatesTokenCount") or 0)
-        cost, measured = _cost_micros(prompt_tokens, output_tokens)
+        output_tokens = output_tokens_of(usage)
+        cost, measured = _cost_micros(prompt_tokens, output_tokens, model)
 
         return runtime.ProviderResult(
             value={"text": text, "model": model, "provider": self.provider_name,
@@ -113,8 +108,8 @@ _ANTHROPIC_RATES = {
     "claude-opus-5": (5.0, 25.0),
 }
 
-# Models that still accept a sampling parameter. Everything else on the current
-# generation rejects `temperature` outright, so it is omitted for them.
+# Sampling parameters were removed on the current Claude generation: sending
+# `temperature` to Sonnet 5 or Opus 5 is a 400. Haiku 4.5 still accepts it.
 _CLAUDE_ACCEPTS_TEMPERATURE = {"claude-haiku-4-5"}
 
 
@@ -179,10 +174,6 @@ class _ClaudeOnVertex:
             "anthropic_version": self._anthropic_version, "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }
-        # Sampling parameters were REMOVED on the current Claude generation:
-        # `temperature` is a 400 on Sonnet 5 and Opus 5, not a nudge. Haiku 4.5
-        # still accepts it. Sending it unconditionally 400s two of the three
-        # models this worker advertises, on every call.
         if model in _CLAUDE_ACCEPTS_TEMPERATURE:
             body["temperature"] = temperature
         if system:

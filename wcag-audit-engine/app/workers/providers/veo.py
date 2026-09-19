@@ -1,20 +1,16 @@
 """Video generation via Veo on Vertex -- predictLongRunning, polled with
 fetchPredictOperation until the operation completes.
 
-FAILS CLOSED PAST CREDENTIALS, DELIBERATELY. Every other Google-backed
-provider in this package treats `google_auth.configured()` as sufficient to
-advertise (Vertex/BigQuery/Imagen/TTS/STT all share one Cloud Platform
-enablement). Veo does not: the exact model resource name on Vertex has
-moved between `-preview` and stable suffixes during this model family's
-rollout, and getting that string wrong here would mean a caller pays,
-waits through a multi-minute poll loop, and then reads an opaque 502 --
-the worst outcome this package's whole design exists to prevent (see
-catalog.py's Worker.available() docstring). So this worker also requires
-WORKER_VEO_ENABLED=1, an explicit opt-in the operator sets only after
-confirming (`GET .../publishers/google/models/{model}` -- a free metadata
-read, no generation) that the configured model id actually resolves on
-this project. Until then it reports exactly why it is off rather than
-silently misbehaving on a real paid call.
+PROVEN, NOT ASSUMED. On resolver-time, 2026-09-18, a real call to
+`veo-3.1-fast-generate-001` in us-central1 (4s, 16:9) was accepted, finished
+in ~30s -- well inside the ~240s a paid x402 call can wait -- and returned the
+clip inline as `response.videos[0].bytesBase64Encoded` (video/mp4). That run
+is what retired the old WORKER_VEO_ENABLED gate: the gate existed only because
+the model id was unverified (the old default, veo-3.1-generate-preview, was
+discontinued 2026-04-02).
+
+REGION is Veo's own setting. Gemini moved to the `global` endpoint; Veo is
+served regionally, so it must not follow WORKER_VERTEX_REGION there.
 """
 
 import asyncio
@@ -27,9 +23,8 @@ import httpx
 from .. import runtime
 from . import google_auth
 
-DEFAULT_REGION = os.environ.get("WORKER_VERTEX_REGION", "us-central1")
-_MODEL = os.environ.get("WORKER_VEO_MODEL", "veo-3.1-generate-preview")
-_ENABLED = os.environ.get("WORKER_VEO_ENABLED") == "1"
+DEFAULT_REGION = os.environ.get("WORKER_VEO_REGION", "us-central1")
+_MODEL = os.environ.get("WORKER_VEO_MODEL", "veo-3.1-fast-generate-001")
 _TIMEOUT = float(os.environ.get("WORKER_VEO_TIMEOUT_SECONDS", "30"))
 _POLL_INTERVAL = float(os.environ.get("WORKER_VEO_POLL_SECONDS", "8"))
 _ASPECT_RATIOS = {"16:9", "9:16"}
@@ -37,9 +32,9 @@ _DURATIONS = {4, 6, 8}
 
 
 def _price_per_second() -> Optional[float]:
-    raw = os.environ.get("WORKER_VEO_PRICE_PER_SECOND_USD")
-    if not raw:
-        return None
+    # Google's published Veo 3.1 Fast rate at the default 720p (1080p is $0.12,
+    # 4K $0.30). Overridable, because the rate is Google's to change.
+    raw = os.environ.get("WORKER_VEO_PRICE_PER_SECOND_USD", "0.10")
     try:
         return float(raw)
     except ValueError:
@@ -50,14 +45,10 @@ class _Veo:
     id = f"vertex:{_MODEL}"
 
     def available(self) -> bool:
-        return _ENABLED and google_auth.configured()
+        return google_auth.configured()
 
     def unavailable_reason(self) -> str:
-        if not google_auth.configured():
-            return google_auth.unavailable_reason()
-        return (f"video generation is disabled on this deployment pending verification "
-               f"that {_MODEL!r} resolves on this project; set WORKER_VEO_ENABLED=1 "
-               "once confirmed (see this module's docstring)")
+        return google_auth.unavailable_reason()
 
     async def _post(self, url: str, headers: dict, body: dict) -> dict:
         try:
