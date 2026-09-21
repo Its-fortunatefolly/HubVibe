@@ -31,7 +31,7 @@ PAY_TO = "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"
 TEXAS_NAMES = "bigquery-public-data.usa_names.usa_1910_2013"
 DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 # A payment never exceeds the dearest price this script expects to meet.
-MAX_PER_CALL_USD = 5.00
+MAX_PER_CALL_USD = 10.00
 _ATOMIC_PER_USD = 1_000_000
 USER_AGENT = "HubVibe-seed/1.0 (+https://hubvibe-io.com)"
 
