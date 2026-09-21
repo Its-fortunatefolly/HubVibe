@@ -188,6 +188,9 @@ def _pay(session, base, route, body, price, account):
     from x402.mechanisms.evm.exact import register_exact_evm_client
 
     client = x402ClientSync()
+    # x402 >= 2.22 caps every payment at $1.00 on the buyer's side; this is
+    # the buyer, and it authorizes exactly the quoted price for this route.
+    client.set_spend_controls({"max_amount_per_payment": "$%.2f" % price})
     register_exact_evm_client(client, EthAccountSigner(account),
                               policies=[max_amount(int(round(price * _ATOMIC_PER_USD)))])
     http = x402HTTPClientSync(client)
