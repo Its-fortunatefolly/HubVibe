@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HubVibe: 37 Machine-Payable Dev Utilities and WCAG Audits</title>
-<meta name="description" content="HubVibe: infrastructure for the machine economy. 37 machine-payable dev utilities and 5 deterministic site audits, paid per call over HTTP 402 by autonomous agents. Agents, APIs, payments, real work.">
+<meta name="description" content="HubVibe: infrastructure for the machine economy. Agents, APIs, payments, real work.">
 <link rel="canonical" href="https://hubvibe-io.com/">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="ard" href="https://hubvibe-io.com/.well-known/ard.json">
@@ -13,289 +13,232 @@
 <meta property="og:url" content="https://hubvibe-io.com/">
 <meta property="og:image" content="https://hubvibe-io.com/og-image.png">
 <meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-/* --- GLOBAL ROOT & RESET --- */
+:root {
+  --bg: #000000; --ink: #FFFFFF; --muted: #C9CBD6; --dim: #8E90A0; --line: #1E1E28;
+  --orange: #FF7B00; --purple: #8F7CFF; --blue: #3FD3FF; --green: #22E38A; --violet: #7A3CFF;
+  --w: 1024px;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-    background-color: #000000;
-    color: #FFFFFF;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    overflow-x: hidden;
-    line-height: 1.6;
-}
-/* --- NAVBAR HEADER --- */
-.navbar {
-    position: fixed; top: 0; left: 0; width: 100%; height: 70px;
-    background-color: rgba(0, 0, 0, 0.9); border-bottom: 1px solid #222222;
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 0 40px; z-index: 1000;
-}
-.nav-left { display: flex; align-items: center; gap: 12px; }
-.brand-logo { height: 32px; width: auto; }
-.brand-text { display: flex; flex-direction: column; }
-.title-main { font-size: 18px; font-weight: 700; letter-spacing: 1px; color: #FFFFFF; }
-.title-sub { font-size: 9px; color: #A0A0A0; letter-spacing: 2px; margin-top: -2px; }
-.nav-right { display: flex; align-items: center; gap: 30px; }
-.nav-link { color: #A0A0A0; text-decoration: none; font-size: 11px; font-weight: 600; letter-spacing: 1.5px; transition: color 0.2s ease; }
-.nav-link:hover { color: #FF7B00; }
-.cta-nav-btn {
-    border: 1px solid #FF7B00; color: #FF7B00; background: transparent;
-    padding: 8px 16px; font-size: 11px; font-weight: 600; letter-spacing: 1px;
-    text-decoration: none; border-radius: 2px; transition: all 0.2s ease;
-}
-.cta-nav-btn:hover { background-color: #FF7B00; color: #000000; box-shadow: 0 0 10px rgba(255, 123, 0, 0.5); }
-/* --- HERO SECTION --- */
-.hero-section {
-    position: relative; width: 100%; height: 100vh;
-    display: flex; flex-direction: column; justify-content: center; align-items: center;
-    background: radial-gradient(circle at bottom, #111122 0%, #000000 70%);
-    padding-top: 70px;
-}
-.vertical-accent { position: absolute; font-size: 10px; color: #444444; letter-spacing: 3px; writing-mode: vertical-rl; text-transform: uppercase; }
-.left-accent { left: 40px; top: 30%; transform: rotate(180deg); }
-.right-accent { right: 40px; top: 30%; }
-.hero-center { text-align: center; margin-bottom: 60px; width: 100%; }
-/* The owner's artwork: mascot, Earth and the HUBVIBE wordmark are all in the image. Nothing is drawn or typed over it. */
-.hero-art-wrap { margin: 0 auto; max-width: 1024px; }
+html { background: var(--bg); }
+body { background: var(--bg); color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.5; overflow-x: hidden; }
+a { color: inherit; text-decoration: none; }
+.wrap { width: 100%; max-width: var(--w); margin: 0 auto; }
+.caps { text-transform: uppercase; letter-spacing: 0.22em; }
+
+/* ---- header over the artwork ---- */
+.hero { position: relative; width: 100%; max-width: var(--w); margin: 0 auto; }
 .hero-art { display: block; width: 100%; height: auto; }
-.hero-subtitle { font-size: 18px; color: #FFFFFF; margin-top: 15px; font-weight: 300; letter-spacing: 0.5px; }
-.horizontal-divider-line { width: 80px; height: 1px; background-color: #FFFFFF; margin: 20px auto; }
-.protocol-subtitles { font-size: 11px; color: #A0A0A0; letter-spacing: 4px; font-weight: 600; text-transform: uppercase; }
-.feature-deck {
-    position: absolute; bottom: 40px; width: 100%; max-width: 1200px;
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; padding: 0 40px;
-}
-.feature-card {
-    background-color: rgba(10, 10, 10, 0.8); border: 1px solid #222222; padding: 20px;
-    text-align: center; font-size: 11px; font-weight: 600; letter-spacing: 1px; color: #D0D0D0; border-radius: 2px;
-}
-/* --- SECTION BOX LAYOUTS --- */
-.section-container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 100px 40px; }
-.bg-pure-black { background-color: #000000; }
-.border-top-grid { border-top: 1px solid #1A1A1A; }
-.section-label { display: block; font-size: 11px; font-weight: 700; color: #FF7B00; letter-spacing: 2px; margin-bottom: 10px; text-transform: uppercase; }
-.section-label.centered { text-align: center; }
-.section-title-white { font-size: 28px; font-weight: 800; letter-spacing: 1px; color: #FFFFFF; margin-bottom: 40px; }
-.section-title-white.centered { text-align: center; }
-.grid-two-col { display: grid; grid-template-columns: 1fr 1.2fr; gap: 60px; }
-.orange-accent-box { border-left: 2px solid #FF7B00; padding-left: 20px; margin-top: 30px; }
-.accent-box-text { font-size: 14px; font-weight: 700; color: #FF7B00; letter-spacing: 1.5px; }
-.paragraphs-gray p { color: #A0A0A0; font-size: 14px; margin-bottom: 20px; }
-/* --- PROTOCOL HORIZON BAR --- */
-.protocol-horizon-layer { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin: 50px 0 30px 0; }
-.proto-card { background-color: #0A0A0A; border-radius: 2px; padding: 24px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 15px; }
-.proto-badge { font-size: 16px; font-weight: 900; letter-spacing: 1px; }
-.proto-name { font-size: 10px; color: #A0A0A0; letter-spacing: 1px; font-weight: 600; }
-.border-mcp { border: 1px solid rgba(255, 123, 0, 0.3); }   .badge-mcp { color: #FF7B00; }
-.border-a2a { border: 1px solid rgba(160, 32, 240, 0.3); }  .badge-a2a { color: #A020F0; }
-.border-http402 { border: 1px solid rgba(0, 210, 255, 0.3); } .badge-http402 { color: #00D2FF; }
-.border-usdc { border: 1px solid rgba(0, 255, 128, 0.3); }  .badge-usdc { color: #00FF80; }
-.border-base { border: 1px solid rgba(80, 0, 200, 0.3); }   .badge-base { color: #7A3CFF; }
-.technology-subtext { text-align: center; color: #666666; font-size: 12px; letter-spacing: 0.5px; }
-/* --- USE CASES MATRIX GRID --- */
-.use-cases-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; }
-.use-case-item { background-color: #050505; border: 1px solid #151515; padding: 30px 20px; text-align: center; transition: border-color 0.2s ease; }
-.use-case-item:hover { border-color: #222222; }
-.use-case-icon { font-size: 24px; margin-bottom: 15px; }
-.use-case-item h3 { font-size: 13px; font-weight: 600; color: #FFFFFF; letter-spacing: 0.5px; }
-/* --- TECHNICAL RESOURCES LIST --- */
-.resources-list-stack { display: flex; flex-direction: column; border-top: 1px solid #151515; }
-.resource-row { display: flex; justify-content: space-between; align-items: center; padding: 24px 16px; border-bottom: 1px solid #151515; text-decoration: none; transition: background-color 0.2s ease; }
-.resource-row:hover { background-color: #050505; }
-.res-title { font-size: 14px; font-weight: 700; color: #FFFFFF; display: flex; align-items: center; gap: 10px; }
-.res-desc { font-size: 13px; color: #666666; }
-.res-arrow { color: #444444; font-weight: 700; transition: color 0.2s ease; }
-.resource-row:hover .res-arrow { color: #FF7B00; }
-/* --- DEV CALL TO ACTION BLOCK --- */
-.cta-block-container { width: 100%; max-width: 1200px; margin: 60px auto 100px auto; padding: 0 40px; }
-.cta-inner-card { background-color: #0A0A0A; border: 1px solid #222222; padding: 40px; display: flex; justify-content: space-between; align-items: center; border-radius: 2px; }
-.cta-left { display: flex; align-items: center; gap: 20px; }
-.world-wireframe-icon { font-size: 32px; color: #FF7B00; }
-.cta-text-wrap h3 { font-size: 18px; font-weight: 800; letter-spacing: 1px; }
-.cta-text-wrap p { font-size: 13px; color: #A0A0A0; margin-top: 4px; }
-.cta-actions { display: flex; align-items: center; gap: 24px; }
-.pill-btn-solid { background-color: #FF7B00; color: #000000; text-decoration: none; font-size: 12px; font-weight: 700; padding: 12px 28px; border-radius: 2px; letter-spacing: 0.5px; box-shadow: 0 0 10px rgba(255, 123, 0, 0.3); }
-.text-link-explore { color: #A0A0A0; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 1px; }
-.text-link-explore:hover { color: #FFFFFF; }
-/* --- FOOTER MATRIX --- */
-.footer-matrix { width: 100%; max-width: 1200px; margin: 0 auto; padding: 40px; border-top: 1px solid #1A1A1A; display: flex; justify-content: space-between; align-items: center; }
-.footer-icon { height: 24px; width: auto; }
-.footer-tagline { font-size: 11px; color: #444444; margin-top: 6px; }
-.matrix-text-vertical { font-size: 9px; color: #222222; letter-spacing: 2px; }
-.neon-email-link { color: #FF7B00; text-decoration: none; font-size: 13px; font-weight: 700; letter-spacing: 1px; text-shadow: 0 0 8px rgba(255, 123, 0, 0.4); }
-.footer-copyright { font-size: 11px; color: #444444; }
-/* --- SMALL SCREENS: the grids stack, the hero shrinks, the deck flows --- */
+.nav { position: absolute; top: 0; left: 0; right: 0; height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand img { height: 46px; width: auto; display: block; }
+.brand-name { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.brand-sub { font-size: 8px; color: var(--purple); letter-spacing: 0.28em; text-transform: uppercase; margin-top: 3px; }
+.links { display: flex; align-items: center; gap: 22px; }
+.links a { font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+.links a:hover { color: var(--orange); }
+.pill { border: 1px solid var(--orange); color: var(--orange); border-radius: 999px; padding: 9px 20px; font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
+.pill:hover { background: var(--orange); color: #000; }
+.side { position: absolute; top: 132px; font-size: 10px; font-weight: 500; color: var(--purple); letter-spacing: 0.28em; text-transform: uppercase; line-height: 1.9; }
+.side::after { content: ""; display: block; width: 40px; height: 2px; background: var(--purple); margin-top: 14px; }
+.side.l { left: 70px; }
+.side.r { right: 70px; text-align: left; }
+.tagline { position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; }
+.tagline h1 { font-size: 26px; font-weight: 300; letter-spacing: 0.01em; }
+.tagline p { margin-top: 10px; font-size: 10px; font-weight: 600; color: var(--purple); letter-spacing: 0.32em; text-transform: uppercase; }
+
+/* ---- feature strip ---- */
+.strip { background: #07070E; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.strip .wrap { display: grid; grid-template-columns: repeat(4, 1fr); }
+.feat { display: flex; align-items: center; gap: 16px; padding: 22px 30px; border-left: 1px solid var(--line); }
+.feat:first-child { border-left: 0; }
+.feat svg { width: 30px; height: 30px; stroke: var(--blue); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; filter: drop-shadow(0 0 6px rgba(63, 211, 255, 0.35)); }
+.feat span { font-size: 9px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); line-height: 1.7; }
+
+/* ---- sections ---- */
+.sec { padding: 34px 70px 30px; border-top: 1px solid var(--line); }
+.sec:first-of-type { border-top: 0; }
+.label { display: flex; align-items: center; gap: 12px; font-size: 10px; font-weight: 700; color: var(--orange); letter-spacing: 0.28em; text-transform: uppercase; }
+.label::after { content: ""; width: 44px; height: 1px; background: var(--orange); }
+.h2 { font-size: 34px; font-weight: 300; letter-spacing: 0.18em; text-transform: uppercase; line-height: 1.15; margin-top: 12px; white-space: nowrap; }
+
+.about { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; }
+.quote { border-left: 2px solid var(--purple); padding-left: 22px; margin-top: 26px; font-size: 12px; font-weight: 500; color: var(--purple); letter-spacing: 0.32em; text-transform: uppercase; line-height: 1.9; }
+.quote::after { content: ""; display: block; width: 40px; height: 2px; background: var(--purple); margin-top: 12px; }
+.about p { font-size: 14px; color: var(--ink); margin-bottom: 14px; line-height: 1.55; }
+
+.row5 { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 22px; }
+.row5 > * { padding: 4px 12px; border-left: 1px solid var(--line); text-align: center; }
+.row5 > *:first-child { border-left: 0; }
+
+.proto .badge { display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 20px; font-weight: 700; letter-spacing: 0.04em; }
+.proto .badge svg { width: 30px; height: 30px; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.proto .name { margin-top: 16px; font-size: 9px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); line-height: 1.8; }
+.mcp { color: var(--orange); } .mcp svg { stroke: var(--orange); }
+.a2a { color: var(--violet); } .a2a svg { stroke: var(--violet); }
+.h402 { color: var(--blue); } .h402 svg { stroke: var(--blue); }
+.usdc { color: var(--green); } .usdc svg { stroke: var(--green); }
+.base { color: var(--violet); } .base svg { stroke: var(--violet); }
+.subtext { text-align: center; color: var(--ink); font-size: 14px; margin-top: 32px; }
+
+.uc { display: flex; align-items: center; gap: 12px; text-align: left; padding: 6px 12px; }
+.uc svg { width: 30px; height: 30px; stroke: var(--ink); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.uc span { font-size: 9px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); line-height: 1.8; white-space: nowrap; }
+
+.res { display: flex; align-items: center; gap: 10px; text-align: left; padding: 6px 10px; }
+.res svg { width: 24px; height: 24px; stroke: var(--ink); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.res .t { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; white-space: nowrap; text-transform: uppercase; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: #3A3A48; }
+.res .d { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.res:hover .t { color: var(--orange); }
+
+.cta { margin: 6px 70px 36px; border: 1px solid var(--line); border-radius: 8px; padding: 32px 40px; display: flex; align-items: center; justify-content: space-between; background: #050509; }
+.cta-l { display: flex; align-items: center; gap: 24px; }
+.cta-l svg { width: 46px; height: 46px; stroke: var(--orange); fill: none; stroke-width: 1.6; }
+.cta h3 { font-size: 20px; font-weight: 700; letter-spacing: 0.02em; }
+.cta p { font-size: 14px; color: var(--muted); margin-top: 4px; }
+.cta-r { display: flex; align-items: center; gap: 28px; }
+.cta-r .pill { padding: 14px 32px; font-size: 11px; }
+.cta-r .or { font-size: 10px; letter-spacing: 0.2em; color: var(--muted); }
+.cta-r .explore { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; text-decoration: underline; text-underline-offset: 6px; text-decoration-color: #3A3A48; }
+
+.foot { border-top: 1px solid var(--line); padding: 40px 70px; display: grid; grid-template-columns: 1.4fr 1fr 1.3fr 0.8fr; align-items: center; gap: 20px; }
+.foot .brand img { height: 50px; }
+.foot .brand-name { font-size: 20px; }
+.foot .brand-sub2 { font-size: 10px; color: var(--muted); margin-top: 2px; white-space: nowrap; }
+.foot .small { font-size: 10px; font-weight: 500; color: var(--purple); letter-spacing: 0.28em; text-transform: uppercase; line-height: 1.9; text-align: center; }
+.foot .mail { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; justify-content: center; }
+.foot .mail svg { width: 26px; height: 26px; stroke: var(--purple); fill: none; stroke-width: 1.6; }
+.foot .copy { font-size: 11px; color: var(--dim); text-align: right; line-height: 1.8; }
+
 @media (max-width: 900px) {
-    .navbar { padding: 0 16px; }
-    .nav-right { gap: 14px; }
-    .nav-link { display: none; }
-    .hero-section { height: auto; min-height: 100vh; padding: 110px 16px 40px; }
-    .vertical-accent { display: none; }
-    .feature-deck { position: static; grid-template-columns: repeat(2, 1fr); padding: 0; margin-top: 40px; }
-    .section-container { padding: 60px 16px; }
-    .grid-two-col { grid-template-columns: 1fr; gap: 30px; }
-    .protocol-horizon-layer, .use-cases-grid { grid-template-columns: repeat(2, 1fr); }
-    .cta-block-container { padding: 0 16px; }
-    .cta-inner-card { flex-direction: column; gap: 24px; align-items: flex-start; }
-    .resource-row { flex-wrap: wrap; gap: 6px; }
-    .footer-matrix { flex-direction: column; gap: 16px; align-items: flex-start; padding: 32px 16px; }
+  .nav { padding: 0 16px; } .links a { display: none; } .links { gap: 0; }
+  .side { display: none; }
+  .tagline h1 { font-size: 18px; } .tagline { bottom: 8px; }
+  .strip .wrap { grid-template-columns: repeat(2, 1fr); } .feat { border-left: 0; border-top: 1px solid var(--line); padding: 18px 16px; }
+  .sec { padding: 32px 16px; } .h2 { font-size: 24px; letter-spacing: 0.12em; }
+  .about { grid-template-columns: 1fr; gap: 20px; }
+  .row5 { grid-template-columns: 1fr; } .row5 > * { border-left: 0; border-top: 1px solid var(--line); padding: 14px 8px; text-align: left; }
+  .cta { margin: 0 16px 32px; flex-direction: column; gap: 22px; align-items: flex-start; padding: 24px; }
+  .foot { grid-template-columns: 1fr; padding: 32px 16px; text-align: left; }
+  .foot .small, .foot .copy { text-align: left; } .foot .mail { justify-content: flex-start; }
 }
 </style>
 </head>
 <body>
-<!-- 1. FIXED NAVIGATION HEADER -->
-<header class="navbar">
-    <div class="nav-left">
-        <img src="/logo-hv.png" alt="HV Logo" class="brand-logo">
-        <div class="brand-text">
-            <span class="title-main">HubVibe</span>
-            <span class="title-sub">MACHINE ECONOMY INFRASTRUCTURE</span>
-        </div>
-    </div>
-    <nav class="nav-right">
-        <a href="#about" class="nav-link">ABOUT</a>
-        <a href="#technology" class="nav-link">TECHNOLOGY</a>
-        <a href="#use-cases" class="nav-link">USE CASES</a>
-        <a href="#resources" class="nav-link">DOCS</a>
-        <a href="mailto:hubvibe@hubvibe-io.com" class="nav-link">CONTACT</a>
-        <a href="https://github.com/Its-fortunatefolly/HubVibe" class="cta-nav-btn">GET STARTED →</a>
+
+<!-- HERO: the owner's artwork (mascot, Earth, wordmark). Nothing is drawn or typed over the mascot. -->
+<section class="hero">
+  <img class="hero-art" src="/hero.jpg" width="1024" height="460" alt="HubVibe">
+  <header class="nav">
+    <a class="brand" href="/">
+      <img src="/logo-hv.png" alt="HV">
+      <span><span class="brand-name">HubVibe</span><br><span class="brand-sub">Machine Economy Infrastructure</span></span>
+    </a>
+    <nav class="links">
+      <a href="#about">About</a>
+      <a href="#technology">Technology</a>
+      <a href="/.well-known/agent.json">Pricing</a>
+      <a href="#resources">Docs</a>
+      <a href="mailto:hubvibe@hubvibe-io.com">Contact</a>
+      <a class="pill" href="https://github.com/Its-fortunatefolly/HubVibe">Get started &rarr;</a>
     </nav>
-</header>
-
-<!-- 2. HERO BLOCK WITH ATMOSPHERIC PLANETARY GLOW -->
-<section class="hero-section">
-    <div class="vertical-accent left-accent">SOFTWARE MOVES THE WORLD.</div>
-    <div class="vertical-accent right-accent">MACHINES TRANSACT A BRIGHTER TOMORROW.</div>
-    <div class="hero-center">
-        <h1 class="hero-art-wrap"><img class="hero-art" src="/hero.jpg" width="1024" height="460" alt="HubVibe"></h1>
-        <p class="hero-subtitle">Infrastructure for the machine economy.</p>
-        <div class="horizontal-divider-line"></div>
-        <p class="protocol-subtitles">AGENTS &middot; APIS &middot; PAYMENTS &middot; REAL WORK</p>
-    </div>
-    <!-- FEATURE ROW DECK -->
-    <div class="feature-deck">
-        <div class="feature-card"><span>⚡ MACHINE-PAYABLE SERVICES</span></div>
-        <div class="feature-card"><span>⚙️ AUTONOMOUS WORKFLOWS</span></div>
-        <div class="feature-card"><span>🗄️ OPEN PROTOCOLS REAL TRANSACTIONS</span></div>
-        <div class="feature-card"><span>👥 BUILD A BRIGHTER TOMORROW</span></div>
-    </div>
+  </header>
+  <div class="side l">Software<br>moves<br>the world.</div>
+  <div class="side r">Machines<br>transact<br>a brighter<br>tomorrow.</div>
+  <div class="tagline">
+    <h1>Infrastructure for the machine economy.</h1>
+    <p>Agents &nbsp;&bull;&nbsp; APIs &nbsp;&bull;&nbsp; Payments &nbsp;&bull;&nbsp; Real work</p>
+  </div>
 </section>
 
-<!-- 3. ABOUT SECTION -->
-<section id="about" class="section-container bg-pure-black">
-    <div class="grid-two-col">
-        <div class="col-left">
-            <span class="section-label">ABOUT -----</span>
-            <h2 class="section-title-white">ABOUT HUBVIBE</h2>
-            <div class="orange-accent-box">
-                <p class="accent-box-text">A QUIETER INTERNET DOES MORE.</p>
-            </div>
-        </div>
-        <div class="col-right paragraphs-gray">
-            <p>HubVibe builds autonomous machine-payable developer infrastructure optimized natively for high-velocity Agent-to-Agent (A2A) networks and micro-transaction settling loops.</p>
-            <p>By bypassing the high-overhead constraints, complex customer acquisition frameworks, and manual interfaces of consumer-facing SaaS tools, our stateless runtime engine fans out complex jobs across verified provider arrays in parallel.</p>
-            <p>We eliminate transaction settlement barriers, allowing autonomous orchestrators to discover, evaluate, and lock programmatic data delivery execution channels completely in fractions of a single second.</p>
-        </div>
+<!-- FEATURE STRIP -->
+<section class="strip"><div class="wrap">
+  <div class="feat"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg><span>Machine-payable<br>services</span></div>
+  <div class="feat"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Autonomous<br>workflows</span></div>
+  <div class="feat"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg><span>Open protocols<br>real transactions</span></div>
+  <div class="feat"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5V12m0 0-5.2 4.8M12 12l5.2 4.8"/></svg><span>Build a brighter<br>tomorrow</span></div>
+</div></section>
+
+<div class="wrap">
+
+<!-- ABOUT -->
+<section id="about" class="sec">
+  <div class="label">About</div>
+  <div class="about">
+    <div>
+      <h2 class="h2">About HubVibe</h2>
+      <div class="quote">A quieter<br>internet<br>does<br>more.</div>
     </div>
+    <div>
+      <p>HubVibe builds infrastructure for a world where software can discover services, communicate with other systems, and transact autonomously.</p>
+      <p>We&rsquo;re building for the emerging machine economy &mdash; where agents and applications can act on behalf of people and organizations, complete real work, and pay per use without requiring a human to stand between every transaction.</p>
+      <p>Our focus is simple: make machine-to-machine interaction reliable, programmable, and economically useful.</p>
+    </div>
+  </div>
 </section>
 
-<!-- 4. TECHNOLOGY STACK HORIZON -->
-<section id="technology" class="section-container bg-pure-black border-top-grid">
-    <span class="section-label centered">TECHNOLOGY -----</span>
-    <h2 class="section-title-white centered">BUILT FOR THE AGENTIC INTERNET</h2>
-    <div class="protocol-horizon-layer">
-        <div class="proto-card border-mcp"><span class="proto-badge badge-mcp">MCP</span><span class="proto-name">MODEL CONTEXT PROTOCOL</span></div>
-        <div class="proto-card border-a2a"><span class="proto-badge badge-a2a">A2A</span><span class="proto-name">AGENT-TO-AGENT COMMERCE</span></div>
-        <div class="proto-card border-http402"><span class="proto-badge badge-http402">HTTP 402</span><span class="proto-name">PAYMENT NATIVE APIS</span></div>
-        <div class="proto-card border-usdc"><span class="proto-badge badge-usdc">USDC</span><span class="proto-name">STABLE PAYMENTS ONCHAIN</span></div>
-        <div class="proto-card border-base"><span class="proto-badge badge-base">BASE</span><span class="proto-name">BUILT FOR THE OPEN ECONOMY</span></div>
-    </div>
-    <p class="technology-subtext">HubVibe operates at the intersection of autonomous agents, open protocols, APIs, and machine payments.</p>
+<!-- TECHNOLOGY -->
+<section id="technology" class="sec">
+  <div class="label">Technology</div>
+  <h2 class="h2">Built for the agentic internet</h2>
+  <div class="row5 proto">
+    <div class="mcp"><div class="badge"><svg viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg>MCP</div><div class="name">Model context<br>protocol</div></div>
+    <div class="a2a"><div class="badge"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>A2A</div><div class="name">Agent-to-agent<br>commerce</div></div>
+    <div class="h402"><div class="badge"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m9 9-3 3 3 3m6-6 3 3-3 3"/></svg>HTTP 402</div><div class="name">Payment native<br>APIs</div></div>
+    <div class="usdc"><div class="badge"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M15 9a3 3 0 0 0-3-2c-1.7 0-3 .9-3 2s1.3 2 3 2 3 .9 3 2-1.3 2-3 2a3 3 0 0 1-3-2"/></svg>USDC</div><div class="name">Stable payments<br>onchain</div></div>
+    <div class="base"><div class="badge"><svg viewBox="0 0 24 24"><path d="M12 2l8.7 5v10L12 22l-8.7-5V7L12 2z"/><path d="M12 7.5l4.3 2.5v5L12 17.5 7.7 15v-5L12 7.5z"/></svg>BASE</div><div class="name">Built for<br>the open economy</div></div>
+  </div>
+  <p class="subtext">HubVibe operates at the intersection of autonomous agents, open protocols, APIs, and machine payments.</p>
 </section>
 
-<!-- 5. 37-WORKER USE CASES MATRIX -->
-<section id="use-cases" class="section-container bg-pure-black border-top-grid">
-    <span class="section-label">USE CASES -----</span>
-    <h2 class="section-title-white">OUR MACHINE CAPABILITIES</h2>
-    <div class="use-cases-grid">
-        <div class="use-case-item"><div class="use-case-icon">🔍</div><h3>Audits &amp; Data</h3></div>
-        <div class="use-case-item"><div class="use-case-icon">📊</div><h3>Analysis &amp; Insights</h3></div>
-        <div class="use-case-item"><div class="use-case-icon">⚙️</div><h3>Compute &amp; Automation</h3></div>
-        <div class="use-case-item"><div class="use-case-icon">📝</div><h3>Content &amp; Transformation</h3></div>
-        <div class="use-case-item"><div class="use-case-icon">📦</div><h3>And More Via Agents</h3></div>
-    </div>
+<!-- USE CASES -->
+<section id="use-cases" class="sec">
+  <div class="label">Use cases</div>
+  <div class="row5">
+    <div class="uc"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m21 21-5.5-5.5"/></svg><span>Audits<br>&amp; data</span></div>
+    <div class="uc"><svg viewBox="0 0 24 24"><path d="M4 20V14M10 20V9M16 20V4M22 20H2"/></svg><span>Analysis<br>&amp; insights</span></div>
+    <div class="uc"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>Compute<br>&amp; automation</span></div>
+    <div class="uc"><svg viewBox="0 0 24 24"><path d="m3 21 12-12m0 0 3 3-12 12-3-3 12-12zM17 3v3M19.5 5.5h-3M21 9v2"/></svg><span>Content<br>&amp; transformation</span></div>
+    <div class="uc"><svg viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg><span>And more<br>via agents</span></div>
+  </div>
 </section>
 
-<!-- 6. TECHNICAL RESOURCES MATRIX -->
-<section id="resources" class="section-container bg-pure-black border-top-grid">
-    <span class="section-label">RESOURCES -----</span>
-    <h2 class="section-title-white">TECHNICAL RESOURCES</h2>
-    <div class="resources-list-stack">
-        <a href="https://github.com/Its-fortunatefolly/HubVibe" class="resource-row">
-            <span class="res-title"><i class="icon-git">📁</i> GitHub</span>
-            <span class="res-desc">Source code</span>
-            <span class="res-arrow">→</span>
-        </a>
-        <a href="/.well-known/agent.json" class="resource-row">
-            <span class="res-title"><i class="icon-json">📄</i> Agent Manifest</span>
-            <span class="res-desc">Every capability, price, schema and live payment rail</span>
-            <span class="res-arrow">→</span>
-        </a>
-        <a href="/.well-known/ard.json" class="resource-row">
-            <span class="res-title"><i class="icon-json">🗂️</i> Discovery Manifest</span>
-            <span class="res-desc">Machine readable (ARD spec v0.91)</span>
-            <span class="res-arrow">→</span>
-        </a>
-        <a href="https://github.com/Its-fortunatefolly/HubVibe#readme" class="resource-row">
-            <span class="res-title"><i class="icon-docs">📖</i> Documentation</span>
-            <span class="res-desc">Setup &amp; integration guidelines</span>
-            <span class="res-arrow">→</span>
-        </a>
-        <a href="/openapi.json" class="resource-row">
-            <span class="res-title"><i class="icon-api">⚙️</i> OpenAPI</span>
-            <span class="res-desc">API reference specs</span>
-            <span class="res-arrow">→</span>
-        </a>
-        <a href="/mcp.json" class="resource-row">
-            <span class="res-title"><i class="icon-mcp">🌐</i> MCP Server</span>
-            <span class="res-desc">Registry entry io.github.Its-fortunatefolly/hubvibe</span>
-            <span class="res-arrow">→</span>
-        </a>
-    </div>
+<!-- RESOURCES -->
+<section id="resources" class="sec">
+  <div class="label">Resources</div>
+  <div class="row5">
+    <a class="res" href="https://github.com/Its-fortunatefolly/HubVibe"><svg viewBox="0 0 24 24"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></svg><span><span class="t">GitHub &rarr;</span><br><span class="d">Source code</span></span></a>
+    <a class="res" href="/.well-known/agent.json"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/><path d="M14 2v6h6M8 13h8M8 17h8M8 9h2"/></svg><span><span class="t">Agent manifest &rarr;</span><br><span class="d">Machine readable</span></span></a>
+    <a class="res" href="https://github.com/Its-fortunatefolly/HubVibe#readme"><svg viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span><span class="t">Documentation &rarr;</span><br><span class="d">Setup &amp; integration</span></span></a>
+    <a class="res" href="/openapi.json"><svg viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/></svg><span><span class="t">OpenAPI &rarr;</span><br><span class="d">API reference</span></span></a>
+    <a class="res" href="/mcp.json"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span><span class="t">MCP registry &rarr;</span><br><span class="d">Discover services</span></span></a>
+  </div>
 </section>
 
-<!-- 7. DEV CALL TO ACTION BLOCK -->
-<section class="cta-block-container">
-    <div class="cta-inner-card">
-        <div class="cta-left">
-            <div class="world-wireframe-icon">🌐</div>
-            <div class="cta-text-wrap">
-                <h3>READY TO BUILD?</h3>
-                <p>Plug into the machine economy today.</p>
-            </div>
-        </div>
-        <div class="cta-actions">
-            <a href="https://github.com/Its-fortunatefolly/HubVibe" class="pill-btn-solid">GET STARTED →</a>
-            <a href="https://github.com/Its-fortunatefolly/HubVibe#readme" class="text-link-explore">EXPLORE DOCS</a>
-        </div>
-    </div>
+<!-- CTA -->
+<section class="cta">
+  <div class="cta-l">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
+    <div><h3>READY TO BUILD?</h3><p>Plug into the machine economy today.</p></div>
+  </div>
+  <div class="cta-r">
+    <a class="pill" href="https://github.com/Its-fortunatefolly/HubVibe">Get started &rarr;</a>
+    <span class="or">OR</span>
+    <a class="explore" href="https://github.com/Its-fortunatefolly/HubVibe#readme">Explore docs</a>
+  </div>
 </section>
 
-<!-- 8. FOOTER MATRIX -->
-<footer class="footer-matrix">
-    <div class="footer-left">
-        <img src="/logo-hv.png" alt="HV" class="footer-icon">
-        <p class="footer-tagline">HubVibe / Infrastructure for the machine economy.</p>
-    </div>
-    <div class="footer-center-left">
-        <span class="matrix-text-vertical">SMALL ACTIONS BIG WORLDS.</span>
-    </div>
-    <div class="footer-center-right">
-        <a href="mailto:hubvibe@hubvibe-io.com" class="neon-email-link">HUBVIBE@HUBVIBE-IO.COM</a>
-    </div>
-    <div class="footer-right">
-        <span class="footer-copyright">&copy; 2026 HubVibe / v1.4.1</span>
-    </div>
+<!-- FOOTER -->
+<footer class="foot">
+  <div class="brand"><img src="/logo-hv.png" alt="HV"><span><span class="brand-name">HubVibe</span><br><span class="brand-sub2">Infrastructure for the machine economy.</span></span></div>
+  <div class="small">Small actions<br>big worlds.</div>
+  <a class="mail" href="mailto:hubvibe@hubvibe-io.com"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 7 10-7"/></svg>HUBVIBE@HUBVIBE-IO.COM</a>
+  <div class="copy">&copy; 2026 HubVibe<br>v1.4.1</div>
 </footer>
+
+</div>
 </body>
 </html>
