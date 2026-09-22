@@ -72,21 +72,20 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #000000;
-    --surface: #0a0a0b;
-    --surface-2: #101012;
-    --line: #1e1e21;
-    --line-bright: #2a2a2e;
-    --text: #f4ede6;
-    --muted: #8d8d94;
-    --dim: #63636a;
-    --accent: #ff8a2a;
-    --accent-soft: #fde4ce;
-    --ok: #4ade80;
-    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --bg: #04060d;
+    --bg-2: #070a14;
+    --line: #1a2033;
+    --text: #f2ede8;
+    --muted: #b9bccb;
+    --dim: #8a90a8;
+    --orange: #ff7a1f;
+    --orange-soft: #ffb37a;
+    --violet: #8b7dff;
+    --blue: #3fa9ff;
+    --display: Jost, Inter, sans-serif;
   }
 
   * { box-sizing: border-box; }
@@ -96,436 +95,347 @@
     background: var(--bg);
     color: var(--text);
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
 
-  a { color: inherit; }
+  a { color: inherit; text-decoration: none; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
 
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+  .wrap { max-width: 1024px; margin: 0 auto; padding: 0 68px; }
+  .caps { font-family: var(--display); text-transform: uppercase; letter-spacing: .32em; }
 
-  /* ---- nav ---- */
-  nav {
+  /* ---- hero: the artwork is the page's own mockup, text sits on top ---- */
+  .hero { position: relative; max-width: 1024px; margin: 0 auto; }
+  .hero-art { display: block; width: 100%; height: auto; }
+  .hero-top {
+    position: absolute; top: 0; left: 0; right: 0;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 22px 0; border-bottom: 1px solid var(--line);
-    position: sticky; top: 0; background: rgba(0,0,0,.88);
-    backdrop-filter: blur(12px); z-index: 20;
+    padding: 18px 30px;
   }
-  .brand { display: flex; align-items: center; gap: 11px; text-decoration: none; }
-  .brand svg { display: block; }
-  .brand-name {
-    font-weight: 800; letter-spacing: .16em; font-size: 14px;
-    color: var(--accent-soft);
-  }
-  .nav-links { display: flex; align-items: center; gap: 28px; }
-  .nav-links a {
-    color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500;
-    transition: color .15s;
-  }
-  .nav-links a:hover { color: var(--text); }
-
-  /* ---- hero ---- */
-  header { padding: 96px 0 76px; }
-  .eyebrow {
-    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
-    text-transform: uppercase; color: var(--accent); margin: 0 0 22px;
-  }
-  h1 {
-    font-size: clamp(38px, 6vw, 62px); line-height: 1.05; letter-spacing: -.03em;
-    font-weight: 800; margin: 0 0 24px; max-width: 15ch;
-  }
-  .lede {
-    font-size: 19px; color: var(--muted); max-width: 60ch; margin: 0 0 38px;
-  }
-  .lede strong { color: var(--text); font-weight: 600; }
-
-  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .brand { display: flex; align-items: center; gap: 16px; }
+  .brand img { display: block; width: 58px; height: auto; }
+  .brand-name { font-size: 26px; font-weight: 600; line-height: 1.1; letter-spacing: -.01em; }
+  .brand-sub { font-family: var(--display); font-size: 10px; letter-spacing: .3em; color: #8fa2ff; text-transform: uppercase; }
+  .nav { display: flex; align-items: center; gap: 18px; }
+  .nav a.link { font-size: 9.5px; font-weight: 500; letter-spacing: .03em; text-transform: uppercase; color: var(--text); }
+  .nav a.link:hover { color: var(--orange-soft); }
   .btn {
-    font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
-    border-radius: 8px; padding: 13px 22px; border: 1px solid transparent;
-    transition: opacity .15s, border-color .15s, background .15s; text-decoration: none;
-    display: inline-block;
+    white-space: nowrap; display: inline-flex; align-items: center; gap: 8px;
+    border: 1.5px solid var(--orange); border-radius: 999px; color: var(--orange);
+    font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    padding: 9px 18px; box-shadow: 0 0 14px rgba(255,122,31,.25) inset, 0 0 12px rgba(255,122,31,.2);
+    transition: background .15s, color .15s;
   }
-  .btn-primary { background: var(--text); color: #000; }
-  .btn-primary:hover { opacity: .88; }
-  /* Border needs to be clearly visible on pure black -- at --line-bright the
-     ghost button read as unstyled text rather than a button. */
-  .btn-ghost { background: transparent; color: var(--text); border-color: #43434a; }
-  .btn-ghost:hover { border-color: var(--accent); color: var(--accent-soft); }
-  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:hover { background: var(--orange); color: #0a0a0a; }
+  .btn-lg { font-size: 13px; padding: 14px 26px; }
+
+  .side {
+    position: absolute; top: 22.5%;
+    font-family: var(--display); font-size: 11px; letter-spacing: .32em; line-height: 1.8;
+    text-transform: uppercase; color: #9fb4ff; margin: 0;
+  }
+  .side::after { content: ""; display: block; width: 40px; height: 2px; background: var(--violet); margin-top: 16px; }
+  .side-l { left: 6.6%; }
+  .side-r { right: 6.4%; }
+
+  .tagline { position: absolute; left: 0; right: 0; top: 83%; text-align: center; }
+  .tagline h1 { font-size: 24px; font-weight: 400; margin: 0 0 12px; letter-spacing: -.005em; text-shadow: 0 2px 12px #000; }
+  .tagline p { margin: 0; font-family: var(--display); font-size: 11px; letter-spacing: .38em; color: #8fb0ff; }
+
+  /* ---- pillars strip ---- */
+  .pillars {
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #060914, #04060d);
+  }
+  .pillars .wrap { display: grid; grid-template-columns: 1fr 1.05fr 1.2fr 1fr; padding: 20px 40px; }
+  .pillar {
+    display: flex; align-items: center; gap: 18px; padding: 0 18px; white-space: nowrap;
+    font-family: var(--display); font-size: 10px; letter-spacing: .22em; line-height: 1.7;
+    text-transform: uppercase; color: var(--text);
+  }
+  .pillar + .pillar { border-left: 1px solid var(--line); }
+  .pillar svg { flex-shrink: 0; width: 34px; height: 34px; stroke: var(--blue); fill: none; stroke-width: 1.6; filter: drop-shadow(0 0 4px rgba(63,169,255,.6)); }
 
   /* ---- sections ---- */
-  section { padding: 76px 0; border-top: 1px solid var(--line); }
+  section { padding: 26px 0; border-bottom: 1px solid var(--line); }
+  .eyebrow {
+    display: flex; align-items: center; gap: 12px; margin: 0 0 16px;
+    font-size: 11.5px; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--orange);
+  }
+  .eyebrow::after { content: ""; width: 42px; height: 2px; background: var(--orange); }
   h2 {
-    font-size: 13px; font-family: var(--mono); letter-spacing: .14em;
-    text-transform: uppercase; color: var(--dim); font-weight: 500; margin: 0 0 34px;
-  }
-  h3 { font-size: 17px; font-weight: 600; margin: 0 0 8px; letter-spacing: -.01em; }
-  .section-lead {
-    font-size: 24px; font-weight: 700; letter-spacing: -.02em;
-    margin: 0 0 16px; max-width: 30ch;
+    font-family: var(--display); font-weight: 300; font-size: 40px;
+    letter-spacing: .2em; text-transform: uppercase; margin: 0; line-height: 1.2;
   }
 
-  /* ---- protocol / proof ---- */
-  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: start; }
-  .steps { list-style: none; padding: 0; margin: 0; counter-reset: step; }
-  .steps li {
-    counter-increment: step; position: relative; padding-left: 40px;
-    margin-bottom: 26px; color: var(--muted); font-size: 15px;
+  .about { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .quiet {
+    margin: 30px 0 0 24px; padding: 4px 0 4px 24px; border-left: 2px solid var(--orange);
+    font-family: var(--display); font-size: 12.5px; letter-spacing: .5em; line-height: 1.9;
+    text-transform: uppercase; color: #9fb4ff;
   }
-  .steps li::before {
-    content: counter(step); position: absolute; left: 0; top: 0;
-    width: 24px; height: 24px; border-radius: 50%;
-    border: 1px solid var(--line-bright); color: var(--accent);
-    font-family: var(--mono); font-size: 11px;
-    display: grid; place-items: center;
-  }
-  .steps b { color: var(--text); font-weight: 600; display: block; margin-bottom: 3px; }
+  .quiet::after { content: ""; display: block; width: 40px; height: 2px; background: var(--violet); margin-top: 16px; }
+  .about-copy { padding-top: 22px; font-size: 14px; color: var(--text); }
+  .about-copy p { margin: 0 0 14px; }
 
-  .code-window {
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: 10px; overflow: hidden;
-  }
-  .code-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 11px 16px; border-bottom: 1px solid var(--line);
-    font-family: var(--mono); font-size: 11px; color: var(--dim);
-    letter-spacing: .06em;
-  }
-  .code-body {
-    margin: 0; padding: 18px; font-family: var(--mono); font-size: 12.5px;
-    line-height: 1.75; color: var(--muted); overflow-x: auto;
-  }
-  .k { color: var(--accent-soft); }
-  .s { color: var(--accent); }
-  .n { color: #7dd3fc; }
-  .c { color: var(--muted); font-style: italic; }
+  .tech { display: grid; grid-template-columns: repeat(5, 1fr); margin: 26px 0 16px; }
+  .tech-item { text-align: center; padding: 0 10px; }
+  .tech-item + .tech-item { border-left: 1px solid #3a3f55; }
+  .tech-name { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 22px; font-weight: 700; white-space: nowrap; }
+  .tech-name svg { width: 34px; height: 34px; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .tech-sub { margin-top: 12px; font-family: var(--display); font-size: 10px; letter-spacing: .2em; line-height: 1.7; text-transform: uppercase; color: var(--muted); }
+  .tech-note { text-align: center; margin: 0; font-size: 14px; }
 
-  .copy-btn {
-    background: transparent; border: 1px solid var(--line-bright); color: var(--muted);
-    font-family: var(--mono); font-size: 11px; padding: 4px 10px; border-radius: 5px;
-    cursor: pointer;
-  }
-  .copy-btn:hover { color: var(--text); border-color: var(--muted); }
+  .row { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 6px; }
+  .cell { display: flex; align-items: center; gap: 12px; padding: 4px 12px; white-space: nowrap; }
+  .cell:first-child { padding-left: 0; }
+  .cell + .cell { border-left: 1px solid var(--line); }
+  .cell svg { flex-shrink: 0; width: 28px; height: 28px; stroke: var(--text); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .cell-text { font-family: var(--display); font-size: 9.5px; letter-spacing: .18em; line-height: 1.6; text-transform: uppercase; }
+  .res-title { display: inline-block; font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; border-bottom: 1px solid var(--text); padding-bottom: 2px; }
+  .res-title::after { content: " \2192"; }
+  .res-sub { display: block; margin-top: 5px; font-size: 10.5px; color: #8fb0ff; }
+  a.cell:hover .res-title { color: var(--orange-soft); border-color: var(--orange-soft); }
 
-  /* ---- audit grid ---- */
-  .audits { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .audit { background: var(--bg); padding: 26px 24px; }
-  .audit p { margin: 0; color: var(--muted); font-size: 14.5px; }
-  .audit .route { font-family: var(--mono); font-size: 12px; color: var(--dim); margin-top: 12px; }
+  .ready { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-top: 22px; padding-bottom: 22px; }
+  .ready-l { display: flex; align-items: center; gap: 22px; }
+  .ready-l svg { width: 46px; height: 46px; stroke: var(--orange); fill: none; stroke-width: 1.6; filter: drop-shadow(0 0 6px rgba(255,122,31,.55)); }
+  .ready h3 { margin: 0; font-size: 19px; font-weight: 500; letter-spacing: .02em; text-transform: uppercase; }
+  .ready p { margin: 2px 0 0; font-size: 15px; letter-spacing: .06em; color: var(--muted); }
+  .ready-r { display: flex; align-items: center; gap: 28px; }
+  .or { font-size: 11px; letter-spacing: .2em; color: var(--muted); }
+  .link-u { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #8fb0ff; border-bottom: 1px solid #8fb0ff; padding-bottom: 3px; }
 
-  /* ---- pricing ---- */
-  .price-hero {
-    border: 1px solid var(--line-bright); border-radius: 12px;
-    padding: 40px; background: var(--surface); margin-bottom: 20px;
-  }
-  .price-tag {
-    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px;
-  }
-  .price-num { font-size: 52px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
-  .price-unit { color: var(--muted); font-size: 16px; }
-  .price-list { list-style: none; padding: 0; margin: 22px 0 0; }
-  .price-list li {
-    padding: 11px 0; border-top: 1px solid var(--line); color: var(--muted);
-    font-size: 14.5px; display: flex; justify-content: space-between; gap: 18px;
-  }
-  .price-list li span:last-child { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+  footer { padding: 30px 0 40px; background: radial-gradient(ellipse at 50% 120%, #0b1a3a 0%, var(--bg) 60%); }
+  footer .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 44px; }
+  .foot-brand { display: flex; align-items: center; gap: 18px; }
+  .foot-brand img { width: 58px; height: auto; }
+  .foot-brand .brand-name { font-size: 22px; font-weight: 500; }
+  .foot-brand .brand-line { font-size: 12.5px; color: var(--text); margin-top: 4px; }
+  .foot-motto { font-family: var(--display); font-size: 10.5px; letter-spacing: .38em; line-height: 1.8; text-transform: uppercase; color: #9fb4ff; }
+  .foot-mail { display: flex; align-items: center; gap: 16px; font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .foot-mail svg { width: 26px; height: 26px; stroke: #9fb4ff; fill: none; stroke-width: 1.6; }
+  .foot-meta { font-size: 11.5px; letter-spacing: .06em; color: var(--muted); line-height: 1.8; }
 
-  /* ---- guarantees ---- */
-  .guarantees { list-style: none; padding: 0; margin: 0; display: grid; gap: 18px; }
-  .guarantees li { display: flex; gap: 13px; color: var(--muted); font-size: 15px; }
-  .guarantees .mark { color: var(--accent); flex-shrink: 0; font-weight: 700; }
-  .guarantees b { color: var(--text); font-weight: 600; }
-
-  /* ---- discovery links ---- */
-  .endpoints { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .endpoint {
-    display: flex; justify-content: space-between; align-items: center; gap: 14px;
-    border: 1px solid var(--line); border-radius: 8px; padding: 13px 16px;
-    text-decoration: none; transition: border-color .15s;
-  }
-  .endpoint:hover { border-color: var(--line-bright); }
-  .endpoint code { font-family: var(--mono); font-size: 13px; color: var(--text); }
-  .endpoint span { font-size: 13px; color: var(--dim); text-align: right; }
-
-  footer {
-    border-top: 1px solid var(--line); padding: 40px 0 60px;
-    color: var(--dim); font-size: 13.5px;
-  }
-  footer a { color: var(--muted); }
-  .footnote { color: var(--dim); font-size: 13px; margin-top: 14px; max-width: 68ch; }
-
-  @media (max-width: 860px) {
-    .split, .audits, .endpoints { grid-template-columns: 1fr; }
-    .split { gap: 40px; }
-    .nav-links { gap: 18px; }
-    .nav-links a.hide-sm { display: none; }
-    header { padding: 64px 0 52px; }
-    section { padding: 56px 0; }
-    .price-hero { padding: 28px; }
+  @media (max-width: 900px) {
+    .wrap, .pillars .wrap { padding-left: 16px; padding-right: 16px; }
+    .pillar, .cell { white-space: normal; }
+    .nav a.link, .side { display: none; }
+    .hero-top { padding: 14px 16px; }
+    .brand img { width: 40px; }
+    .brand-name { font-size: 20px; }
+    .brand-sub { display: none; }
+    .tagline { position: static; padding: 18px 16px 24px; }
+    .tagline h1 { font-size: 20px; }
+    .tagline p { font-size: 10px; letter-spacing: .24em; }
+    .pillars .wrap, .tech, .row { grid-template-columns: repeat(2, 1fr); row-gap: 22px; }
+    .pillar, .cell { padding: 0 12px; }
+    .pillar + .pillar, .tech-item + .tech-item, .cell + .cell { border-left: 0; }
+    .about { grid-template-columns: 1fr; gap: 0; }
+    h2 { font-size: 26px; letter-spacing: .12em; }
+    .ready, footer .wrap { flex-direction: column; align-items: flex-start; }
   }
 </style>
 </head>
 <body>
 
-<div class="wrap">
-  <nav>
+<div class="hero">
+  <img class="hero-art" src="/hero.jpg" width="1024" height="460" alt="The HubVibe robot mascot holding a magnifying glass above the glowing horizon of Earth at night.">
+  <div class="hero-top">
     <a class="brand" href="/" aria-label="HubVibe home">
-      <svg width="30" height="30" viewBox="0 0 100 100" aria-hidden="true">
-        <defs>
-          <filter id="g" x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="3" result="b"/>
-            <feFlood flood-color="#FF8A2A" flood-opacity=".9"/>
-            <feComposite in2="b" operator="in" result="gc"/>
-            <feMerge><feMergeNode in="gc"/><feMergeNode in="gc"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        <g fill="#FDE4CE" filter="url(#g)">
-          <rect x="9" y="22" width="10" height="56" rx="1"/>
-          <rect x="34" y="22" width="10" height="56" rx="1"/>
-          <rect x="9" y="45" width="35" height="10" rx="1"/>
-          <polygon points="50,22 61,22 70.5,57 80,22 91,22 77,78 64,78"/>
-        </g>
-      </svg>
-      <span class="brand-name">HUBVIBE</span>
+      <img src="/logo-hv.png" width="72" height="54" alt="">
+      <span>
+        <span class="brand-name">HubVibe</span><br>
+        <span class="brand-sub">Machine economy infrastructure</span>
+      </span>
     </a>
-    <div class="nav-links">
-      <a href="#protocol" class="hide-sm">Protocol</a>
-      <a href="#capabilities">Capabilities</a>
-      <a href="#audits">Audits</a>
-      <a href="#pricing">Pricing</a>
-      <a href="/docs">API</a>
-    </div>
-  </nav>
+    <nav class="nav" aria-label="Main">
+      <a class="link" href="#about">About</a>
+      <a class="link" href="#technology">Technology</a>
+      <a class="link" href="/.well-known/agent.json">Pricing</a>
+      <a class="link" href="/docs">Docs</a>
+      <a class="link" href="#contact">Contact</a>
+      <a class="btn" href="/.well-known/agent.json">Get started &rarr;</a>
+    </nav>
+  </div>
+  <p class="side side-l">Software<br>moves<br>the world.</p>
+  <p class="side side-r">Machines<br>transact<br>a brighter<br>tomorrow.</p>
+  <div class="tagline">
+    <h1>Infrastructure for the machine economy.</h1>
+    <p>AGENTS &nbsp;&bull;&nbsp; APIS &nbsp;&bull;&nbsp; PAYMENTS &nbsp;&bull;&nbsp; REAL WORK</p>
+  </div>
+</div>
 
-  <header>
-    <p class="eyebrow">Machine-economy infrastructure</p>
-    <h1>Services your software can buy on its own.</h1>
-    <p class="lede">
-      HubVibe is a gateway where autonomous agents discover, use and pay for
-      machine services — compliance audits, AI inference, search and
-      extraction, on-chain and market data, media, compute. An agent calls an
-      endpoint, gets an HTTP 402 with the price and how to pay, settles it,
-      and receives a result — <strong>no account, no sales call, no human in
-      the loop</strong>.
-    </p>
-    <div class="cta-row">
-      <a class="btn btn-primary" href="/.well-known/agent.json">Read the machine manifest</a>
-      <a class="btn btn-ghost" href="#pricing">See pricing</a>
+<div class="pillars">
+  <div class="wrap">
+    <div class="pillar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+      <span>Machine-payable<br>services</span>
     </div>
-  </header>
+    <div class="pillar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/><circle cx="12" cy="12" r="6.5"/></svg>
+      <span>Autonomous<br>workflows</span>
+    </div>
+    <div class="pillar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="2.6"/><path d="M5 5v14c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V5M5 9.7c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6M5 14.3c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/></svg>
+      <span>Open protocols<br>real transactions</span>
+    </div>
+    <div class="pillar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.8"/><circle cx="5" cy="18" r="2.8"/><circle cx="19" cy="18" r="2.8"/><path d="M10.6 7.4 6.4 15.6M13.4 7.4l4.2 8.2M7.8 18h8.4"/></svg>
+      <span>Build a brighter<br>tomorrow</span>
+    </div>
+  </div>
+</div>
 
-  <section id="protocol">
-    <h2>How a machine buys</h2>
-    <div class="split">
+<main>
+  <section id="about">
+    <div class="wrap about">
       <div>
-        <p class="section-lead">Payment is part of the request, not a signup flow.</p>
-        <ol class="steps">
-          <li><b>Call the endpoint</b>Unauthenticated. Nothing to register first.</li>
-          <li><b>Read the 402</b>The response carries the exact price and every payment rail that can actually settle on this node.</li>
-          <li><b>Pay and retry</b>Over whichever rails are live for this deployment -- the 402 tells you. The audit runs and the result comes back on the same call.</li>
-        </ol>
+        <p class="eyebrow">About</p>
+        <h2>About HubVibe</h2>
+        <p class="quiet">A quieter<br>internet<br>does<br>more.</p>
       </div>
-      <div class="code-window">
-        <div class="code-head"><span>HTTP 402 — POST /audit/wcag</span></div>
-<pre class="code-body">{
-  <span class="k">"error"</span>: <span class="s">"payment_required"</span>,
-  <span class="k">"price_usd"</span>: <span class="n">0.05</span>,
-  <span class="k">"accepts"</span>: [
-    <span class="c">// every rail this node can settle,</span>
-    <span class="c">// each in its own protocol's shape</span>
-  ],
-  <span class="k">"other_rails"</span>: [],
-  <span class="k">"docs"</span>: <span class="s">"/.well-known/agent.json"</span>
-}</pre>
+      <div class="about-copy">
+        <p>HubVibe builds infrastructure for a world where software can discover services, communicate with other systems, and transact autonomously.</p>
+        <p>We&rsquo;re building for the emerging machine economy &mdash; where agents and applications can act on behalf of people and organizations, complete real work, and pay per use without requiring a human to stand between every transaction.</p>
+        <p>Our focus is simple: make machine-to-machine interaction reliable, programmable, and economically useful.</p>
       </div>
     </div>
   </section>
 
-  <section id="capabilities">
-    <h2>What agents can buy here</h2>
-    <p class="section-lead">One gateway, one payment flow, a growing repertoire of machine services.</p>
-    <div class="audits">
-      <div class="audit">
-        <h3>AI models</h3>
-        <p>LLM inference across Gemini and Claude (via Vertex Model Garden), with provider and model choice — the exact model that ran comes back with measured token usage.</p>
-        <div class="route">POST /work/llm/analyze · /work/llm/extract · /work/llm/generate</div>
+  <section id="technology">
+    <div class="wrap">
+      <p class="eyebrow">Technology</p>
+      <h2>Built for the agentic internet</h2>
+      <div class="tech">
+        <div class="tech-item">
+          <div class="tech-name" style="color:#ff8a3d">
+            <svg viewBox="0 0 24 24" stroke="#ff8a3d" aria-hidden="true"><path d="M12 2.5 3.5 7v10L12 21.5 20.5 17V7z"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/></svg>MCP
+          </div>
+          <div class="tech-sub">Model context<br>protocol</div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-name" style="color:#b57bff">
+            <svg viewBox="0 0 24 24" stroke="#b57bff" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4l-1.1 1.1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.1-1.1"/></svg>A2A
+          </div>
+          <div class="tech-sub">Agent-to-agent<br>commerce</div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-name" style="color:#3fb4ff">
+            <svg viewBox="0 0 24 24" stroke="#3fb4ff" aria-hidden="true"><rect x="3.5" y="3.5" width="15" height="17" rx="1.5"/><path d="M7 3.5V2h13.5v17H18.5"/><path d="m9 10-2 2 2 2M13 10l2 2-2 2"/></svg>HTTP 402
+          </div>
+          <div class="tech-sub">Payment native<br>APIs</div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-name" style="color:#3fe0b0">
+            <svg viewBox="0 0 24 24" stroke="#3fe0b0" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M15 8.6c-.6-.9-1.7-1.4-3-1.4-1.8 0-3 .9-3 2.3 0 3.2 6.2 1.8 6.2 5 0 1.4-1.3 2.4-3.2 2.4-1.4 0-2.6-.6-3.2-1.6M12 5.5v1.7M12 16.9v1.6"/></svg>USDC
+          </div>
+          <div class="tech-sub">Stable payments<br>onchain</div>
+        </div>
+        <div class="tech-item">
+          <div class="tech-name" style="color:#8a7dff">
+            <svg viewBox="0 0 24 24" stroke="#8a7dff" aria-hidden="true"><path d="M12 2.5 20.5 7.2v9.6L12 21.5l-8.5-4.7V7.2z"/><path d="M8 8.5h8.5L8 15.5h8.5"/></svg>BASE
+          </div>
+          <div class="tech-sub">Built for<br>the open economy</div>
+        </div>
       </div>
-      <div class="audit">
-        <h3>Search &amp; research</h3>
-        <p>Grounded web search, guarded page fetch, structured extraction — and composite research jobs that return one cited answer, on a page, a question, or a company.</p>
-        <div class="route">POST /work/search/web · /work/research/web · /work/research/company</div>
-      </div>
-      <div class="audit">
-        <h3>Compute &amp; data</h3>
-        <p>BigQuery queries, plain-language questions, forecasting and anomaly detection against a dataset, plus code execution in Google's own hosted sandbox.</p>
-        <div class="route">POST /work/data/query · /work/data/forecast · /work/code/execute</div>
-      </div>
-      <div class="audit">
-        <h3>Blockchain</h3>
-        <p>Read-only JSON-RPC against Base mainnet: balances, blocks, transactions, receipts, logs, contract calls. No broadcasting, by design.</p>
-        <div class="route">POST /work/chain/address · /work/chain/transaction · /work/chain/rpc</div>
-      </div>
-      <div class="audit">
-        <h3>Market intelligence</h3>
-        <p>Live spot prices, exchange-rate tables and tickers from public Coinbase data — plus prediction-market questions, prices and volumes.</p>
-        <div class="route">POST /work/market/intel · /work/market/quote · /work/market/prediction</div>
-      </div>
-      <div class="audit">
-        <h3>Media</h3>
-        <p>Image generation (Imagen), voice synthesis and transcription (Cloud Speech), delivered in the response itself — the only channel a per-call payer needs.</p>
-        <div class="route">POST /work/image/generate · /work/speech/synthesize</div>
-      </div>
-      <div class="audit">
-        <h3>Site audits</h3>
-        <p>The original product: deterministic accessibility, SEO, security-header and performance checks against the live page.</p>
-        <div class="route">POST /audit/*</div>
-      </div>
-      <div class="audit">
-        <h3>Agent network</h3>
-        <p>MCP · A2A · HTTP 402 · USDC · BASE. Discovery via the agent manifest, a live MCP endpoint, and payment challenges that carry the catalog.</p>
-        <div class="route">POST /mcp · GET /.well-known/agent.json</div>
-      </div>
+      <p class="tech-note">HubVibe operates at the intersection of autonomous agents, open protocols, APIs, and machine payments.</p>
     </div>
-    <p class="footnote">
-      Which capabilities are live on a given node is deployment state, not a
-      promise: the <a href="/.well-known/agent.json">agent manifest</a> lists
-      exactly what this node sells right now, and <a href="/work">/work</a>
-      indexes the worker network for free, including why anything unavailable
-      is off. A capability without a configured provider is omitted, never
-      advertised broken.
-    </p>
   </section>
 
-  <section id="audits">
-    <h2>The audit suite</h2>
-    <p class="section-lead">Four dimensions. Run one, or run all four in a single billed call.</p>
-    <div class="audits">
-      <div class="audit">
-        <h3>Accessibility</h3>
-        <p>WCAG 2.1 A/AA via axe-core, executed against the rendered page in a real browser.</p>
-        <div class="route">POST /audit/wcag</div>
-      </div>
-      <div class="audit">
-        <h3>SEO</h3>
-        <p>Title, meta description, H1 structure, canonical, OpenGraph, structured data, lang attribute.</p>
-        <div class="route">POST /audit/seo</div>
-      </div>
-      <div class="audit">
-        <h3>Security headers</h3>
-        <p>HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking protection, Referrer-Policy, CORS.</p>
-        <div class="route">POST /audit/security</div>
-      </div>
-      <div class="audit">
-        <h3>Performance</h3>
-        <p>DOM node count, transferred bytes, and request count measured from one real page load.</p>
-        <div class="route">POST /audit/performance</div>
+  <section id="use-cases">
+    <div class="wrap">
+      <p class="eyebrow">Use cases</p>
+      <div class="row">
+        <div class="cell">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/></svg>
+          <span class="cell-text">Audits<br>&amp; data</span>
+        </div>
+        <div class="cell">
+          <svg viewBox="0 0 24 24" aria-hidden="true" style="fill:var(--text);stroke:none"><rect x="3" y="15" width="3" height="6"/><rect x="8" y="11" width="3" height="10"/><rect x="13" y="7" width="3" height="14"/><rect x="18" y="3" width="3" height="18"/></svg>
+          <span class="cell-text">Analysis<br>&amp; insights</span>
+        </div>
+        <div class="cell">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          <span class="cell-text">Compute<br>&amp; automation</span>
+        </div>
+        <div class="cell">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 11-11M13 7l2 2M17 3v3M15.5 4.5h3M20 8v2M19 9h2M10 3v2M9 4h2"/></svg>
+          <span class="cell-text">Content<br>&amp; transformation</span>
+        </div>
+        <div class="cell">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/></svg>
+          <span class="cell-text">And more<br>via agents</span>
+        </div>
       </div>
     </div>
-    <p class="footnote">
-      Narrow, disclosed signals — not a substitute for a full manual accessibility
-      audit, a penetration test, or a Lighthouse run. A check that cannot run
-      returns an error and is never reported as a pass.
-    </p>
   </section>
 
-  <section id="pricing">
-    <h2>Pricing</h2>
-    <div class="price-hero">
-      <div class="price-tag">
-        <span class="price-num">Metered</span>
-        <span class="price-unit">per call · settled machine-to-machine</span>
+  <section id="resources">
+    <div class="wrap">
+      <p class="eyebrow">Resources</p>
+      <div class="row">
+        <a class="cell" href="https://github.com/its-fortunatefolly/hubvibe" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" aria-hidden="true" style="fill:var(--text);stroke:none"><path d="M12 1.5a10.5 10.5 0 0 0-3.3 20.5c.5.1.7-.2.7-.5v-1.8c-2.9.6-3.5-1.4-3.5-1.4-.5-1.2-1.2-1.5-1.2-1.5-1-.7 0-.7 0-.7 1 .1 1.6 1.1 1.6 1.1.9 1.6 2.5 1.2 3.1.9.1-.7.4-1.2.7-1.4-2.3-.3-4.8-1.2-4.8-5.2 0-1.1.4-2.1 1.1-2.8-.1-.3-.5-1.4.1-2.8 0 0 .9-.3 2.9 1.1a10 10 0 0 1 5.2 0c2-1.4 2.9-1.1 2.9-1.1.6 1.4.2 2.5.1 2.8.7.8 1.1 1.7 1.1 2.8 0 4-2.5 4.9-4.8 5.2.4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10.5 10.5 0 0 0 12 1.5z"/></svg>
+          <span><span class="res-title">GitHub</span><span class="res-sub">Source code</span></span>
+        </a>
+        <a class="cell" href="/.well-known/agent.json">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z"/><path d="M14 2.5V7h5M9 11h7M9 14.5h7M9 18h5"/></svg>
+          <span><span class="res-title">Agent manifest</span><span class="res-sub">Machine readable</span></span>
+        </a>
+        <a class="cell" href="/docs">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 5.5c3-1.3 6.3-1.3 9.5.5 3.2-1.8 6.5-1.8 9.5-.5v14c-3-1.3-6.3-1.3-9.5.5-3.2-1.8-6.5-1.8-9.5-.5zM12 6v14"/></svg>
+          <span><span class="res-title">Documentation</span><span class="res-sub">Setup &amp; integration</span></span>
+        </a>
+        <a class="cell" href="/openapi.json">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3.5c-2 0-2.5 1-2.5 2.5v3c0 1.5-.8 2.5-2.5 3 1.7.5 2.5 1.5 2.5 3v3c0 1.5.5 2.5 2.5 2.5M16 3.5c2 0 2.5 1 2.5 2.5v3c0 1.5.8 2.5 2.5 3-1.7.5-2.5 1.5-2.5 3v3c0 1.5-.5 2.5-2.5 2.5"/></svg>
+          <span><span class="res-title">OpenAPI</span><span class="res-sub">API reference</span></span>
+        </a>
+        <a class="cell" href="/mcp.json">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.2"/></svg>
+          <span><span class="res-title">MCP registry</span><span class="res-sub">Discover services</span></span>
+        </a>
       </div>
-      <p class="lede" style="margin:0;font-size:16px;max-width:52ch;">
-        Agents pay for exactly the audits they run. No minimum, no
-        commitment, no account. The live rate for every route is published
-        in the agent manifest and quoted in the 402 challenge itself, so a
-        caller reads the price from the endpoint rather than from a page
-        that could drift.
-      </p>
-      <ul class="price-list">
-        <li><span>Rates</span><span><a href="/.well-known/agent.json">/.well-known/agent.json</a></span></li>
-        <li><span>Payment</span><span>HTTP 402 &middot; <a href="/.well-known/agent.json">live rails</a></span></li>
-      </ul>
     </div>
-
-  </section>
-
-  <section id="guarantees">
-    <h2>What we guarantee</h2>
-    <ul class="guarantees">
-      <li><span class="mark">→</span><span><b>You are charged only for a result.</b> If an audit cannot run — the target is unreachable, or it times out — the call returns an error and the payment is never settled.</span></li>
-      <li><span class="mark">→</span><span><b>A check that fails to run is never a pass.</b> Results are rule-based and reproducible. Nothing here asks a language model whether a page looks compliant.</span></li>
-      <li><span class="mark">→</span><span><b>We advertise only rails that work.</b> The 402 lists payment methods this node can actually settle, so an agent never builds a payment that cannot land.</span></li>
-      <li><span class="mark">→</span><span><b>Rate limits cost nothing.</b> A throttled request is rejected before any payment is touched and returns a Retry-After.</span></li>
-    </ul>
   </section>
 
   <section id="start">
-    <h2>Call it</h2>
-    <div class="split">
-      <div>
-        <p class="section-lead">One request. Works from anything that speaks HTTP.</p>
-        <p style="color:var(--muted);font-size:15px;max-width:46ch;">
-          Start unauthenticated: the call returns the 402 above, carrying the
-          price and the rails this node can settle. Settle one and repeat the
-          same request with the header that rail names — or let a client
-          library do both in one call.
-        </p>
-        <div class="endpoints" style="margin-top:26px;grid-template-columns:1fr;">
-          <a class="endpoint" href="/.well-known/agent.json"><code>/.well-known/agent.json</code><span>Agent manifest</span></a>
-          <a class="endpoint" href="/openapi.json"><code>/openapi.json</code><span>OpenAPI spec</span></a>
-          <a class="endpoint" href="/mcp.json"><code>/mcp.json</code><span>MCP tools</span></a>
-          <a class="endpoint" href="/llms.txt"><code>/llms.txt</code><span>Plain-text summary</span></a>
+    <div class="wrap ready">
+      <div class="ready-l">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c2.6 2.6 3.9 5.8 3.9 9.5s-1.3 6.9-3.9 9.5c-2.6-2.6-3.9-5.8-3.9-9.5S9.4 5.1 12 2.5z"/></svg>
+        <div>
+          <h3>Ready to build?</h3>
+          <p>Plug into the machine economy today.</p>
         </div>
       </div>
-      <div class="code-window">
-        <div class="code-head">
-          <span>curl</span>
-          <button class="copy-btn" id="copy-curl-button">Copy</button>
-        </div>
-<pre class="code-body" id="curl-example">curl -X POST https://hubvibe-io.com/audit/bundle \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com"}'
-# -> 402 with the price and the payable rails.
-# Settle one, then repeat this call carrying the
-# payment header that rail's entry names.</pre>
+      <div class="ready-r">
+        <a class="btn btn-lg" href="/.well-known/agent.json">Get started &rarr;</a>
+        <span class="or">OR</span>
+        <a class="link-u" href="/docs">Explore docs</a>
       </div>
     </div>
   </section>
+</main>
 
-  <footer>
-    <div class="brand" style="margin-bottom:14px;">
-      <svg width="20" height="20" viewBox="0 0 100 100" aria-hidden="true">
-        <g fill="#8d8d94">
-          <rect x="9" y="22" width="10" height="56" rx="1"/>
-          <rect x="34" y="22" width="10" height="56" rx="1"/>
-          <rect x="9" y="45" width="35" height="10" rx="1"/>
-          <polygon points="50,22 61,22 70.5,57 80,22 91,22 77,78 64,78"/>
-        </g>
-      </svg>
-      <span class="brand-name" style="color:var(--dim);">HUBVIBE</span>
+<footer id="contact">
+  <div class="wrap">
+    <div class="foot-brand">
+      <img src="/logo-hv.png" width="72" height="54" alt="">
+      <div>
+        <div class="brand-name">HubVibe</div>
+        <div class="brand-line">Infrastructure for the machine economy.</div>
+      </div>
     </div>
-    HubVibe — machine-payable services for autonomous agents.
-    <a href="/docs">API reference</a> ·
-    <a href="/.well-known/agent.json">Agent manifest</a> ·
-    <a href="https://github.com/its-fortunatefolly/hubvibe" target="_blank" rel="noopener">Source</a>
-  </footer>
-</div>
+    <div class="foot-motto">Small actions<br>big worlds.</div>
+    <a class="foot-mail" href="mailto:hubvibe@hubvibe-io.com">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="1.5"/><path d="m3 6 9 7 9-7"/></svg>
+      hubvibe@hubvibe-io.com
+    </a>
+    <div class="foot-meta">&copy; 2026 HubVibe<br>v1.4.0</div>
+  </div>
+</footer>
 
-<script>
-document.getElementById("copy-curl-button").addEventListener("click", async () => {
-  const button = document.getElementById("copy-curl-button");
-  const text = document.getElementById("curl-example").textContent;
-  try {
-    await navigator.clipboard.writeText(text);
-    button.textContent = "Copied";
-  } catch (err) {
-    button.textContent = "Select to copy";
-  }
-  setTimeout(() => { button.textContent = "Copy"; }, 2000);
-});
-</script>
 </body>
 </html>
