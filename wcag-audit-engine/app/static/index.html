@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=1024">
 <title>HubVibe: 37 Machine-Payable Dev Utilities and WCAG Audits</title>
 <meta name="description" content="HubVibe: infrastructure for the machine economy. Agents, APIs, payments, real work.">
 <link rel="canonical" href="https://hubvibe-io.com/">
@@ -24,7 +24,7 @@
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { background: var(--bg); }
-body { background: var(--bg); color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.5; overflow-x: hidden; }
+body { min-width: 1024px; background: var(--bg); color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.5; overflow-x: hidden; }
 a { color: inherit; text-decoration: none; }
 .wrap { width: 100%; max-width: var(--w); margin: 0 auto; }
 .caps { text-transform: uppercase; letter-spacing: 0.22em; }
@@ -113,18 +113,6 @@ a { color: inherit; text-decoration: none; }
 .foot .mail svg { width: 26px; height: 26px; stroke: var(--purple); fill: none; stroke-width: 1.6; }
 .foot .copy { font-size: 11px; color: var(--dim); text-align: right; line-height: 1.8; }
 
-@media (max-width: 900px) {
-  .nav { padding: 0 16px; } .links a { display: none; } .links { gap: 0; }
-  .side { display: none; }
-  .tagline h1 { font-size: 18px; } .tagline { bottom: 8px; }
-  .strip .wrap { grid-template-columns: repeat(2, 1fr); } .feat { border-left: 0; border-top: 1px solid var(--line); padding: 18px 16px; }
-  .sec { padding: 32px 16px; } .h2 { font-size: 24px; letter-spacing: 0.12em; }
-  .about { grid-template-columns: 1fr; gap: 20px; }
-  .row5 { grid-template-columns: 1fr; } .row5 > * { border-left: 0; border-top: 1px solid var(--line); padding: 14px 8px; text-align: left; }
-  .cta { margin: 0 16px 32px; flex-direction: column; gap: 22px; align-items: flex-start; padding: 24px; }
-  .foot { grid-template-columns: 1fr; padding: 32px 16px; text-align: left; }
-  .foot .small, .foot .copy { text-align: left; } .foot .mail { justify-content: flex-start; }
-}
 </style>
 </head>
 <body>
