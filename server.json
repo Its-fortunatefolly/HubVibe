@@ -3,7 +3,7 @@
   "name": "io.github.Its-fortunatefolly/hubvibe",
   "title": "HubVibe: 37 Machine-Payable Dev Utilities and WCAG Audits",
   "description": "Pay per call via HTTP 402: 5 deterministic site audits as MCP tools, 37 /work jobs, receipt per job.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "icons": [
     {
       "src": "https://hubvibe-io.com/favicon.svg",
