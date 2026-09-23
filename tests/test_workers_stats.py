@@ -67,9 +67,11 @@ W = _load_workers()
 
 
 def _stats():
-    import importlib
-
-    return importlib.import_module(W.__name__ + ".skills.stats")
+    """The stats module of the SAME package instance `W` points at. Another
+    test file's fresh load replaces the sys.modules entry, so a by-name
+    import would hand back a second copy whose exception classes and
+    functions are not the ones W.router registered."""
+    return W.skills.stats
 
 
 @pytest.fixture

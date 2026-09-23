@@ -168,6 +168,9 @@ def test_mcp_json_prices_come_from_the_catalog(monkeypatch):
     body = TestClient(module.app).get("/mcp.json").json()
 
     catalog = {entry["path"]: entry["price_usd"] for entry in module._CATALOG}
+    # A worker-backed tool is priced from ITS catalog row, the same way.
+    for worker in module._mcp_worker_tools().values():
+        catalog[worker.path] = worker.price_usd
     served = {
         tool["httpEndpoint"]["path"]: tool["httpEndpoint"]["price_usd"]
         for tool in body["tools"]
