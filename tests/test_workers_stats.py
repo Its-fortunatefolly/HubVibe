@@ -415,7 +415,7 @@ def test_the_mcp_tool_is_listed_from_the_catalog_row(app_module, client):
     assert served["httpEndpoint"] == {"method": "POST", "path": PATH, "price_usd": 0.50}
     assert served["outputSchema"] == tool["outputSchema"]
     card = next(e for e in client.get("/.well-known/ard.json").json()["entries"]
-                if e["identifier"].endswith(":mcp:site-audits"))
+                if e["identifier"].endswith(":mcp:hubvibe"))
     assert TOOL in card["capabilities"]
 
 

@@ -412,21 +412,7 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
                 "input_schema": worker.input_schema, "billed": False})
         # Everything else goes through the CORE's failure path, so an
         # unbilled worker failure unwinds exactly like an unbilled audit.
-        response = _failed(auth, exc.detail)
-        response.status_code = status
-        try:
-            body = json.loads(bytes(response.body).decode())
-            body["reason"] = exc.reason
-            body["worker"] = worker.name
-            body["receipt_id"] = ledger.receipt_id_for(call_id)
-            # The core's headers minus the ones describing ITS body: the
-            # body just grew, and a copied Content-Length made every
-            # failed worker call die mid-response instead of a clean 502.
-            headers = {k: v for k, v in response.headers.items()
-                       if k.lower() not in ("content-length", "content-type")}
-            return JSONResponse(status_code=status, content=body, headers=headers)
-        except Exception:  # pragma: no cover
-            return response
+        return _unbilled_failure(auth, worker, call_id, exc.reason, status, exc.detail)
     except Exception as exc:  # pragma: no cover - unexpected adapter bug
         log.exception("worker %s crashed", worker.name)
         ledger.close_call(call_id, "failed", failure_reason="internal_error",
@@ -436,6 +422,24 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
         return _failed(auth, f"{worker.name} failed: {type(exc).__name__}")
 
     _record_attempts(call_id, ctx)
+
+    # The delivery contract, before anything is charged: the result must
+    # match the output schema this route publishes everywhere (openapi.json,
+    # the MCP outputSchema, the 402's Bazaar record, the A2A skill). A result
+    # that does not is a failed job -- 502, nothing billed, on the ledger as
+    # contract_mismatch -- never a paid surprise. Same unwinding as a
+    # provider failure.
+    problem = catalog.contract.check(worker.output_schema, result)
+    if problem is not None:
+        log.error("worker %s: result violates its published output schema: %s", worker.name, problem)
+        ledger.close_call(call_id, "failed", failure_reason="contract_mismatch",
+                          failure_stage="deliver", payer=payer)
+        if claimed and idempotency_key:
+            ledger.release_idempotency(idempotency_key)
+        return _unbilled_failure(
+            auth, worker, call_id, "contract_mismatch", 502,
+            f"{worker.name} produced a result that does not match its published "
+            f"output schema ({problem}); it was not delivered")
 
     # Only now, with a real result in hand, is anything charged.
     warning = await asyncio.get_running_loop().run_in_executor(
@@ -491,6 +495,27 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
         else:
             ledger.complete_idempotency(idempotency_key, json.dumps(content))
     return delivered
+
+
+def _unbilled_failure(auth, worker, call_id: str, reason: str, status: int, detail: str):
+    """The failed-job response: the core's unbilled failure (prepaid debit
+    refunded, MPP credential released, nothing settled) with the worker's
+    reason, name and receipt id added to the body."""
+    response = _failed(auth, detail)
+    response.status_code = status
+    try:
+        body = json.loads(bytes(response.body).decode())
+        body["reason"] = reason
+        body["worker"] = worker.name
+        body["receipt_id"] = ledger.receipt_id_for(call_id)
+        # The core's headers minus the ones describing ITS body: the body
+        # just grew, and a copied Content-Length made every failed worker
+        # call die mid-response instead of a clean 502.
+        headers = {k: v for k, v in response.headers.items()
+                   if k.lower() not in ("content-length", "content-type")}
+        return JSONResponse(status_code=status, content=body, headers=headers)
+    except Exception:  # pragma: no cover
+        return response
 
 
 def register_routes() -> None:

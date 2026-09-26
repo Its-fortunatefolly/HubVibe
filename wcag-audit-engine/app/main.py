@@ -99,7 +99,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.5.1"
+SERVICE_VERSION = "1.5.2"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -141,7 +141,7 @@ async def _lifespan(_app: "FastAPI"):
 # ard.json and (by hand, in the static files) mcp.json and the registry entry.
 # Crawlers scored this node as a five-tool audit service while it sold 37
 # more routes, because each surface carried its own audit-era title.
-SERVICE_TITLE = "HubVibe: 38 Machine-Payable Dev Utilities and WCAG Audits"
+SERVICE_TITLE = "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents"
 
 app = FastAPI(
     lifespan=_lifespan,
@@ -1293,6 +1293,23 @@ def _failed_audit_response(auth, detail: str) -> JSONResponse:
     return JSONResponse(status_code=502, content=content)
 
 
+def _output_contract_problem(path: str, result: dict) -> Optional[str]:
+    """The delivery contract for an audit: the result must match the output
+    schema this route publishes (MCP outputSchema, agent.json, ard.json,
+    the 402's Bazaar record) before it is billed. None when it does."""
+    if workers is None:
+        return None
+    return workers.catalog.contract.check(_MCP_OUTPUT_SCHEMAS.get(path), result)
+
+
+def _contract_failure(auth, path: str, problem: str) -> JSONResponse:
+    logging.getLogger("hubvibe.audit").error(
+        "%s: result violates its published output schema: %s", path, problem)
+    return _failed_audit_response(
+        auth, f"The audit produced a result that does not match its published output "
+              f"schema ({problem}); it was not delivered")
+
+
 def _bill(auth, price_usd: float) -> Optional[str]:
     """Collect payment for an audit that actually produced a result.
 
@@ -2230,7 +2247,10 @@ async def agent_manifest(request: Request):
             "docs": f"{base}/docs",
         },
         "guarantees": [
-            "You are charged only for a call that produced a result. A job or "
+            "You are charged only for a call that produced a result, and every "
+            "result is checked against the route's published output schema "
+            "before it is billed: one that does not match is not delivered and "
+            "not charged (HTTP 502, reason contract_mismatch). A job or "
             "check that could not run returns HTTP 502, is never settled, and "
             "is never reported as a pass -- an x402 payment is verified to grant "
             "access and settled only once the work has actually produced a "
@@ -2971,7 +2991,7 @@ async def mcp_streamable_http(
             "result": {
                 "protocolVersion": version,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "hubvibe-site-audit", "version": SERVICE_VERSION},
+                "serverInfo": {"name": "hubvibe", "version": SERVICE_VERSION},
                 "instructions": (
                     "HubVibe: pay-per-call tools for agents -- web search and "
                     "cited research, LLM completion and extraction, crypto and "
@@ -3242,6 +3262,14 @@ def _mcp_tools_call(
             request_id, f"Audit could not complete: {exc}. Nothing was charged.", details
         )
 
+    problem = _output_contract_problem("/audit/" + name[len("audit_"):], result)
+    if problem is not None:
+        _unbill_failed_audit(auth)
+        return _mcp_tool_error(
+            request_id,
+            f"{name} produced a result that does not match its published outputSchema "
+            f"({problem}); it was not delivered. Nothing was charged.",
+            {"reason": "contract_mismatch", "billed": False})
     warning = _bill(auth, price_usd=price)
     refused = _settlement_refused(auth)
     if refused is not None:
@@ -3747,6 +3775,9 @@ def audit(
         ],
     }
 
+    problem = _output_contract_problem("/audit/wcag", result)
+    if problem is not None:
+        return _contract_failure(auth, "/audit/wcag", problem)
     warning = _bill(auth, price_usd=_price_of("/audit"))
     if warning:
         result["billing_warning"] = warning
@@ -3803,6 +3834,9 @@ def audit_wcag(
             for v in violations
         ],
     }
+    problem = _output_contract_problem("/audit/wcag", result)
+    if problem is not None:
+        return _contract_failure(auth, "/audit/wcag", problem)
     warning = _bill(auth, price_usd=_price_of("/audit/wcag"))
     if warning:
         result["billing_warning"] = warning
@@ -3836,6 +3870,9 @@ def audit_seo(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
+    problem = _output_contract_problem("/audit/seo", result)
+    if problem is not None:
+        return _contract_failure(auth, "/audit/seo", problem)
     warning = _bill(auth, price_usd=_price_of("/audit/seo"))
     if warning:
         result["billing_warning"] = warning
@@ -3862,6 +3899,9 @@ def audit_security(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
+    problem = _output_contract_problem("/audit/security", result)
+    if problem is not None:
+        return _contract_failure(auth, "/audit/security", problem)
     warning = _bill(auth, price_usd=_price_of("/audit/security"))
     if warning:
         result["billing_warning"] = warning
@@ -3888,6 +3928,9 @@ def audit_performance(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
+    problem = _output_contract_problem("/audit/performance", result)
+    if problem is not None:
+        return _contract_failure(auth, "/audit/performance", problem)
     warning = _bill(auth, price_usd=_price_of("/audit/performance"))
     if warning:
         result["billing_warning"] = warning
@@ -3950,6 +3993,9 @@ def audit_bundle(
         "security": security_result,
         "performance": performance_result,
     }
+    problem = _output_contract_problem("/audit/bundle", result)
+    if problem is not None:
+        return _contract_failure(auth, "/audit/bundle", problem)
     warning = _bill(auth, price_usd=_price_of("/audit/bundle"))
     if warning:
         result["billing_warning"] = warning

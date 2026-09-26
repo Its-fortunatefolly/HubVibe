@@ -2306,7 +2306,7 @@ def test_mcp_initialize_negotiates_protocol_version(monkeypatch):
     # Echo a version we support...
     assert result["protocolVersion"] == "2025-06-18"
     assert result["capabilities"]["tools"] == {"listChanged": False}
-    assert result["serverInfo"]["name"] == "hubvibe-site-audit"
+    assert result["serverInfo"]["name"] == "hubvibe"
 
     # ...but fall back to ours for one we don't.
     r2 = _rpc(client, "initialize", {"protocolVersion": "1999-01-01", "capabilities": {}})

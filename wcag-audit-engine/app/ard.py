@@ -118,7 +118,7 @@ def build_manifest(
             **common,
         },
         {
-            "identifier": _identifier(publisher, "mcp", "site-audits"),
+            "identifier": _identifier(publisher, "mcp", "hubvibe"),
             "displayName": "HubVibe (MCP server)",
             "type": TYPE_MCP_SERVER_CARD,
             "url": f"{base}/mcp.json",

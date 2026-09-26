@@ -33,7 +33,7 @@ STATIC = REPO_ROOT / "wcag-audit-engine" / "app" / "static"
 ARD_SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "ard-entry.schema.json"
 
 TEST_PAY_TO = "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"
-TITLE = "HubVibe: 38 Machine-Payable Dev Utilities and WCAG Audits"
+TITLE = "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents"
 
 
 def _load_workers():
@@ -242,8 +242,8 @@ def test_ard_lists_every_audit_every_live_worker_and_the_cards(client):
         entry = by_id[f"urn:air:audit.example.test:audit:{path.rsplit('/', 1)[-1]}"]
         assert entry["data"]["path"] == path
         assert entry["data"]["output_schema"]["type"] == "object"
-    assert by_id["urn:air:audit.example.test:mcp:site-audits"]["url"] == "https://audit.example.test/mcp.json"
-    assert by_id["urn:air:audit.example.test:mcp:site-audits"]["type"] == "application/mcp-server-card+json"
+    assert by_id["urn:air:audit.example.test:mcp:hubvibe"]["url"] == "https://audit.example.test/mcp.json"
+    assert by_id["urn:air:audit.example.test:mcp:hubvibe"]["type"] == "application/mcp-server-card+json"
     assert by_id["urn:air:audit.example.test:api:openapi"]["url"] == "https://audit.example.test/openapi.json"
     a2a_card = by_id["urn:air:audit.example.test:agent:a2a"]
     assert a2a_card["url"] == "https://audit.example.test/.well-known/agent-card.json"

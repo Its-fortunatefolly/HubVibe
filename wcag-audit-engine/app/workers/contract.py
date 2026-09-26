@@ -24,7 +24,44 @@ asks a registry builds its semantic index from (ARD spec, "SHOULD contain
 2-5 examples").
 """
 
-from typing import Any
+import logging
+from typing import Any, Optional
+
+_log = logging.getLogger("hubvibe.workers.contract")
+_validator_missing_logged = False
+
+
+def check(schema: Optional[dict], value: Any) -> Optional[str]:
+    """The delivery contract: does `value` match the output schema this route
+    published? None when it does, otherwise one line saying where it does
+    not (JSON path and message) -- the caller turns that into an unbilled
+    failure, so a paid result can never differ in shape from the schema in
+    openapi.json, the MCP outputSchema, the 402's Bazaar record and the A2A
+    skill. Pure: no I/O.
+
+    Without a validator the check cannot run; it then reports None once
+    with a log line rather than refusing every sale on a packaging error.
+    """
+    global _validator_missing_logged
+    if not schema:
+        return None
+    try:
+        from jsonschema import Draft202012Validator
+    except ImportError:  # pragma: no cover - requirements.txt pins it
+        if not _validator_missing_logged:
+            _validator_missing_logged = True
+            _log.error("jsonschema is not installed: the delivery contract is not being checked")
+        return None
+    try:
+        error = next(iter(sorted(Draft202012Validator(schema).iter_errors(value),
+                                 key=lambda e: list(e.absolute_path))), None)
+    except Exception as exc:  # a broken schema is our defect, never the buyer's
+        _log.error("output schema could not be evaluated: %s", exc)
+        return None
+    if error is None:
+        return None
+    where = "/".join(str(p) for p in error.absolute_path) or "(root)"
+    return f"{where}: {error.message}"[:300]
 
 # --- schema helpers -----------------------------------------------------------
 
