@@ -77,6 +77,8 @@ class FakeNode:
             def do_POST(self):
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}")
+                if self.path == "/a2a":
+                    return self._a2a(body)
                 price = node.prices.get(self.path)
                 if price is None:
                     return self._send(404, {"detail": "Not Found"})
@@ -100,9 +102,57 @@ class FakeNode:
                                                    "network": "eip155:8453"})} if price > 0 else None
                 return self._send(200, envelope, extra)
 
+            def _a2a(self, rpc):
+                """The node's A2A shape: a task in input-required carrying the
+                v2 challenge until the message metadata carries a payload."""
+                node.a2a_requests.append((dict(self.headers), rpc))
+                if rpc.get("method") != "SendMessage" or self.headers.get("A2A-Version") != "1.0":
+                    return self._send(200, {"jsonrpc": "2.0", "id": rpc.get("id"),
+                                            "error": {"code": -32601, "message": "Method not found"}})
+                message = rpc["params"]["message"]
+                data = message["parts"][0]["data"]
+                skill, arguments = data["skill"], data.get("arguments") or {}
+                route = R.Router.route_for(skill)  # the node takes worker and MCP tool names alike
+                price = node.prices.get(route)
+                task_id = message.get("taskId") or "task-%d" % (len(node.a2a_requests))
+                if price is None:
+                    return self._send(200, {"jsonrpc": "2.0", "id": rpc["id"],
+                                            "error": {"code": -32602, "message": f"Unknown skill {skill!r}"}})
+                meta = message.get("metadata") or {}
+                paid = "x402.payment.payload" in meta
+                if price > 0 and (not paid or node.refuse_payment):
+                    md = {"x402.payment.status": "payment-failed" if paid else "payment-required",
+                          "x402.payment.required": {"x402Version": 2, "price_usd": price, "accepts": [
+                              {"scheme": "exact", "network": "eip155:8453", "amount": str(int(price * 1_000_000)),
+                               "payTo": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd", "asset": "0x8335"}]}}
+                    if paid:
+                        md["x402.payment.error"] = "SETTLEMENT_FAILED"
+                    return self._send(200, {"jsonrpc": "2.0", "id": rpc["id"], "result": {"task": {
+                        "id": task_id, "contextId": "ctx", "status": {
+                            "state": "TASK_STATE_INPUT_REQUIRED",
+                            "message": {"messageId": "a", "role": "ROLE_AGENT",
+                                        "parts": [{"text": "Payment is required: $%.2f." % price}],
+                                        "metadata": md}}}}})
+                node.executions.append((route, arguments))
+                envelope = {"status": "ok", "worker": skill, "price_usd": price,
+                            "result": {"echo": arguments, "n": len(node.executions)},
+                            "receipt_id": "rcpt_%d" % len(node.executions),
+                            "receipt_url": "/work/receipts/rcpt_%d" % len(node.executions)}
+                md = {"x402.payment.status": "payment-completed",
+                      "x402.payment.receipts": [{"success": True, "payer": "0xPAYER", "transaction": "0xTX",
+                                                 "network": "eip155:8453"}]} if price > 0 else {}
+                return self._send(200, {"jsonrpc": "2.0", "id": rpc["id"], "result": {"task": {
+                    "id": task_id, "contextId": "ctx",
+                    "status": {"state": "TASK_STATE_COMPLETED",
+                               "message": {"messageId": "b", "role": "ROLE_AGENT",
+                                           "parts": [{"text": "Done."}], "metadata": md}},
+                    "artifacts": [{"artifactId": task_id + "-result", "name": skill,
+                                   "parts": [{"data": envelope, "mediaType": "application/json"}]}]}}})
+
             def log_message(self, *a):
                 pass
 
+        self.a2a_requests = []
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.url = "http://127.0.0.1:%d" % self.httpd.server_address[1]
@@ -130,6 +180,12 @@ def router(node, tmp_path, monkeypatch):
         return {"PAYMENT-SIGNATURE": "stub-signature"}
 
     monkeypatch.setattr(r, "_sign", fake_sign)
+
+    def fake_sign_challenge(required):  # the A2A seam: a PaymentRequired dict in, a payload out
+        signed.append(("a2a", R.Router._price_of_challenge(required)))
+        return {"x402Version": 2, "scheme": "exact", "network": "eip155:8453", "payload": {"stub": True}}
+
+    monkeypatch.setattr(r, "_sign_challenge", fake_sign_challenge)
     r.signed = signed
     return r
 
@@ -301,6 +357,97 @@ def test_tool_names_resolve_to_routes():
     assert f("research.page_facts") == "/work/research/page_facts"
     assert f("audit.wcag") == "/audit/wcag" and f("bundle") == "/audit/bundle"
     assert f("/work/llm/generate") == "/work/llm/generate" and f("/audit/seo") == "/audit/seo"
+    # The MCP tool names, as tools/list and the A2A card spell them.
+    assert f("hubvibe_market_quote") == "/work/market/quote"
+    assert f("hubvibe_research_page_facts") == "/work/research/page_facts"
+    assert f("hubvibe_security_mcp_inspect") == "/work/security/mcp_inspect"
+    assert f("hubvibe_predictive_probability_engine") == "/work/stats/probability"
+    assert f("audit_wcag") == "/audit/wcag" and f("audit_bundle") == "/audit/bundle"
+
+
+def test_every_catalog_name_and_mcp_tool_name_routes_to_its_own_path():
+    """The live catalog is the authority: every worker name, its MCP tool
+    name and every audit tool name must resolve to the route it sells."""
+    pkg = REPO_ROOT / "wcag-audit-engine" / "app" / "workers"
+    spec = importlib.util.spec_from_file_location("router_test_workers", pkg / "__init__.py",
+                                                  submodule_search_locations=[str(pkg)])
+    workers = importlib.util.module_from_spec(spec)
+    sys.modules["router_test_workers"] = workers
+    spec.loader.exec_module(workers)
+    for worker in workers.catalog.CATALOG:
+        assert R.Router.route_for(worker.name) == worker.path, worker.name
+        tool = ("hubvibe_predictive_probability_engine" if worker.name == "stats.probability"
+                else "hubvibe_" + worker.name.replace(".", "_"))
+        assert R.Router.route_for(tool) == worker.path, tool
+    for audit in ("wcag", "seo", "security", "performance", "bundle"):
+        assert R.Router.route_for("audit_" + audit) == "/audit/" + audit
+
+
+# --- the same job over A2A --------------------------------------------------------
+
+
+def test_a2a_clears_the_payment_task_and_delivers_the_artifact(router, node):
+    out = router.a2a("market.quote", {"product_id": "BTC-USD"})
+    assert out["status"] == "ok" and out["result"]["echo"] == {"product_id": "BTC-USD"}
+    assert router.signed == [("a2a", 0.02)]
+    assert router.spent_usd == 0.02
+    first, second = node.a2a_requests[-2], node.a2a_requests[-1]
+    assert first[0].get("A2A-Version") == "1.0" and "a2a-x402" in first[0].get("A2A-Extensions", "")
+    paid_message = second[1]["params"]["message"]
+    assert paid_message["taskId"] == "task-%d" % (len(node.a2a_requests) - 1)
+    assert paid_message["metadata"]["x402.payment.status"] == "payment-submitted"
+    assert paid_message["metadata"]["x402.payment.payload"]["payload"] == {"stub": True}
+    row = router.ledger()[-1]
+    assert row["settled"] is True and row["tx"] == "0xTX" and row["transport"] == "a2a"
+
+
+def test_a2a_accepts_mcp_tool_names_and_caches_analytical_skills(router, node):
+    router.a2a("hubvibe_data_query", {"sql": "SELECT 1"})
+    again = router.a2a("data.query", {"sql": "SELECT 1"})
+    assert again["router"]["cache"] == "hit"
+    assert len([e for e in node.executions if e[0] == "/work/data/query"]) == 1
+    assert router.spent_usd == 0.50
+
+
+def test_a2a_refused_settlement_is_reported_and_nothing_is_spent(router, node):
+    node.refuse_payment = True
+    with pytest.raises(R.PaymentRefused):
+        router.a2a("market.quote", {"product_id": "BTC-USD"})
+    assert router.spent_usd == 0.0
+    assert router.ledger()[-1]["outcome"] == "refused"
+
+
+def test_a2a_never_signs_above_the_per_call_cap(router, node):
+    with pytest.raises(R.CapExceeded):
+        router.a2a("research.brief", {"url": "https://example.com"})
+    assert router.signed == []
+
+
+def test_a2a_unknown_skill_is_an_upstream_error_with_the_a2a_code(router, node):
+    with pytest.raises(R.Upstream) as err:
+        router.a2a("no.such.skill", {})
+    assert err.value.extra["a2a_code"] == -32602
+
+
+def test_a2a_free_skill_completes_without_signing(router, node):
+    out = router.a2a("free.probe", {})
+    assert out["status"] == "ok" and router.signed == []
+
+
+def test_the_proxy_sells_skills_over_a2a_too(router, node):
+    import socket
+
+    def free_port():
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+    port = free_port()
+    threading.Thread(target=R.serve, args=(router, "127.0.0.1", port), daemon=True).start()
+    time.sleep(0.3)
+    with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=10) as agent:
+        bought = agent.post("/a2a", json={"skill": "market.quote", "arguments": {"product_id": "ETH-USD"}})
+        assert bought.status_code == 200 and bought.json()["result"]["echo"] == {"product_id": "ETH-USD"}
+        bad = agent.post("/a2a", json={"arguments": {}})
+        assert bad.status_code == 400 and bad.json()["reason"] == "invalid_request"
 
 
 def test_the_copyable_client_executes_a_task_by_tool_name(node, tmp_path, monkeypatch):

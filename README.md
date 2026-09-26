@@ -170,7 +170,7 @@ configured is absent, with a specific reason, until it is.
 | `extract.page` / `fetch.raw` | $0.10 | Rendered-page extraction, or raw status/headers/body |
 | `search.web` | $0.10 | Live web search, grounded via Gemini's Google Search tool |
 | `llm.analyze` / `llm.extract` | $0.25 | Gemini: answer-from-material / structured-field extraction |
-| `llm.generate` | $0.25 | Raw completion — Gemini, or Claude via Vertex Model Garden |
+| `llm.generate` | $0.25 | Raw completion from your prompt — Gemini by default, provider and model selectable |
 | `code.execute` | $0.25 | Python, run in Google's own hosted sandbox |
 | `image.generate` | $0.50 | Imagen 4 |
 | `speech.synthesize` / `speech.transcribe` | $0.25 | Cloud Text-to-Speech / Speech-to-Text v2 (sync, ≤60s) |

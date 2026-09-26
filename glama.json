@@ -7,7 +7,7 @@
     {
       "name": "audit_wcag",
       "title": "Accessibility audit (WCAG 2.1 A/AA)",
-      "description": "WCAG 2.1 A/AA accessibility audit via axe-core against raw HTML or a live URL.",
+      "description": "Website accessibility audit (a11y, WCAG compliance check): WCAG 2.1 level A and AA conformance of any live URL or raw HTML, tested with axe-core in a real headless browser. Returns every violation with rule id, impact, help text and affected node count. Deterministic rules; a check that cannot run returns an error, never a pass. $0.05 per call. Returns: pass (bool), violations[] with id/impact/help/help_url/nodes_affected.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -113,7 +113,7 @@
     {
       "name": "audit_seo",
       "title": "SEO and metadata audit",
-      "description": "Title, meta description, H1 structure, canonical link, OpenGraph tags, structured data, and lang attribute.",
+      "description": "SEO audit of a web page (on-page SEO check) for any live URL or raw HTML: title tag, meta description, H1 heading structure, canonical link, OpenGraph and social tags, JSON-LD structured data, html lang attribute. Rule-by-rule findings with severity and what is missing or malformed. $0.05 per call. Returns: pass (bool), findings[] with id/severity/detail.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -203,7 +203,7 @@
     {
       "name": "audit_security",
       "title": "Security header audit",
-      "description": "HTTPS, HSTS, CSP, X-Content-Type-Options, clickjacking protection, Referrer-Policy, and CORS from a live HTTP response. Not a TLS/cipher-suite scan or a penetration test.",
+      "description": "Security headers check for a website: audits HTTPS, HSTS, Content- Security-Policy (CSP), X-Content-Type-Options, X-Frame-Options / clickjacking protection, Referrer-Policy and CORS from the real HTTP response of any live URL. Findings with severity for what is missing. Header posture only, not a penetration test. $0.05 per call. Returns: pass (bool), findings[] with id/severity/detail.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -280,7 +280,7 @@
     {
       "name": "audit_performance",
       "title": "Page performance audit",
-      "description": "DOM node count, transferred bytes, and request count from one real page load. Not a full Lighthouse-style audit.",
+      "description": "Page speed and page weight audit of a web page from one real browser load: total bytes transferred, HTTP request count and DOM node count, measured rather than estimated, with findings when the page is heavy. Page-weight signals, not Core Web Vitals. $0.05 per call. Returns: pass (bool), metrics{}, findings[] with id/severity/detail.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -374,7 +374,7 @@
     {
       "name": "audit_bundle",
       "title": "Full site compliance bundle (all four audits)",
-      "description": "Runs audit_wcag + audit_seo + audit_security + audit_performance against one URL in a single call, billed once. If any dimension fails to run, the whole call fails and nothing is billed.",
+      "description": "Full website audit in one call: accessibility (WCAG 2.1 A/AA via axe-core), on-page SEO, HTTP security headers and page speed / page weight, from a single browser load of one URL. Cheaper than four separate calls; if any part cannot run, nothing is billed. Use a single audit route when you need only one of the four. $0.15 per call. Returns: pass (bool) plus wcag{}, seo{}, security{}, performance{} sub-results.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1767,7 +1767,7 @@
     {
       "name": "hubvibe_chain_network",
       "title": "Base network state",
-      "description": "Current Base mainnet block height and gas price, read live from a Base RPC node. Use to check chain liveness or time an on-chain action. $0.02 per call. Returns: block_number, gas_price_wei, gas_price_gwei.",
+      "description": "Base chain status: current block height and gas price (wei and gwei), read live from a Base mainnet RPC node. No input needed. Use it to check the chain is live, time an on-chain action, or estimate gas before a chain.rpc call. $0.02 per call. Returns: block_number, gas_price_wei, gas_price_gwei.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1977,7 +1977,7 @@
     {
       "name": "hubvibe_chain_address",
       "title": "Base address report",
-      "description": "Everything about one Base mainnet address in a single call: ETH balance, transaction count, and whether it is a contract or an externally owned account. Three chain reads folded into one answer. $0.05 per call. Returns: balance_wei, balance_eth, transaction_count, is_contract, code_size_bytes.",
+      "description": "Base wallet lookup: ETH balance, transaction count (nonce) and whether the address is a contract or an ordinary wallet, in one call for one Base mainnet address. Input: address. Three RPC reads folded into one answer; for a token balance or any other read, use chain.rpc. $0.05 per call. Returns: balance_wei, balance_eth, transaction_count, is_contract, code_size_bytes.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2218,7 +2218,7 @@
     {
       "name": "hubvibe_chain_transaction",
       "title": "Base transaction lookup",
-      "description": "One Base mainnet transaction with its receipt folded in: sender, recipient, value, block, success or failure, and gas actually used. $0.05 per call. Returns: from, to, value_eth, block_number, status, gas_used, log_count.",
+      "description": "Base transaction lookup by hash: sender, recipient, ETH value, block, success or failure, gas used and log count, with the receipt folded in. Input: the 0x transaction hash. Use chain.rpc for the raw eth_getTransactionReceipt output. $0.05 per call. Returns: from, to, value_eth, block_number, status, gas_used, log_count.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2503,7 +2503,7 @@
     {
       "name": "hubvibe_market_quote",
       "title": "Crypto spot quote",
-      "description": "Live spot price and 24-hour change for any Coinbase product (BTC-USD, ETH-USD and the rest), from Coinbase's public market data. $0.02 per call. Returns: price, price_change_24h_pct, volume_24h, base/quote currency.",
+      "description": "Crypto price: live spot price, 24-hour change and 24-hour volume for any Coinbase product such as BTC-USD or ETH-USD, from Coinbase's public market data. Input: product_id. Use market.ticker for bid and ask from a second source, market.rates for a whole exchange-rate table. $0.02 per call. Returns: price, price_change_24h_pct, volume_24h, base/quote currency.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2763,7 +2763,7 @@
     {
       "name": "hubvibe_market_prediction",
       "title": "Prediction market probabilities",
-      "description": "Live prediction markets and the probabilities they currently imply, from Polymarket. Search by topic or take the highest-volume markets. Returns each outcome as a percentage, not a raw price. $0.05 per call. Returns: markets[] with question, implied_probabilities[], volume, end_date.",
+      "description": "Prediction market odds from Polymarket: live markets and the probability each outcome currently implies, as percentages rather than raw prices. Search by topic or take the highest-volume markets. Input: optional query and limit. Use prediction.market for one market by slug, prediction.events for event groupings. $0.05 per call. Returns: markets[] with question, implied_probabilities[], volume, end_date.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3108,7 +3108,7 @@
     {
       "name": "hubvibe_extract_page",
       "title": "Web page extraction",
-      "description": "Fetch any web page and return its readable text, title, description and links, rendered in a real browser so JavaScript-built pages extract correctly. Falls back to direct fetch when rendering is unavailable. $0.10 per call. Returns: title, description, text, text_chars, links[], javascript_rendered.",
+      "description": "Web page to clean text: fetch any URL in a real browser (JavaScript-rendered pages included) and return the readable text, title, description and links. Input: url. Use fetch.raw when you need the raw HTTP status, headers and body; research.brief when you want a question answered from the page. $0.10 per call. Returns: title, description, text, text_chars, links[], javascript_rendered.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3401,7 +3401,7 @@
     {
       "name": "hubvibe_llm_analyze",
       "title": "Analyse text",
-      "description": "Answer a specific question about text you supply, using Gemini. Answers only from the material given and says so explicitly when the material does not contain the answer, rather than guessing. $0.25 per call. Returns: answer, model, tokens{prompt,output}.",
+      "description": "Answer a question from text you supply, using Gemini. Grounded in the material only: if the text does not contain the answer it says so instead of guessing. Input: text and question. Use llm.extract for fixed JSON fields, llm.generate for a free-form completion. $0.25 per call. Returns: answer, model, tokens{prompt,output}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3649,7 +3649,7 @@
     {
       "name": "hubvibe_llm_extract",
       "title": "Extract fields as JSON",
-      "description": "Pull named fields out of text and return them as a JSON object with exactly the keys you asked for. Fields the text does not state come back as null instead of being invented. $0.25 per call. Returns: fields{} with one key per requested field.",
+      "description": "Structured data extraction: pull the fields you name out of text and get a JSON object with exactly those keys, null for anything the text does not state. Input: text and a list of field names. For extraction from a live web page use research.page_facts. $0.25 per call. Returns: fields{} with one key per requested field.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3890,7 +3890,7 @@
     {
       "name": "hubvibe_data_query",
       "title": "Run a BigQuery query",
-      "description": "Execute a read-only BigQuery SQL query, including against Google's public datasets, and get the rows back as JSON. Every query is dry-run first and refused if it would scan more than the byte ceiling, so cost is bounded before anything runs. $0.50 per call. Returns: columns[], rows[], row_count, gib_processed, cache_hit.",
+      "description": "BigQuery SQL: run a read-only query, including against Google's public datasets, and get columns and rows back as JSON with the bytes processed. Every query is dry-run first and refused above the scan ceiling, so cost is bounded before it runs. Input: sql, optional max_scan_gib. Use data.question to ask in plain language instead. $0.50 per call. Returns: columns[], rows[], row_count, gib_processed, cache_hit.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -4173,7 +4173,7 @@
     {
       "name": "hubvibe_data_question",
       "title": "Answer a question from a dataset",
-      "description": "Ask a question in plain language about any BigQuery table, including Google's public datasets, and get a written answer with the SQL and the rows it came from. Writes the query, runs it under a byte ceiling, and reads the result back as an analysis. $5.00 per call. Returns: answer, sql, columns[], rows[], gib_processed.",
+      "description": "Plain-language question answered over any BigQuery table, including Google's public datasets: the SQL is written for you, run under a byte ceiling, and the rows read back into a written answer. Input: question and table, optional column list. Returns answer, sql, columns and rows. Use data.query when you already have the SQL. $5.00 per call. Returns: answer, sql, columns[], rows[], gib_processed.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -4471,7 +4471,7 @@
     {
       "name": "hubvibe_research_brief",
       "title": "Research brief on a URL",
-      "description": "Read any web page and get a written answer to your question about it. Renders the page in a real browser, extracts the content, and analyses it in one paid call. Answers only from the page, and says when the page does not contain the answer. $5.00 per call. Returns: brief, title, final_url, source{}, model.",
+      "description": "Answer a question about one web page: the URL is rendered in a real browser, its content extracted and analysed, and a written brief returned that is grounded in the page only and says when the page does not answer. Input: url, optional question. Use research.page_facts for fixed JSON fields, research.web when the answer needs a web search. $5.00 per call. Returns: brief, title, final_url, source{}, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -4746,7 +4746,7 @@
     {
       "name": "hubvibe_research_page_facts",
       "title": "Structured facts from a URL",
-      "description": "Read any web page and return exactly the fields you name as JSON -- pricing, contact, product names, whatever you ask for. Fields the page does not state come back null rather than invented. Built for pipelines that need a fixed shape. $5.00 per call. Returns: fields{} with one key per requested field, plus title and final_url.",
+      "description": "Structured facts from a web page: name the fields you need (pricing, contact, product names, anything) and get exactly those keys back as JSON from the rendered page, null where the page does not say. Input: url and fields. Built for pipelines that need a fixed shape; use research.brief for a written answer. $5.00 per call. Returns: fields{} with one key per requested field, plus title and final_url.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -4989,7 +4989,7 @@
     {
       "name": "hubvibe_market_intel",
       "title": "Market intelligence read",
-      "description": "Combine a live crypto spot quote with live prediction-market probabilities on the same subject and get them analysed together in one call. Market data and implied probabilities only -- not investment advice. $5.00 per call. Returns: spot{}, prediction_markets[], analysis, disclaimer.",
+      "description": "Crypto market read in one call: a live Coinbase spot quote and live Polymarket probabilities on the same subject, analysed together in a written summary. Input: optional product_id, query, question and limit. Market data and implied probabilities only, not investment advice. $5.00 per call. Returns: spot{}, prediction_markets[], analysis, disclaimer.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -5421,7 +5421,7 @@
     {
       "name": "hubvibe_search_web",
       "title": "Web search",
-      "description": "A live web search, answered from current Google Search results with the sources it used. Grounded, not the model's own memory. $0.10 per call. Returns: query, answer, sources[{url,title}], search_queries_used[], model.",
+      "description": "Web search for agents: a live Google Search query answered from current results, returning a grounded answer plus the source URLs and titles it used, never the model's own memory. Input: query. Use research.web when you need the sources read in full and a cited brief. $0.10 per call. Returns: query, answer, sources[{url,title}], search_queries_used[], model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -5678,7 +5678,7 @@
     {
       "name": "hubvibe_llm_generate",
       "title": "Raw text completion",
-      "description": "A raw completion from a large language model: your prompt, your system message, your provider and model choice among what this deployment has configured (Gemini; Claude on Vertex once Model Garden access is enabled). Unlike llm.analyze, nothing is prescribed about the shape of the answer. $0.25 per call. Returns: text, model, provider, finish_reason, usage{input_tokens,output_tokens}.",
+      "description": "LLM text generation: a raw completion from your prompt, with optional system message, max_tokens and temperature. Gemini by default; optional provider and model fields select another configured model. Input: prompt. Nothing is prescribed about the answer's shape; use llm.analyze for an answer grounded in text you supply. $0.25 per call. Returns: text, model, provider, finish_reason, usage{input_tokens,output_tokens}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -5944,7 +5944,7 @@
     {
       "name": "hubvibe_code_execute",
       "title": "Execute Python",
-      "description": "Run Python code in Google's own hosted sandbox and get the executed code, its output, and the outcome back. Not run in this service's own infrastructure. $0.25 per call. Returns: code, output, outcome, summary, model.",
+      "description": "Run Python code in Google's hosted sandbox, not on this service's own machines, and get the code, its output and the outcome back. Input: code. For questions over BigQuery data use data.query instead. $0.25 per call. Returns: code, output, outcome, summary, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -6172,7 +6172,7 @@
     {
       "name": "hubvibe_image_generate",
       "title": "Generate an image",
-      "description": "Generate one image from a text prompt using Imagen 4. Returns the image as base64-encoded bytes. $0.50 per call. Returns: prompt, aspect_ratio, image_base64, mime_type, model.",
+      "description": "Image generation: one image from a text prompt with Imagen 4, returned as base64-encoded image bytes with its MIME type. Input: prompt, optional aspect_ratio. $0.50 per call. Returns: prompt, aspect_ratio, image_base64, mime_type, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -6402,7 +6402,7 @@
     {
       "name": "hubvibe_speech_synthesize",
       "title": "Text to speech",
-      "description": "Convert text to spoken audio (MP3) using Google Cloud Text-to-Speech. $0.25 per call. Returns: text_chars, voice, audio_base64, mime_type.",
+      "description": "Text to speech: convert text to spoken MP3 audio with Google Cloud Text-to-Speech, returned as base64. Input: text, optional voice name. $0.25 per call. Returns: text_chars, voice, audio_base64, mime_type.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -6624,7 +6624,7 @@
     {
       "name": "hubvibe_speech_transcribe",
       "title": "Speech to text",
-      "description": "Transcribe up to 60 seconds / 10MB of audio using Google Cloud Speech-to-Text. Longer audio is refused before payment; this is the synchronous API only. $0.25 per call. Returns: transcript, language_code, confidence, model.",
+      "description": "Speech to text: transcribe up to 60 seconds or 10 MB of audio with Google Cloud Speech-to-Text and get the transcript with its confidence and language. Input: audio_base64, optional language_code. Longer audio is refused before payment. $0.25 per call. Returns: transcript, language_code, confidence, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -6849,7 +6849,7 @@
     {
       "name": "hubvibe_data_forecast",
       "title": "Forecast a time series",
-      "description": "Forecast a time series in a BigQuery table with Google's pretrained TimesFM model (AI.FORECAST) -- no model to train. Point it at the table and the timestamp/value columns. $10.00 per call. Returns: table, timestamp_col, data_col, horizon, columns[], rows[], row_count, gib_processed.",
+      "description": "Time-series forecast from a BigQuery table using Google's pretrained TimesFM model (AI.FORECAST), no model to train: point it at the table, timestamp column and value column and get forecast rows for the horizon you set. Input: table, timestamp_col, data_col, optional horizon and id_cols. $10.00 per call. Returns: table, timestamp_col, data_col, horizon, columns[], rows[], row_count, gib_processed.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -7159,7 +7159,7 @@
     {
       "name": "hubvibe_data_anomalies",
       "title": "Detect anomalies in a time series",
-      "description": "Detect anomalies in a target table's time series against a history table, using AI.DETECT_ANOMALIES (TimesFM). Both tables share the same timestamp and value column names. $10.00 per call. Returns: history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, columns[], rows[], row_count, gib_processed.",
+      "description": "Anomaly detection over a BigQuery time series with AI.DETECT_ANOMALIES (TimesFM): score a target table against a history table that shares its timestamp and value columns and get the anomalous rows with probabilities. Input: history_table, target_table, timestamp_col, data_col, optional threshold and id_cols. $10.00 per call. Returns: history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, columns[], rows[], row_count, gib_processed.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -7484,7 +7484,7 @@
     {
       "name": "hubvibe_verify_claims",
       "title": "Verify claims against sources",
-      "description": "Check up to 10 specific claims against up to 4 specific source URLs. Each claim comes back SUPPORTED, CONTRADICTED or UNSUPPORTED, with the quote the verdict is based on. $5.00 per call. Returns: claims[], verdicts[{claim,verdict,quote,source_n}], sources_read[], sources_unread[], model.",
+      "description": "Fact check: up to 10 claims checked against up to 4 source URLs you name; each claim comes back SUPPORTED, CONTRADICTED or UNSUPPORTED with the quote the verdict rests on. Input: claims and sources. Use research.web when you have a question but no sources yet. $5.00 per call. Returns: claims[], verdicts[{claim,verdict,quote,source_n}], sources_read[], sources_unread[], model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -7830,7 +7830,7 @@
     {
       "name": "hubvibe_research_web",
       "title": "Research brief from live web search",
-      "description": "Answer a question from a live web search: search, read the top sources, and get a cited answer with every claim tied to [n] source numbers. $5.00 per call. Returns: question, answer, sources[{n,url,title}], partial[], model.",
+      "description": "Cited web research: search the live web for your question, read the top sources in full, and get a written answer with every claim tied to a numbered source. Input: question, optional max_sources. Use search.web for a quick grounded answer with links only. $5.00 per call. Returns: question, answer, sources[{n,url,title}], partial[], model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -8115,7 +8115,7 @@
     {
       "name": "hubvibe_research_company",
       "title": "Research and verify a company",
-      "description": "A research brief on a company from live web sources: what it does, its products, and anything notable, cited to [n] source numbers, with thin or conflicting evidence disclosed rather than papered over. $10.00 per call. Returns: company, report, sources[{n,url,title}], partial[], model.",
+      "description": "Company research brief from live web sources: what the company does, its products and anything notable, every claim cited to a numbered source, with thin or conflicting evidence disclosed rather than papered over. Input: company name, optional max_sources. $10.00 per call. Returns: company, report, sources[{n,url,title}], partial[], model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -8400,7 +8400,7 @@
     {
       "name": "hubvibe_monitor_snapshot",
       "title": "Save a monitoring baseline",
-      "description": "Fetch a page and save it as the baseline for monitor.check. Call this once, then monitor.check later to see what changed. $0.50 per call. Returns: url, title, text_chars, content_hash, note.",
+      "description": "Website change monitoring, step one: fetch a page and store it as the baseline. Input: url. Call monitor.check later to learn whether and how it changed. $0.50 per call. Returns: url, title, text_chars, content_hash, note.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -8629,7 +8629,7 @@
     {
       "name": "hubvibe_monitor_check",
       "title": "Check a page against its baseline",
-      "description": "Re-fetch a page monitor.snapshot was called on, and get back whether it changed and a summary of what changed. $0.50 per call. Returns: url, title, changed, baseline_age_seconds, change_summary, model.",
+      "description": "Website change monitoring, step two: re-fetch a page saved with monitor.snapshot and get whether it changed, how old the baseline is, and a written summary of the differences. Input: url. $0.50 per call. Returns: url, title, changed, baseline_age_seconds, change_summary, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -8865,7 +8865,7 @@
     {
       "name": "hubvibe_security_mcp_inspect",
       "title": "Inspect an MCP endpoint",
-      "description": "Probe a customer-specified MCP server's initialize handshake and tools/list: whether it requires authentication, what protocol version it speaks, and which of its tools are not marked read-only. $5.00 per call. Returns: reachable, requires_auth, protocol_version, tool_count, tools[], tools_without_readonly_annotation[].",
+      "description": "MCP server security check: probe any MCP endpoint's initialize handshake and tools/list and report whether it requires authentication, which protocol version it speaks, how many tools it exposes and which are not marked read-only. Input: url of the MCP endpoint. $5.00 per call. Returns: reachable, requires_auth, protocol_version, tool_count, tools[], tools_without_readonly_annotation[].",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -9195,7 +9195,7 @@
     {
       "name": "hubvibe_fetch_raw",
       "title": "Raw HTTP fetch",
-      "description": "Fetch any URL and get back exactly what the server sent: status code, headers, and body. Unlike extract.page, every status code is a result, not a failure -- a 404 or 500 from the target is delivered as one. $0.10 per call. Returns: url, final_url, status, content_type, bytes, text, truncated, headers{}.",
+      "description": "Raw HTTP fetch: GET any URL and get exactly what the server sent, status code, headers and body, plus the final URL after redirects. Every status is a result, so a 404 or 500 from the target is delivered, not failed. Input: url. Use extract.page for readable text from a rendered page. $0.10 per call. Returns: url, final_url, status, content_type, bytes, text, truncated, headers{}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -9460,7 +9460,7 @@
     {
       "name": "hubvibe_chain_rpc",
       "title": "Base RPC passthrough",
-      "description": "A generic allowlisted read-only JSON-RPC call to Base mainnet: your method, your params. A JSON-RPC error (a revert reason, 'block not found') comes back as the result, not a failure -- it is the chain's own answer to exactly this call. $0.05 per call. Returns: method, result or error, endpoint.",
+      "description": "Base JSON-RPC passthrough: call any allowlisted read-only method on Base mainnet (eth_call, eth_getBalance, eth_getLogs, eth_getBlockByNumber and more) with your own params. A JSON-RPC error such as a revert reason comes back as the result, since it is the chain's own answer. Input: method, optional params. $0.05 per call. Returns: method, result or error, endpoint.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -9686,7 +9686,7 @@
     {
       "name": "hubvibe_market_rates",
       "title": "Currency exchange rates",
-      "description": "Coinbase's exchange-rate table for one base currency against every currency it quotes -- crypto and fiat. $0.02 per call. Returns: currency, rates{}.",
+      "description": "Currency exchange rates: Coinbase's full rate table for one base currency against every crypto and fiat currency it quotes, for example USD to BTC, ETH, EUR and GBP. Input: currency code. $0.02 per call. Returns: currency, rates{}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -9904,7 +9904,7 @@
     {
       "name": "hubvibe_market_ticker",
       "title": "Crypto ticker",
-      "description": "Live bid, ask and volume for one Coinbase product, from an independent market-data host to market.quote -- a genuine second source, not the same read twice. $0.02 per call. Returns: product_id, price, bid, ask, volume, time.",
+      "description": "Crypto ticker: live best bid, best ask, last price and volume for one Coinbase product from Coinbase's Exchange data host, an independent second source to market.quote. Input: product_id such as BTC-USD. $0.02 per call. Returns: product_id, price, bid, ask, volume, time.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -10158,7 +10158,7 @@
     {
       "name": "hubvibe_prediction_market",
       "title": "Prediction market by slug",
-      "description": "One named Polymarket market, looked up by its exact slug, with its current implied probabilities. $0.05 per call. Returns: slug, market{question,implied_probabilities[],...}.",
+      "description": "One Polymarket prediction market by its exact slug, with its question and current implied probabilities. Input: slug. Use market.prediction to search markets by topic. $0.05 per call. Returns: slug, market{question,implied_probabilities[],...}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -10478,7 +10478,7 @@
     {
       "name": "hubvibe_prediction_events",
       "title": "Prediction market events",
-      "description": "Live Polymarket events -- groupings of related markets -- ranked by volume. $0.05 per call. Returns: events[{id,title,slug,volume,end_date,market_count}], count.",
+      "description": "Polymarket events, groupings of related prediction markets, ranked by trading volume with title, slug, end date and market count. Input: optional limit. $0.05 per call. Returns: events[{id,title,slug,volume,end_date,market_count}], count.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -10742,7 +10742,7 @@
     {
       "name": "hubvibe_maps_places",
       "title": "Search places",
-      "description": "Search for places -- businesses, addresses, points of interest -- via Google's managed Maps Grounding Lite MCP server. Requires the operator to enable the Maps Grounding Lite API and set a key; unavailable until then. $0.10 per call. Returns: query, result (places found, per Maps Grounding Lite's own shape).",
+      "description": "Places search: find businesses, addresses and points of interest by free-text query through Google Maps Grounding Lite, for example 'coffee near the Ferry Building, San Francisco'. Input: query, optional region_code (ISO country code) to bias results. $0.10 per call. Returns: query, result (places found, per Maps Grounding Lite's own shape).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -10956,7 +10956,7 @@
     {
       "name": "hubvibe_maps_route",
       "title": "Compute a route",
-      "description": "Directions and travel time between two places, via Google's managed Maps Grounding Lite MCP server. $0.10 per call. Returns: origin, destination, travel_mode, result (route, per Maps Grounding Lite's own shape).",
+      "description": "Directions and travel time between two named places through Google Maps Grounding Lite. Input: origin, destination, optional travel_mode (DRIVE, WALK, BICYCLE or TRANSIT; default DRIVE). $0.10 per call. Returns: origin, destination, travel_mode, result (route, per Maps Grounding Lite's own shape).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -11195,7 +11195,7 @@
     {
       "name": "hubvibe_maps_weather",
       "title": "Weather at a location",
-      "description": "Current or forecast weather at a named place, via Google's managed Maps Grounding Lite MCP server. $0.10 per call. Returns: location, result (weather, per Maps Grounding Lite's own shape).",
+      "description": "Weather at a named place, current or forecast, through Google Maps Grounding Lite. Input: location as a place name or address. $0.10 per call. Returns: location, result (weather, per Maps Grounding Lite's own shape).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -11405,7 +11405,7 @@
     {
       "name": "hubvibe_video_generate",
       "title": "Generate a video",
-      "description": "Generate a short video from a text prompt using Veo. Off by default: enabled only once the operator has confirmed the configured Veo model resolves on this project (see the provider module for why). $10.00 per call. Returns: prompt, aspect_ratio, duration_seconds, video_base64 or gcs_uri, mime_type, model.",
+      "description": "Video generation: a short clip from a text prompt with Google Veo, returned as base64 video bytes (or a GCS URI when large) with its MIME type. Input: prompt, optional aspect_ratio (16:9 or 9:16), duration_seconds (4, 6 or 8) and generate_audio. $10.00 per call. Returns: prompt, aspect_ratio, duration_seconds, video_base64 or gcs_uri, mime_type, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

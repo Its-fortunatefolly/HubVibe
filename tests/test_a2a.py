@@ -222,6 +222,15 @@ def test_operations_this_agent_does_not_offer_get_the_spec_codes(client):
     assert call("NoSuchMethod")["error"]["code"] == -32601
 
 
+def test_a_body_that_is_not_json_is_a_json_rpc_parse_error(client):
+    """A2A 1.0.1 section 9.5: invalid JSON is -32700 with the standard
+    message, in a JSON-RPC envelope -- not FastAPI's 422 `detail` list."""
+    response = client.post("/a2a", content=b"not json", headers={"content-type": "application/json",
+                                                                 "A2A-Version": "1.0"})
+    assert response.json() == {"jsonrpc": "2.0", "id": None,
+                               "error": {"code": -32700, "message": "Invalid JSON payload"}}
+
+
 def test_a_message_without_a_skill_is_told_how_to_name_one(client):
     body = client.post("/a2a", headers={"A2A-Version": "1.0"}, json={
         "jsonrpc": "2.0", "id": 1, "method": "SendMessage",

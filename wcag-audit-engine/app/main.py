@@ -99,7 +99,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.5.0"
+SERVICE_VERSION = "1.5.1"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -1919,7 +1919,8 @@ _CATALOG = [
             "Full website audit in one call: accessibility (WCAG 2.1 A/AA via "
             "axe-core), on-page SEO, HTTP security headers and page speed / "
             "page weight, from a single browser load of one URL. Cheaper than "
-            "four separate calls; if any part cannot run, nothing is billed."
+            "four separate calls; if any part cannot run, nothing is billed. "
+            "Use a single audit route when you need only one of the four."
         ),
         "returns": "pass (bool) plus wcag{}, seo{}, security{}, performance{} sub-results.",
     },
@@ -2178,6 +2179,8 @@ async def agent_manifest(request: Request):
             "currency": "USD",
             "single_audit_usd": _price_of("/audit/wcag"),
             "bundle_usd": _price_of("/audit/bundle"),
+            "workers_usd": "0.02 to 10.00 per call; each worker's price is on its "
+                           "row under `workers.capabilities` and in its 402",
             "note": (
                 "Per-call pricing is the product and is what a machine caller "
                 "should use -- no account, no minimum, no subscription."
@@ -2227,17 +2230,19 @@ async def agent_manifest(request: Request):
             "docs": f"{base}/docs",
         },
         "guarantees": [
-            "You are charged only for an audit that produced a result. A check "
-            "that could not run returns HTTP 502, is never settled, and is "
-            "never reported as a pass -- an x402 payment is verified to grant "
-            "access and settled only once the audit has actually produced a "
+            "You are charged only for a call that produced a result. A job or "
+            "check that could not run returns HTTP 502, is never settled, and "
+            "is never reported as a pass -- an x402 payment is verified to grant "
+            "access and settled only once the work has actually produced a "
             "result (a settlement the facilitator refuses withholds the result "
             "and charges nothing), a prepaid key debited for it is refunded, "
             "and an MPP credential it consumed is accepted again on the retry.",
             "Rate-limited requests are rejected before any payment is settled, "
             "so a 429 never costs you anything.",
-            "Results are deterministic rule-based checks against the live page, "
-            "never an LLM's opinion.",
+            "The audits are deterministic rule-based checks against the live "
+            "page, never an LLM's opinion. Workers state their sources and the "
+            "provider used in every result, and every delivered job has a "
+            "receipt.",
         ],
         "endpoints": [
             {
@@ -2864,10 +2869,15 @@ async def _validation_error(request: Request, exc: RequestValidationError):
     opaque transport error. Invalid JSON is -32700 (parse error), anything
     else -32600 (invalid request). Every other route keeps the default.
     """
-    if request.url.path != "/mcp":
+    if request.url.path not in ("/mcp", "/a2a"):
         return await request_validation_exception_handler(request, exc)
     errors = exc.errors() if hasattr(exc, "errors") else []
     parse_error = any(e.get("type") == "json_invalid" for e in errors)
+    if request.url.path == "/a2a":
+        # A2A 1.0.1 section 9.5: the standard JSON-RPC codes and messages.
+        return JSONResponse(status_code=200, content=a2a.error(
+            None, *((-32700, "Invalid JSON payload") if parse_error
+                    else (-32600, "Request payload validation error"))))
     code, message = (-32700, "Parse error: the body is not valid JSON") if parse_error else (
         -32600, "Invalid Request: expected a JSON-RPC request object"
     )
@@ -2963,10 +2973,13 @@ async def mcp_streamable_http(
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": "hubvibe-site-audit", "version": SERVICE_VERSION},
                 "instructions": (
-                    "Rule-based site compliance audits, a deterministic "
-                    "statistics engine, and HubVibe's worker network (search, "
-                    "research, LLM, data, chain, market, maps, media). Every "
-                    "tool costs money. Calls "
+                    "HubVibe: pay-per-call tools for agents -- web search and "
+                    "cited research, LLM completion and extraction, crypto and "
+                    "Base on-chain data, prediction markets, BigQuery SQL and "
+                    "forecasting, a deterministic statistics engine, image, "
+                    "speech and video generation, sandboxed Python, maps and "
+                    "weather, and rule-based site audits (WCAG, SEO, security "
+                    "headers, performance). Every tool costs money. Calls "
                     "must be paid for; this deployment currently settles: "
                     f"{', '.join(_payment_methods_live()) or 'no rail is configured'}"
                     f" -- see {PUBLIC_BASE_URL}/.well-known/agent.json and the 402 "
@@ -3022,10 +3035,14 @@ def _a2a_card() -> dict:
     return a2a.build_card(
         base_url=PUBLIC_BASE_URL, name="HubVibe",
         description=(
-            f"{SERVICE_TITLE}. Rule-based site audits (accessibility, SEO, security, "
-            "performance) and a worker network (search, research, LLM, data, chain, "
-            "market, maps, media, statistics), each skill paid per call over x402. "
-            "Name a skill in a data part: {\"skill\": <id>, \"arguments\": {...}}."
+            f"{SERVICE_TITLE}. Pay-per-call skills for agents: web search and cited "
+            "research, LLM completion and extraction, crypto prices and Base on-chain "
+            "reads, prediction markets, BigQuery SQL and forecasting, deterministic "
+            "statistics, image, speech and video generation, sandboxed Python, maps "
+            "and weather, and rule-based site audits (WCAG, SEO, security headers, "
+            "performance). One price per call, no account; a delivered job carries "
+            "a receipt. Name a skill in a data part: {\"skill\": <id>, "
+            "\"arguments\": {...}}."
         ),
         version=SERVICE_VERSION, tools=_mcp_tools(),
         tags_for=_a2a_tags, example_for=_mcp_tool_example,

@@ -119,21 +119,25 @@ def build_manifest(
         },
         {
             "identifier": _identifier(publisher, "mcp", "site-audits"),
-            "displayName": "HubVibe site audits (MCP server)",
+            "displayName": "HubVibe (MCP server)",
             "type": TYPE_MCP_SERVER_CARD,
             "url": f"{base}/mcp.json",
             "description": (
-                "MCP server (Streamable HTTP) exposing the five deterministic "
+                "MCP server (Streamable HTTP) with every HubVibe capability as a "
+                "tool: web search and cited research, LLM completion and "
+                "extraction, crypto and Base on-chain data, prediction markets, "
+                "BigQuery SQL and forecasting, deterministic statistics, image, "
+                "speech and video generation, sandboxed Python, maps, and the five "
                 "site audits (WCAG 2.1 via axe-core, SEO, security headers, "
-                "performance, and the bundle) and every worker as tools. "
-                "initialize and tools/list are free; tools/call is billed per call."),
+                "performance, bundle). initialize and tools/list are free; "
+                "tools/call is billed per call."),
             "capabilities": list(mcp_tool_names),
             "representativeQueries": [
-                "MCP server with a website accessibility audit tool",
-                "MCP tool to check a URL for SEO and security header problems",
+                "MCP server with pay-per-call web search, LLM and crypto data tools",
+                "MCP tool that answers a question from a live web search with sources",
                 "run WCAG, SEO, security and performance audits from an MCP client",
             ],
-            "tags": ["mcp", "wcag", "seo", "security-headers", "performance"],
+            "tags": ["mcp", "web-search", "llm", "crypto-data", "site-audits"],
             "metadata": {"endpoint": f"{base}/mcp", "protocol": "streamable-http"},
             **common,
         },
