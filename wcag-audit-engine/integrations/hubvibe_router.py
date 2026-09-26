@@ -6,7 +6,15 @@ What it does, in one loop, for any of the node's paid routes (the 38
 node's A2A endpoint:
 
   1. POST the request to hubvibe-io.com. A 200 is the result.
-  2. On 402, clear it locally: sign the payment with the agent's OWN wallet
+  2. On 402, VERIFY before signing: fetch the node's purchase contract for
+     the route (GET /contracts/{capability}, free), have the node check the
+     request body against the input schema (POST .../verify, free), and
+     compare the 402's payment terms -- network, asset, pay-to, amount,
+     resource -- with the contract. Any difference raises VerificationFailed
+     and nothing is signed. The paid retry carries X-HubVibe-Contract with
+     the contract hash, so the node refuses the payment if the contract
+     changed in between.
+  2b. Then clear it locally: sign the payment with the agent's OWN wallet
      (USDC on Base or on Solana, the private key never leaves this machine)
      using the official x402 client library, and retry once with the
      PAYMENT-SIGNATURE header. The 200 carries the result and the
@@ -97,12 +105,14 @@ from typing import Any, Optional
 
 import httpx
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 _ATOMIC_PER_USD = 1_000_000  # USDC has 6 decimals on Base and on Solana
 _DEFAULT_CACHE_PATHS = ("/work/data/", "/work/stats/")
 _FREE_GET_PATHS = ("/work", "/work/receipts/", "/.well-known/", "/openapi.json",
-                   "/mcp.json", "/llms.txt", "/health")
+                   "/mcp.json", "/llms.txt", "/health", "/contracts")
+_CONTRACT_HEADER = "X-HubVibe-Contract"
+_CONTRACT_TTL = 300  # seconds a fetched purchase contract is trusted before re-fetching
 _A2A_X402_EXTENSION = "https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2"
 _A2A_VERSION = "1.0"
 
@@ -124,6 +134,13 @@ class RouterError(RuntimeError):
 
 class NotConfigured(RouterError):
     reason = "payment_not_configured"
+
+
+class VerificationFailed(RouterError):
+    """The purchase did not verify: the node's contract for this capability
+    and the terms it is asking to be paid on (or the buyer's own body) do
+    not agree. Raised BEFORE anything is signed; no payment exists."""
+    reason = "verification_failed"
 
 
 class CapExceeded(RouterError):
@@ -212,6 +229,7 @@ class Router:
         self._http = httpx.Client(timeout=timeout, headers={"User-Agent": user_agent})
         self._x402_http = None
         self._x402_core = None
+        self._contracts: dict = {}
         self._lock = threading.Lock()
         self._spent_usd = 0.0
         self.home.mkdir(parents=True, exist_ok=True)
@@ -437,6 +455,113 @@ class Router:
     def _headers(self) -> dict:
         return {"X-API-Key": self.api_key} if self.api_key else {}
 
+    # ---- VERIFY (before anything is signed) ----------------------------------
+
+    def contract(self, tool: str, *, fresh: bool = False) -> dict:
+        """The node's Purchase Verification Contract for a capability (free),
+        cached for _CONTRACT_TTL seconds per process."""
+        path = self.route_for(tool)
+        now = time.time()
+        cached = self._contracts.get(path)
+        if cached and not fresh and now - cached[0] < _CONTRACT_TTL:
+            return cached[1]
+        try:
+            response = self._http.get(self.base_url + "/contracts" + path)
+        except Exception as exc:  # no contract obtainable -> no payment
+            raise VerificationFailed(f"the node's contract for {path} could not be fetched: {type(exc).__name__}",
+                                     path=path)
+        if response.status_code == 404:
+            raise VerificationFailed(f"the node sells no capability at {path}", path=path)
+        if response.status_code != 200:
+            raise VerificationFailed(f"the node's contract for {path} could not be read (HTTP {response.status_code})",
+                                     path=path, http_status=response.status_code)
+        contract = self._safe_json(response)
+        cap = contract.get("capability") if isinstance(contract, dict) else None
+        if not isinstance(cap, dict) or cap.get("path") != path or not contract.get("contract_hash") \
+                or not (contract.get("payment") or {}).get("rails"):
+            raise VerificationFailed(f"the node's contract for {path} is malformed or not for this route", path=path)
+        self._contracts[path] = (now, contract)
+        return contract
+
+    def verify(self, tool: str, body: Any = None, expect: Optional[dict] = None) -> dict:
+        """VERIFY on its own: the contract, the node's check of `body` against
+        the input schema and of `expect` against the terms, plus this
+        client's own comparison of `expect`. Raises VerificationFailed on
+        any mismatch; returns {"contract", "verification"} otherwise."""
+        path = self.route_for(tool)
+        contract = self.contract(tool)
+        payload = {}
+        if body is not None:
+            payload["input"] = body
+        if expect:
+            payload["expect"] = expect
+        response = self._http.post(self.base_url + "/contracts" + path + "/verify",
+                                   json=payload, headers={"Content-Type": "application/json"})
+        verification = self._safe_json(response)
+        if response.status_code != 200 or not isinstance(verification, dict):
+            raise VerificationFailed(f"the node could not verify {path} (HTTP {response.status_code})", path=path)
+        if verification.get("contract_hash") != contract["contract_hash"]:
+            raise VerificationFailed("the node's contract changed while verifying; re-verify", path=path)
+        if not verification.get("verified"):
+            raise VerificationFailed(f"verification failed: {json.dumps(verification.get('mismatches'))[:300]}",
+                                     path=path, mismatches=verification.get("mismatches"))
+        return {"contract": contract, "verification": verification}
+
+    def _rail_prefix(self) -> Optional[str]:
+        return {"base": "eip155:", "solana": "solana:"}.get(self.rail or "")
+
+    @staticmethod
+    def _challenge_problem(contract: dict, accepts: list, rail_prefix: Optional[str],
+                           resource_url: Optional[str]) -> Optional[str]:
+        """Same comparison the node's purchase module makes (purchase.challenge_problem):
+        every accepted requirement on the buyer's rail must be a rail of the contract
+        -- network, asset, pay-to, amount -- and the resource must be the capability."""
+        rails = (contract.get("payment") or {}).get("rails") or []
+        url = (contract.get("capability") or {}).get("url")
+        if resource_url and url and resource_url != url:
+            return f"resource {resource_url!r} is not the capability's URL {url!r}"
+        considered = 0
+        for entry in accepts or []:
+            if not isinstance(entry, dict):
+                return "malformed accepts entry"
+            network = entry.get("network")
+            if rail_prefix and not str(network).startswith(rail_prefix):
+                continue
+            considered += 1
+            amount = entry.get("amount") or entry.get("maxAmountRequired")
+            pay_to = str(entry.get("payTo") or entry.get("pay_to") or "")
+            asset = str(entry.get("asset") or "")
+            match = next((r for r in rails if r.get("protocol") == "x402" and r.get("network") == network
+                          and str(r.get("asset") or "").lower() == asset.lower()
+                          and str(r.get("pay_to") or "").lower() == pay_to.lower()
+                          and str(amount) == str(r.get("amount_atomic"))), None)
+            if match is None:
+                return (f"challenge offers network={network} asset={asset} payTo={pay_to} amount={amount}, "
+                        f"which the contract does not")
+            entry_resource = entry.get("resource")
+            if isinstance(entry_resource, str) and entry_resource and url and entry_resource != url:
+                return f"challenge resource {entry_resource!r} is not the capability's URL {url!r}"
+        if considered == 0:
+            return "the challenge offers no rail this buyer can pay"
+        return None
+
+    def _verify_before_signing(self, path: str, body: Any, accepts: list, resource_url: Optional[str],
+                               quoted_price: Optional[float]) -> dict:
+        """The full VERIFY step for one purchase; returns the contract to bind
+        the payment to, or raises VerificationFailed (nothing signed)."""
+        contract = self.contract(path)
+        price = (contract.get("price") or {}).get("usd")
+        if quoted_price is not None and price is not None and abs(float(price) - float(quoted_price)) > 1e-9:
+            raise VerificationFailed(f"the 402 quotes ${quoted_price:.2f} but the contract says ${float(price):.2f}",
+                                     path=path, price_usd=quoted_price)
+        problem = self._challenge_problem(contract, accepts, self._rail_prefix(), resource_url)
+        if problem:
+            raise VerificationFailed(f"the 402's payment terms do not match the contract: {problem}",
+                                     path=path, price_usd=quoted_price)
+        if body is not None:
+            self.verify(path, body)
+        return contract
+
     def quote(self, path: str, body: Any) -> dict:
         """The price and rails of a route, from its 402. Free; nothing is signed."""
         url = self.base_url + path
@@ -501,12 +626,20 @@ class Router:
             if price is None:
                 raise PaymentRefused("the node answered 402 without a readable price", path=path)
             self._check_caps(price, path)
+            # VERIFY: the contract, this body, and the 402's own terms must
+            # agree before a signature exists.
+            raw = first.headers.get("PAYMENT-REQUIRED") or first.headers.get("payment-required")
+            v2 = _b64json(raw) if raw else None
+            accepts = (v2 or {}).get("accepts") or (self._safe_json(first) or {}).get("accepts") or []
+            resource_url = ((v2 or {}).get("resource") or {}).get("url")
+            contract = self._verify_before_signing(path, body, accepts, resource_url, price)
             try:
                 paid_headers = self._sign(first, url)
             except RouterError:
                 raise
             except Exception as exc:  # the library refused to sign: cap, unsupported rail, bad key
                 raise PaymentRefused(f"could not sign the payment: {type(exc).__name__}: {str(exc)[:160]}", path=path, price_usd=price)
+            paid_headers[_CONTRACT_HEADER] = contract["contract_hash"]
             response = self._http.post(url, json=body, headers={**headers, **paid_headers})
             settlement = self._settlement_of(response)
             if response.status_code == 402:
@@ -565,6 +698,10 @@ class Router:
             if price is None:
                 raise PaymentRefused("the A2A task asked for payment without a readable price", path=path)
             self._check_caps(price, path)
+            # VERIFY: the task's challenge must match the contract (the
+            # resource named there is the node's A2A/MCP endpoint, so only
+            # the rails are compared) and the body the input schema.
+            self._verify_before_signing(path, body, required.get("accepts") or [], None, price)
             try:
                 signed = self._sign_challenge(required)
             except RouterError:
@@ -762,6 +899,17 @@ def serve(router: Router, host: str = "127.0.0.1", port: int = 8402) -> None:
                 return self._send(400, {"status": "error", "reason": "invalid_json", "detail": "body must be a JSON object"})
             if path == "/router/cache/clear":
                 return self._send(200, {"status": "ok", "cleared": router.cache_clear()})
+            if path == "/router/verify":
+                # {"tool": ..., "body": {...}, "expect": {...}} -> VERIFY only, nothing bought.
+                if not isinstance(body, dict) or not isinstance(body.get("tool"), str):
+                    return self._send(400, {"status": "error", "reason": "invalid_request",
+                                            "detail": 'body must be {"tool": "<name>", "body": {...}, "expect": {...}}'})
+                try:
+                    return self._send(200, router.verify(body["tool"], body.get("body"), body.get("expect")))
+                except VerificationFailed as exc:
+                    return self._send(409, exc.as_json())
+                except RouterError as exc:
+                    return self._send(502, exc.as_json())
             use_cache = self.headers.get("X-HubVibe-Cache", "").lower() != "bypass"
             try:
                 if path == "/a2a":
@@ -774,6 +922,8 @@ def serve(router: Router, host: str = "127.0.0.1", port: int = 8402) -> None:
                 return self._send(200, router.call(path, body, use_cache=use_cache))
             except CapExceeded as exc:
                 return self._send(402, exc.as_json())
+            except VerificationFailed as exc:
+                return self._send(409, exc.as_json())
             except NotConfigured as exc:
                 return self._send(503, exc.as_json())
             except PaymentRefused as exc:
@@ -810,6 +960,8 @@ def _cli(argv: Optional[list] = None) -> int:
     p_call = sub.add_parser("call", help="buy one job (pays if the node asks)")
     p_call.add_argument("path"); p_call.add_argument("body", nargs="?", default="{}")
     p_call.add_argument("--no-cache", action="store_true")
+    p_verify = sub.add_parser("verify", help="VERIFY a purchase without buying it (free)")
+    p_verify.add_argument("path"); p_verify.add_argument("body", nargs="?", default="{}")
     p_a2a = sub.add_parser("a2a", help="buy one skill over the node's A2A endpoint")
     p_a2a.add_argument("skill"); p_a2a.add_argument("body", nargs="?", default="{}")
     p_a2a.add_argument("--no-cache", action="store_true")
@@ -828,6 +980,8 @@ def _cli(argv: Optional[list] = None) -> int:
             print(json.dumps(router.quote(args.path, json.loads(args.body)), indent=2))
         elif args.cmd == "call":
             print(json.dumps(router.call(args.path, json.loads(args.body), use_cache=not args.no_cache), indent=2, default=str))
+        elif args.cmd == "verify":
+            print(json.dumps(router.verify(args.path, json.loads(args.body)), indent=2, default=str))
         elif args.cmd == "a2a":
             print(json.dumps(router.a2a(args.skill, json.loads(args.body), use_cache=not args.no_cache), indent=2, default=str))
         elif args.cmd == "serve":

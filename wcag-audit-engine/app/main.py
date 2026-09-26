@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 try:
     from . import (a2a, ard, audits, billing, browser_pool, mpp_payments,
-                   solana_hash_verifier, x402_payments)
+                   purchase, solana_hash_verifier, x402_payments)
 except ImportError:
     # Loaded directly by file path (e.g. by tooling/tests) rather than as
     # part of the `app` package -- fall back to loading each sibling module
@@ -56,6 +56,7 @@ except ImportError:
     ard = _load_sibling_module("ard")  # type: ignore
     solana_hash_verifier = _load_sibling_module("solana_hash_verifier")  # type: ignore
     a2a = _load_sibling_module("a2a")  # type: ignore
+    purchase = _load_sibling_module("purchase")  # type: ignore
 
 # The worker network: additional machine-payable capabilities that run BESIDE
 # the audits. Kept in its own import block so the audit imports above are
@@ -912,6 +913,12 @@ def _payment_required_response(
         "alternative": alternative,
         "docs": f"{PUBLIC_BASE_URL}/.well-known/agent.json",
     }
+    # VERIFY before PAY: where the contract for this exact purchase is, and
+    # its hash, so a buyer can compare these terms with the published
+    # capability before signing (see /contracts/{capability}).
+    contract_ref = _contract_ref_for_path(path)
+    if contract_ref is not None:
+        body["contract"] = contract_ref
     if error:
         body["error_detail"] = error_detail or error
         body["billed"] = False
@@ -1167,6 +1174,23 @@ def _authorize_and_rate_limit(
     # the client's address (the one the platform vouches for, see
     # _client_ip). Either way this is per-instance overload protection, not
     # the billing boundary: that's Stripe usage records / on-chain settlement.
+    # VERIFY before PAY: a buyer that verified a purchase contract says so
+    # with X-HubVibe-Contract: <contract_hash>. If this route no longer
+    # sells that exact contract, nothing is verified or settled -- the 402
+    # comes back with the current contract so the buyer can re-verify.
+    claimed = request.headers.get(purchase.HEADER)
+    if claimed:
+        current = _contract_hash_for_path(request.url.path)
+        if current is not None and claimed.strip() != current:
+            return None, _payment_required_response(
+                host=_mpp_realm(request), price_usd=price_usd, path=request.url.path,
+                error="contract_mismatch",
+                error_detail=(
+                    f"The purchase contract you verified ({claimed.strip()[:40]}) is not the "
+                    f"one this route sells now ({current}). Nothing was verified or charged; "
+                    f"GET the `contract.url` in this response and re-verify before paying."),
+            )
+
     rate_limit_key = x_api_key or _client_ip(request)
     if not _audit_limiter.check(rate_limit_key):
         return None, _rate_limited_response()
@@ -2205,6 +2229,15 @@ async def agent_manifest(request: Request):
         },
         "payment": {
             "methods": live_methods,
+            "purchase_verification": (
+                f"Before paying, GET {base}/contracts/{{capability}} (free): the exact "
+                "capability, its input and output schema, price, and every rail's "
+                "network, asset and pay-to, with a contract_hash over all of it. POST "
+                f"{base}/contracts/{{capability}}/verify with your expected terms and "
+                "input to have them checked. The 402 names the same contract. Send "
+                f"{purchase.HEADER}: <contract_hash> with the paid request and the node "
+                "refuses to take payment if the contract has changed."
+            ),
             "challenge": (
                 "Unauthenticated calls return HTTP 402 with a machine-readable "
                 "`accepts` array in the body and, for MPP, one signed "
@@ -2243,6 +2276,7 @@ async def agent_manifest(request: Request):
             "mcp": f"{base}/mcp.json",
             "a2a_agent_card": f"{base}/.well-known/agent-card.json",
             "a2a_endpoint": f"{base}/a2a",
+            "contracts": f"{base}/contracts",
             "llms_txt": f"{base}/llms.txt",
             "docs": f"{base}/docs",
         },
@@ -2259,6 +2293,11 @@ async def agent_manifest(request: Request):
             "and an MPP credential it consumed is accepted again on the retry.",
             "Rate-limited requests are rejected before any payment is settled, "
             "so a 429 never costs you anything.",
+            "What you verify is what you buy: /contracts/{capability} states the "
+            "capability, schemas, price, network, asset and pay-to from the same "
+            "catalog the 402 charges from, under one contract_hash; a paid request "
+            f"carrying {purchase.HEADER} with a hash this route no longer sells is "
+            "refused before any payment is touched.",
             "The audits are deterministic rule-based checks against the live "
             "page, never an LLM's opinion. Workers state their sources and the "
             "provider used in every result, and every delivered job has a "
@@ -3035,6 +3074,237 @@ async def _mcp_dispatch_tool_call(payload, request, x_api_key, x_payment, author
     return await run_in_threadpool(
         _mcp_tools_call, payload, request, x_api_key, x_payment, authorization
     )
+
+
+# --- Purchase Verification Contract (VERIFY, before PAY) ---------------------
+# One object per capability, built from the rows and schemas every other
+# surface is built from: _CATALOG + _MCP_OUTPUT_SCHEMAS for the audits,
+# workers.catalog for the bees, x402_payments/mpp_payments for the rails.
+# Shaping, hashing and comparison live in app/purchase.py.
+
+
+def _capability_for(ref: str) -> Optional[dict]:
+    """A capability by worker name ("market.quote"), audit id ("audit.wcag"),
+    MCP tool name ("hubvibe_market_quote", "audit_wcag") or path
+    ("/work/market/quote", "work/market/quote", "/audit")."""
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    if ref.startswith("/") or "/" in ref or ("/" + ref) in _CATALOG_ALIASES:
+        path = _CATALOG_ALIASES.get("/" + ref.lstrip("/"), "/" + ref.lstrip("/"))
+    elif ref.startswith("audit_"):
+        path = "/audit/" + ref[len("audit_"):]
+    elif ref.startswith("audit."):
+        path = "/audit/" + ref[len("audit."):]
+    else:
+        path = None
+    if path is not None:
+        entry = next((e for e in _CATALOG if e["path"] == path), None)
+        if entry is not None:
+            name = path.rsplit("/", 1)[-1]
+            return {"kind": "audit", "id": f"audit.{name}", "path": path, "mcp_tool": f"audit_{name}",
+                    "title": _MCP_TOOL_TITLES[path], "description": entry["description"],
+                    "returns": entry["returns"], "tags": x402_payments.bazaar_tags(None),
+                    "price_usd": entry["price_usd"], "input_schema": _schema_for(entry["input"]),
+                    "output_schema": _MCP_OUTPUT_SCHEMAS[path], "response_schema": None,
+                    "input_example": {"url": "https://example.com"}, "max_seconds": None,
+                    "buyer_note": None, "worker": None}
+    if workers is None or not workers.is_configured():
+        return None
+    worker = None
+    if path is not None:
+        worker = workers.catalog.get(path)
+    elif ref in _MCP_WORKER_TOOLS:
+        worker = workers.catalog.BY_NAME.get(_MCP_WORKER_TOOLS[ref])
+    else:
+        worker = workers.catalog.BY_NAME.get(ref)
+    if worker is None or not worker.available():
+        return None
+    tool = next((n for n, w in _MCP_WORKER_TOOLS.items() if w == worker.name), None)
+    return {"kind": "worker", "id": worker.name, "path": worker.path, "mcp_tool": tool,
+            "title": worker.title, "description": worker.description, "returns": worker.returns,
+            "tags": list(worker.tags), "price_usd": worker.price_usd,
+            "input_schema": worker.input_schema, "output_schema": worker.output_schema,
+            "response_schema": workers.catalog.response_schema(worker),
+            "input_example": workers.catalog.example_for(worker), "max_seconds": worker.max_seconds,
+            "buyer_note": workers.catalog.buyer_note(worker), "worker": worker}
+
+
+def _purchase_rails(price_usd: float, url: str, description: str) -> list:
+    """Every rail a 402 for this capability offers, in one shape: the x402
+    v2 requirements (the PAYMENT-REQUIRED header), the x402 v1 entry (the
+    body's `accepts`) and the MPP methods -- built by the same functions
+    the 402 itself calls, so the terms cannot differ."""
+    price = f"${price_usd:.2f}"
+    rails = []
+    v2 = x402_payments.payment_required_v2_dict(price=price, resource_url=url, description=description)
+    for accepted in v2.get("accepts") or []:
+        rails.append({
+            "protocol": "x402", "x402_version": 2, "scheme": accepted.get("scheme"),
+            "network": accepted.get("network"), "asset": accepted.get("asset"),
+            "pay_to": accepted.get("payTo"), "amount_atomic": str(accepted.get("amount")),
+            "max_timeout_seconds": accepted.get("maxTimeoutSeconds"),
+            "send_via_header": "PAYMENT-SIGNATURE",
+        })
+    v1 = x402_payments.accepts_entry(price=price, resource_url=url, description=description)
+    if v1:
+        rails.append({
+            "protocol": "x402", "x402_version": 1, "scheme": v1.get("scheme"),
+            "network": v1.get("network"), "asset": v1.get("asset"), "pay_to": v1.get("payTo"),
+            "amount_atomic": str(v1.get("maxAmountRequired")),
+            "max_timeout_seconds": v1.get("maxTimeoutSeconds"), "send_via_header": "X-PAYMENT",
+        })
+    for entry in mpp_payments.accepts_entries(price_usd=price_usd):
+        rails.append({
+            "protocol": "mpp", "method": entry.get("method"),
+            "credential_types": entry.get("credential_types"),
+            "network": entry.get("network") or (f"eip155:{entry['chain_id']}" if entry.get("chain_id") else None),
+            "asset": entry.get("asset"), "pay_to": entry.get("recipient"),
+            "amount_atomic": entry.get("amount_minor_units"),
+            "send_via_header": "Authorization: Payment", "challenge_in": "WWW-Authenticate",
+        })
+    return rails
+
+
+def _purchase_contract(cap: dict) -> dict:
+    base = PUBLIC_BASE_URL
+    url = f"{base}{cap['path']}"
+    fields = {
+        "capability": {
+            "id": cap["id"], "kind": cap["kind"], "path": cap["path"], "method": "POST", "url": url,
+            "mcp_tool": cap["mcp_tool"], "a2a_skill": cap["mcp_tool"], "title": cap["title"],
+            "description": cap["description"], "returns": cap["returns"], "tags": cap["tags"],
+        },
+        "provider": {
+            "name": "HubVibe", "service": SERVICE_TITLE, "base_url": base, "node_version": SERVICE_VERSION,
+            "agent_manifest": f"{base}/.well-known/agent.json",
+            "agent_card": f"{base}/.well-known/agent-card.json",
+            "openapi": f"{base}/openapi.json", "ard": f"{base}/.well-known/ard.json",
+            "mcp_endpoint": f"{base}/mcp", "a2a_endpoint": f"{base}/a2a",
+        },
+        "input_schema": cap["input_schema"], "input_example": cap["input_example"],
+        "output_schema": cap["output_schema"],
+        **({"response_schema": cap["response_schema"]} if cap["response_schema"] else {}),
+        "price": {"usd": cap["price_usd"], "currency": "USD", "model": "per-call"},
+        "payment": {
+            "methods": _payment_methods_live(),
+            "rails": _purchase_rails(cap["price_usd"], url, cap["description"]),
+            "challenge": "POST the capability's url with no credential: the 402 repeats these "
+                         "terms (v1 in the body's accepts, v2 in the PAYMENT-REQUIRED header, MPP in "
+                         "WWW-Authenticate) and names this contract in `contract`.",
+            "bind": f"Send {purchase.HEADER}: <contract_hash> with the paid request; the node "
+                    "refuses payment if it no longer sells this contract.",
+            **({"spend_note": cap["buyer_note"]} if cap["buyer_note"] else {}),
+        },
+        "constraints": {
+            "rate_limit_per_minute": RATE_LIMIT_PER_MINUTE,
+            "max_seconds": cap["max_seconds"],
+            "idempotency": "Idempotency-Key header: a repeated key returns the stored result and "
+                           "is not charged again" if cap["kind"] == "worker" else None,
+        },
+        "guarantees": [
+            "The result is validated against output_schema before it is billed; one that does not "
+            "match is not delivered and not charged (HTTP 502, reason contract_mismatch).",
+            "A call that produced no result is never settled.",
+        ],
+        "proof": ({"receipt": f"{base}/work/receipts/{{receipt_id}}",
+                   "note": "receipt_id and receipt_url are in every delivered body; the receipt "
+                           "carries the settlement and sha256 hashes of the request and result"}
+                  if cap["kind"] == "worker" else
+                  {"receipt": None,
+                   "note": "a settled x402 payment returns the facilitator's settle response in the "
+                           "PAYMENT-RESPONSE header of the 200"}),
+        "sources": {
+            "openapi_operation": f"{base}/openapi.json#/paths/{cap['path'].replace('/', '~1')}/post",
+            "mcp_tool": cap["mcp_tool"], "agent_card_skill": cap["mcp_tool"],
+            "agent_manifest": f"{base}/.well-known/agent.json",
+            "x402_challenge": "PAYMENT-REQUIRED header and body of the route's 402",
+        },
+    }
+    hash_fn = workers.ledger.canonical_hash if workers is not None else None
+    return purchase.assemble(fields, hash_fn)
+
+
+def _all_capabilities() -> list:
+    caps = [_capability_for(e["path"]) for e in _CATALOG]
+    if workers is not None and workers.is_configured():
+        caps += [_capability_for(w.name) for w in workers.catalog.live()]
+    return [c for c in caps if c is not None]
+
+
+def _contract_ref_for_path(path: Optional[str]) -> Optional[dict]:
+    if not path:
+        return None
+    try:
+        cap = _capability_for(path)
+        if cap is None:
+            return None
+        contract = _purchase_contract(cap)
+    except Exception:  # the pointer must never be why a 402 fails
+        return None
+    url = f"{PUBLIC_BASE_URL}/contracts/{cap['id']}"
+    return {"url": url, "verify": f"{url}/verify", "hash": contract["contract_hash"],
+            "header": purchase.HEADER}
+
+
+def _contract_hash_for_path(path: str) -> Optional[str]:
+    try:
+        cap = _capability_for(path)
+        return _purchase_contract(cap)["contract_hash"] if cap is not None else None
+    except Exception:
+        return None
+
+
+@app.get("/contracts", tags=["discovery"])
+async def purchase_contracts():
+    """Every capability this node sells, with its contract URL and hash."""
+    rows = []
+    for cap in _all_capabilities():
+        contract = _purchase_contract(cap)
+        rows.append({"id": cap["id"], "kind": cap["kind"], "path": cap["path"], "mcp_tool": cap["mcp_tool"],
+                     "price_usd": cap["price_usd"], "contract_url": f"{PUBLIC_BASE_URL}/contracts/{cap['id']}",
+                     "contract_hash": contract["contract_hash"]})
+    return {"contract_version": purchase.CONTRACT_VERSION, "count": len(rows), "capabilities": rows,
+            "verify": f"POST {PUBLIC_BASE_URL}/contracts/{{id}}/verify with "
+                      "{\"expect\": {...}, \"input\": {...}}",
+            "bind": f"{purchase.HEADER}: <contract_hash> on the paid request"}
+
+
+def _unknown_capability(ref: str) -> JSONResponse:
+    return JSONResponse(status_code=404, content={
+        "status": "error", "reason": "unknown_capability",
+        "detail": f"No capability {ref!r} is sold on this node. GET {PUBLIC_BASE_URL}/contracts lists them.",
+        "billed": False})
+
+
+@app.get("/contracts/{capability:path}", tags=["discovery"])
+async def purchase_contract(capability: str):
+    """The Purchase Verification Contract for one capability (free)."""
+    cap = _capability_for(capability)
+    if cap is None:
+        return _unknown_capability(capability)
+    return _purchase_contract(cap)
+
+
+@app.post("/contracts/{capability:path}/verify", tags=["discovery"])
+async def purchase_verify(capability: str, payload: Any = Body(None)):
+    """Check a buyer's expected terms (`expect`) and its request body
+    (`input`) against the contract, deterministically. Free; nothing here
+    reads a payment."""
+    cap = _capability_for(capability)
+    if cap is None:
+        return _unknown_capability(capability)
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict) or not isinstance(payload.get("expect", {}), dict):
+        return JSONResponse(status_code=400, content={
+            "status": "error", "reason": "invalid_request",
+            "detail": 'body must be a JSON object: {"expect": {...}, "input": {...}}', "billed": False})
+    contract = _purchase_contract(cap)
+    checker = workers.catalog.contract.check if workers is not None else None
+    result = purchase.verify(contract, payload.get("expect"), payload.get("input"), checker)
+    result["contract"] = contract
+    return result
 
 
 # --- A2A: the Agent Card and the JSON-RPC endpoint --------------------------

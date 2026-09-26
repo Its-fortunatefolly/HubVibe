@@ -415,6 +415,11 @@ def start_node(port: int, env: dict, log_path: Path) -> subprocess.Popen:
     raise SystemExit("STOP  the node did not come up on port %d" % port)
 
 
+def _get_json(url: str, timeout=30) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return json.loads(response.read().decode())
+
+
 def _post(url: str, body: dict, headers: dict | None = None, timeout=90):
     data = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -756,6 +761,90 @@ def main() -> int:
                 node2.kill()
             if not args.keep:
                 node2_log.unlink(missing_ok=True)
+
+        step("Purchase verification: DISCOVER -> VERIFY -> AUTHORIZE -> PAY -> EXECUTE -> PROVE")
+        # The bundled buyer-side router drives the whole lifecycle against
+        # THIS node with THIS payer, through the stub facilitator: nothing on
+        # chain. The facilitator log is the witness for "no payment": a
+        # refused purchase must leave it untouched.
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            "hubvibe_router_sim", REPO / "wcag-audit-engine" / "integrations" / "hubvibe_router.py")
+        router_mod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(router_mod)
+        router = router_mod.Router(base, evm_key=payer.key.hex() if payer.key.hex().startswith("0x")
+                                   else "0x" + payer.key.hex(), rail="base", max_price_usd=1.00,
+                                   home=str(work / "router-home"))
+        page = f"{facilitator}/page"
+        # DISCOVER
+        listing = _get_json(f"{base}/contracts")
+        ids = {row["id"] for row in listing.get("capabilities", [])}
+        checks.expect("audit.wcag" in ids, f"DISCOVER: /contracts lists audit.wcag among {len(ids)} capabilities")
+        capability = "/work/stats/probability" if "stats.probability" in ids else "/audit/wcag"
+        body = ({"points": [[1, 2.1], [2, 3.9], [3, 6.2], [4, 7.8], [5, 10.1]], "predict_x": [6]}
+                if capability.startswith("/work") else {"url": page})
+        contract = _get_json(f"{base}/contracts{capability}")
+        checks.expect(contract.get("capability", {}).get("path") == capability
+                      and contract.get("contract_hash", "").startswith("sha256:"),
+                      f"DISCOVER: the contract for {capability} names the capability and carries a hash")
+        # VERIFY
+        try:
+            verified = router.verify(capability, body, expect={"price_usd": contract["price"]["usd"],
+                                                                "pay_to": recipient, "network": "eip155:8453",
+                                                                "contract_hash": contract["contract_hash"]})
+            checks.ok(f"VERIFY: expected price/pay-to/network/hash and the body verify against {capability}")
+        except router_mod.RouterError as exc:
+            checks.fail(f"VERIFY: {exc}")
+        before = len(state.log)
+        # AUTHORIZE (caps) -> PAY (signed only after the 402 matched the contract) -> EXECUTE
+        try:
+            delivered = router.call(capability, body, use_cache=False)
+            checks.expect(delivered.get("status") == "ok", f"PAY+EXECUTE: {capability} delivered through the router")
+        except router_mod.RouterError as exc:
+            delivered = {}
+            checks.fail(f"PAY+EXECUTE: {exc}")
+        paid_entries = [e for e in state.log[before:] if e.get("path") in ("/verify", "/settle")]
+        checks.expect(len(paid_entries) >= 2, f"PAY: the facilitator saw verify and settle for the verified purchase "
+                                             f"({[e.get('path') for e in paid_entries]})")
+        # PROVE
+        row = router.ledger()[-1] if router.ledger() else {}
+        checks.expect(bool(row.get("settled")) and bool(row.get("tx")), f"PROVE: the router's ledger holds the settlement tx {row.get('tx')}")
+        if delivered.get("receipt_url"):
+            receipt = _get_json(f"{base}{delivered['receipt_url']}")
+            checks.expect(receipt.get("outcome") == "paid_delivered",
+                          f"PROVE: the node's receipt says {receipt.get('outcome')} (result hash {str(receipt.get('delivery', {}).get('result_hash'))[:24]}...)")
+        else:
+            checks.ok("PROVE: the settlement receipt came back in the 200's PAYMENT-RESPONSE header (audit route)")
+
+        step("Invalid purchase: altered terms -> verification failure -> NO PAYMENT")
+        # Buyer side: the contract the buyer holds says a different pay-to than
+        # the node's 402 offers (a swapped recipient, a stale contract, a
+        # man-in-the-middle). The router must refuse before signing.
+        altered = json.loads(json.dumps(contract))
+        for rail in altered["payment"]["rails"]:
+            rail["pay_to"] = "0x000000000000000000000000000000000000dEaD"
+        router._contracts[capability] = (time.time(), altered)
+        before = len(state.log)
+        try:
+            router.call(capability, body, use_cache=False)
+            checks.fail("buyer side: a purchase whose pay-to differs from the contract was NOT refused")
+        except router_mod.VerificationFailed as exc:
+            checks.ok(f"buyer side: refused before signing -- {str(exc)[:90]}")
+        except router_mod.RouterError as exc:
+            checks.fail(f"buyer side: wrong failure type {type(exc).__name__}: {exc}")
+        checks.expect(len(state.log) == before, "buyer side: the facilitator saw NO verify and NO settle (nothing was paid)")
+        router._contracts.pop(capability, None)
+        # Node side: a signed payment that binds to a contract hash the route
+        # no longer sells is refused before the payment layer is touched.
+        import httpx as _httpx
+        with _httpx.Client(timeout=60) as http:
+            first = http.post(f"{base}{capability}", json=body)
+            signed = router._sign(first, f"{base}{capability}") if first.status_code == 402 else {}
+            signed["X-HubVibe-Contract"] = "sha256:" + "0" * 64
+            bound = http.post(f"{base}{capability}", json=body, headers={"Content-Type": "application/json", **signed})
+        checks.expect(bound.status_code == 402 and bound.json().get("error") == "contract_mismatch",
+                      f"node side: a payment bound to a stale contract hash is refused with 402 contract_mismatch (HTTP {bound.status_code})")
+        checks.expect(len(state.log) == before, "node side: the facilitator saw NO verify and NO settle for it")
 
         step("Node log")
         node_text = node_log.read_text(errors="replace")

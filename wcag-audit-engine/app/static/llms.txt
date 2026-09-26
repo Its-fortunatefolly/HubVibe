@@ -37,6 +37,13 @@ Machine-readable discovery:
   unpaid call returns the task in input-required with the price in
   metadata x402.payment.required; send the signed PaymentPayload in the
   next message's metadata x402.payment.payload with the same taskId.
+- /contracts/{capability} -- Purchase Verification Contract (free): before
+  paying, the exact capability, its input and output schema, price, and
+  every rail's network, asset and pay-to, under one contract_hash; the
+  402 names the same contract. POST /contracts/{capability}/verify with
+  {"expect": {...}, "input": {...}} to have your terms and body checked.
+  Send X-HubVibe-Contract: <contract_hash> with the paid request and the
+  node refuses payment if the contract changed. GET /contracts lists all.
 - /mcp.json -- static MCP tool definitions with their httpEndpoint
 - /docs -- interactive API reference
 
