@@ -8,6 +8,9 @@
 > checks against the actual page; a check that couldn't run is never
 > reported as a false pass, and a call that produced no result is never
 > billed.
+> Every result is checked against the route's published output schema
+> before it is billed; one that does not match is not delivered and not
+> charged (HTTP 502, reason contract_mismatch).
 
 Base URL: https://hubvibe-io.com
 

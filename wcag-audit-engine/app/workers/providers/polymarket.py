@@ -61,6 +61,17 @@ class _Polymarket:
         data = response.json()
         return data if isinstance(data, list) else [data]
 
+    @staticmethod
+    def _num(value):
+        """Polymarket serialises volume and liquidity as decimal strings
+        ('20.0396'); the published contract promises a number or null."""
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     def _shape(self, market: dict) -> dict:
         outcomes = _as_list(market.get("outcomes"))
         prices = _as_list(market.get("outcomePrices"))
@@ -80,8 +91,8 @@ class _Polymarket:
             "active": market.get("active"),
             "closed": market.get("closed"),
             "end_date": market.get("endDate"),
-            "volume": market.get("volume"),
-            "liquidity": market.get("liquidity"),
+            "volume": self._num(market.get("volume")),
+            "liquidity": self._num(market.get("liquidity")),
             "implied_probabilities": implied,
         }
 
@@ -125,7 +136,7 @@ class _Polymarket:
         data = await self._get("/events", params)
         events = [
             {"id": e.get("id"), "title": e.get("title"), "slug": e.get("slug"),
-             "volume": e.get("volume"), "end_date": e.get("endDate"),
+             "volume": self._num(e.get("volume")), "end_date": e.get("endDate"),
              "market_count": len(e.get("markets") or [])}
             for e in data if isinstance(e, dict)
         ]

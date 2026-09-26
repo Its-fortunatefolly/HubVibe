@@ -231,6 +231,10 @@ Only a job that produced a result.
   bundled `hubvibe_tollbooth.py` keeps it as `last_settlement`.
 - One signed payment buys one job. A replayed x402 authorization is
   refused with a 402 before it reaches the facilitator.
+- Every result is checked against the route's published output schema
+  (`openapi.json`, the MCP `outputSchema`, the 402's Bazaar record, the A2A
+  skill) before it is billed. A result that does not match is not delivered
+  and not charged: HTTP 502, reason `contract_mismatch`.
 - Every `/work` call, paid or refused, has a receipt at
   `GET /work/receipts/{receipt_id}` (the id is returned on the response):
   outcome (`paid_delivered`, `paid_failed`, `unpaid_refused`, ...), rail,

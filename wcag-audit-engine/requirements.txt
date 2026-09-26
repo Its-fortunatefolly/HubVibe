@@ -14,3 +14,6 @@ solana==0.36.12
 # (mainnet x402 settlement + the x402 Bazaar listing).
 cdp-sdk==1.48.1
 httpx==0.28.1
+# The delivery contract check (app/workers/contract.py): every result is
+# validated against the route's published output schema before it is billed.
+jsonschema>=4.17,<5

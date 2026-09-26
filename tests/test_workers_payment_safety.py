@@ -92,6 +92,13 @@ def client(app_module):
     return TestClient(app_module.app)
 
 
+def _valid(name, **extra):
+    """A result that satisfies the worker's published output schema (the
+    delivery contract refuses anything else before billing), with the
+    test's own markers merged in."""
+    return {**W.catalog.output_example(W.catalog.BY_NAME[name]), **extra}
+
+
 def _stub_skill(app_module, monkeypatch, name, fn):
     """Replace one worker's implementation, so payment behaviour can be tested
     without depending on a live provider."""
@@ -286,7 +293,7 @@ def test_same_idempotency_key_returns_the_stored_result_and_is_not_billed(
 
     async def counted(ctx, payload):
         runs.append(1)
-        return {"ran": len(runs)}
+        return _valid("market.quote", ran=len(runs))
 
     _stub_skill(app_module, monkeypatch, "market.quote", counted)
     billed = []
@@ -320,7 +327,7 @@ def test_a_failed_job_releases_its_idempotency_key_for_a_genuine_retry(
         calls["n"] += 1
         if calls["n"] == 1:
             raise W.runtime.TransientProviderError("down", reason="provider_down")
-        return {"ok": True}
+        return _valid("market.quote", ok=True)
 
     _stub_skill(app_module, monkeypatch, "market.quote", fails_then_works)
     W.router.configure(
@@ -333,7 +340,7 @@ def test_a_failed_job_releases_its_idempotency_key_for_a_genuine_retry(
     second = client.post("/work/market/quote", headers=headers, json={"product_id": "BTC-USD"})
     assert first.status_code == 502
     assert second.status_code == 200, "the same key must work again after a failure"
-    assert second.json()["result"] == {"ok": True}
+    assert second.json()["result"]["ok"] is True
 
 
 def test_an_in_flight_duplicate_gets_409_rather_than_running_twice(app_module):
@@ -485,7 +492,7 @@ def test_a_worker_above_the_client_cap_tells_the_buyer_how_to_lift_it(client):
 
 def test_a_delivered_job_carries_a_retrievable_receipt(app_module, client, monkeypatch):
     async def works(ctx, payload):
-        return {"answer": 42, "echo": payload}
+        return _valid("market.quote", answer=42, echo=payload)
 
     _stub_skill(app_module, monkeypatch, "market.quote", works)
     monkeypatch.setattr(app_module, "_bill", lambda auth, price_usd: None)
@@ -553,7 +560,7 @@ def test_an_mpp_hash_paid_job_gets_a_paid_delivered_receipt(app_module, client, 
     ledger row and receipt must carry payer, tx, amount, asset, network and
     pay_to exactly as for an x402 settlement, with rail mpp."""
     async def works(ctx, payload):
-        return {"answer": 42}
+        return _valid("market.quote", answer=42)
 
     _stub_skill(app_module, monkeypatch, "market.quote", works)
     facts = {"rail": "mpp", "method": "evm", "payer": "0x37555e884c5eba10f6e816dbecea30965b9b38c0",
@@ -579,7 +586,7 @@ def test_an_mpp_hash_paid_job_gets_a_paid_delivered_receipt(app_module, client, 
         "rail": "mpp", "payer": facts["payer"], "pay_to": facts["pay_to"], "amount_atomic": 20000,
         "amount_usd": 0.02, "asset": facts["asset"], "network": "eip155:8453",
         "tx_hash": facts["tx_hash"], "settled": True}
-    assert receipt["delivery"]["result_hash"] == W.ledger.canonical_hash({"answer": 42})
+    assert receipt["delivery"]["result_hash"] == W.ledger.canonical_hash(response.json()["result"])
     # The x402 gate's _bill still ran (it is a no-op for a prepaid MPP call).
     assert billed == [0.02]
 
@@ -588,7 +595,7 @@ def test_an_x402_payer_is_unaffected_by_the_mpp_fact_lookup(app_module, client, 
     """With no MPP credential, the lookup is never consulted: an API-key call
     still records no payer and reads delivered_not_settled."""
     async def works(ctx, payload):
-        return {"ok": True}
+        return _valid("market.quote", ok=True)
 
     _stub_skill(app_module, monkeypatch, "market.quote", works)
     consulted = []
