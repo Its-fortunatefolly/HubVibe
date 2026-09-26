@@ -7,6 +7,8 @@ sources it used. No separate search API, no separate key.
 
 import os
 
+from typing import Optional
+
 import httpx
 
 from .. import runtime
@@ -21,6 +23,17 @@ _TIMEOUT = float(os.environ.get("WORKER_SEARCH_TIMEOUT_SECONDS", "45"))
 _SEARCH_QUERY_USD = float(os.environ.get("WORKER_SEARCH_PRICE_PER_QUERY_USD", "0.014"))
 
 
+def prompt_for(query: str, language: Optional[str] = None) -> str:
+    """The grounded-search prompt; the caller's language, when given, is
+    the answer's language (the search itself runs on the query as written)."""
+    prompt = ("Answer this from current web search results, concisely and "
+              f"factually: {query}")
+    if language:
+        prompt += (f" Write the answer in the language with BCP-47 tag '{language}'; "
+                   "keep names, quotations and numbers exactly as found.")
+    return prompt
+
+
 class _GeminiGroundedSearch:
     id = f"vertex-search:{_MODEL}"
 
@@ -30,16 +43,14 @@ class _GeminiGroundedSearch:
     def unavailable_reason(self) -> str:
         return google_auth.unavailable_reason()
 
-    async def search(self, query: str) -> runtime.ProviderResult:
+    async def search(self, query: str, language: Optional[str] = None) -> runtime.ProviderResult:
         if not google_auth.configured():
             raise runtime.ProviderUnavailable(google_auth.unavailable_reason())
 
         project = google_auth.project()
         url = model_url(project, _MODEL, "generateContent")
         body = {
-            "contents": [{"role": "user", "parts": [{"text": (
-                "Answer this from current web search results, concisely and "
-                f"factually: {query}")}]}],
+            "contents": [{"role": "user", "parts": [{"text": prompt_for(query, language)}]}],
             "tools": [{"google_search": {}}],
             "generationConfig": {"temperature": 0.1},
         }

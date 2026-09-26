@@ -59,6 +59,7 @@ async def check(ctx, payload: dict) -> dict:
             "question": ("Summarize concretely what changed between the previous and "
                         "current version. If nothing meaningful changed beyond "
                         "formatting or whitespace, say so explicitly."),
+            "language": payload.get("language"),
         })
         result["change_summary"] = analysis["answer"]
         result["model"] = analysis["model"]
@@ -70,3 +71,4 @@ async def check(ctx, payload: dict) -> dict:
 
 
 SKILLS = {"monitor.snapshot": snapshot, "monitor.check": check}
+PRECHECKS = {"monitor.check": llm_skill.validate_language}

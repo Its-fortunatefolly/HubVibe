@@ -141,6 +141,23 @@ _BQ_ROWS = _arr(_obj({}, [], "One row keyed by column name.", additionalProperti
                 "Result rows, keyed by column name.", [{"name": "James", "n": 4942431}])
 _GIB = _n("Gibibytes BigQuery scanned; the metered cost basis.", 0.012)
 
+_AVAILABILITY = ["in_stock", "out_of_stock", "preorder", "backorder", "limited", "discontinued", "unknown"]
+
+
+def _b_or_null(description: str, example: bool) -> dict:
+    return {"type": ["boolean", "null"], "description": description, "examples": [example]}
+
+
+_COMMERCE_OPTION = _obj({
+    "name": _s("The option as the page names it.", "Natural Black / 10"),
+    "available": _b_or_null("Purchasable now; null when the page does not say.", True),
+    "availability": _enum(_AVAILABILITY, "Availability of this option.", "in_stock"),
+    "price": _n("Price of this option; null when not stated.", 110.0, nullable=True),
+    "currency": _s("ISO 4217 code; null when not stated.", "USD", nullable=True),
+    "sku": _s("SKU when the page states one.", "WR3MNCW100", nullable=True),
+    "url": _s("Option-specific URL when the page gives one.", "https://example.com/products/wool-runner?variant=10", nullable=True),
+}, ["name", "available", "availability", "price", "currency"], "One purchasable variation.")
+
 _PROBABILITY = _obj({"outcome": _s("Outcome label.", "Yes"),
                      "probability_pct": _n("Implied probability in percent.", 62.5, nullable=True)},
                     ["outcome"], "One outcome and what the market prices it at.")
@@ -600,6 +617,49 @@ OUTPUT_SCHEMAS = {
         "model": _s("Model that summarised the diff; present only when something changed.", "gemini-2.5-flash"),
     }, ["url", "changed", "baseline_age_seconds", "change_summary"]),
 
+    "commerce.availability": _obj({
+        "url": _s("The page checked.", "https://example.com/products/wool-runner"),
+        "final_url": _s("The URL after redirects.", "https://example.com/products/wool-runner", nullable=True),
+        "title": _s("Product or listing name from the page.", "Wool Runner", nullable=True),
+        "available": _b_or_null("Purchasable or bookable right now under the conditions asked; null when the page does not say.", True),
+        "availability": _enum(_AVAILABILITY, "Availability of the option asked for (or of the product when no variant was named).", "in_stock"),
+        "price": _n("Price of the matched option, else the product's; null when not stated.", 110.0, nullable=True),
+        "currency": _s("ISO 4217 currency of `price`; null when not stated.", "USD", nullable=True),
+        "options": _arr(_COMMERCE_OPTION, "Every purchasable variation the page lists (sizes, colours, dates, rooms, fares)."),
+        "options_count": _i("How many options the page lists.", 7),
+        "matched_option": {"type": ["object", "null"],
+                           "description": "The option matching `variant`; null when no variant was asked or none matched.",
+                           "properties": _COMMERCE_OPTION["properties"], "required": _COMMERCE_OPTION["required"]},
+        "variant": _s("The variant asked for, as given.", "size 10", nullable=True),
+        "quantity": _i("The quantity asked for.", 2, nullable=True),
+        "quantity_ok": _b_or_null("Whether that quantity can be ordered; null when the page does not say.", True),
+        "ship_to": _s("The country asked for.", "US", nullable=True),
+        "ship_to_ok": _b_or_null("Whether the page says it delivers there; null when it does not say.", True),
+        "shipping": _s("What the page states about shipping or delivery; null unless stated.",
+                       "Free shipping on orders over $75", nullable=True),
+        "eligibility_notes": _arr(_s("A restriction or caveat the page states, or why a condition could not be checked.",
+                                     "Ships to US, CA and GB only."),
+                                  "Restrictions and caveats, in words.", []),
+        "evidence": _arr(_s("What the answer rests on: a structured-data field or an exact quote from the page.",
+                            "JSON-LD Offer availability https://schema.org/InStock price 110 USD"),
+                         "The evidence behind the answer, best first."),
+        "source": _enum(["jsonld", "shopify", "opengraph", "llm", "none"],
+                        "Which layer answered: the page's JSON-LD, the Shopify product JSON, Open Graph tags, the model over the rendered page, or nothing usable.",
+                        "jsonld"),
+        "javascript_rendered": _b("Whether a real browser had to render the page to answer.", False),
+        "http_status": _i("HTTP status of the page fetch.", 200, nullable=True),
+        "confidence": _enum(["high", "medium", "low"],
+                            "high: exact structured data for the option asked; medium: page-level tags only; low: model reading or nothing found.",
+                            "high"),
+        "checked_at": {"type": "string", "format": "date-time",
+                       "description": "When the page was read (UTC). The answer was true at this moment; nothing here is cached.",
+                       "examples": ["2026-09-26T18:00:00Z"]},
+        "language": _s("BCP-47 tag the prose fields were written in; null for the page's own language.", "en", nullable=True),
+        "model": _s("The model used, only when the model layer ran.", "gemini-2.5-flash", nullable=True),
+    }, ["url", "available", "availability", "price", "currency", "options", "options_count",
+        "matched_option", "quantity_ok", "ship_to_ok", "eligibility_notes", "evidence", "source",
+        "javascript_rendered", "confidence", "checked_at"]),
+
     "security.mcp_inspect": _obj({
         "url": _s("The MCP endpoint inspected.", "https://mcp.example.com/mcp"),
         "reachable": _b("Whether the server answered the MCP initialize handshake.", True),
@@ -722,8 +782,8 @@ RESPONSE_ENVELOPE = {
     "type": "object",
     "description": (
         "The 200 body of every paid /work call. `result` is the worker's own "
-        "output (its schema is per route); everything else is the same on all "
-        "38 routes. A receipt for the job is at `receipt_url`."),
+        "output (its schema is per route); everything else is the same on every "
+        "/work route. A receipt for the job is at `receipt_url`."),
     "properties": {
         "status": _const("ok", "Present only on a delivered result."),
         "worker": _s("Catalog name of the worker that ran.", "market.quote"),
@@ -956,6 +1016,12 @@ REPRESENTATIVE_QUERIES = {
         "has this web page changed since the last check",
         "summarize what changed on a monitored page",
         "diff a URL against its saved baseline",
+    ],
+    "commerce.availability": [
+        "can I buy this product right now and at what price",
+        "is this item in stock in size 10 and does it ship to Japan",
+        "live availability, price and options on a product or booking page",
+        "is this listing out of stock, on preorder or discontinued",
     ],
     "security.mcp_inspect": [
         "inspect an MCP server for auth and which tools can change state",

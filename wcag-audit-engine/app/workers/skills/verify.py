@@ -6,6 +6,7 @@ quote the verdict is decided from.
 from .. import runtime
 from ..providers import gemini
 from . import extract as extract_skill
+from . import llm as llm_skill
 
 MAX_CLAIMS = 10
 MAX_SOURCES = 4
@@ -31,6 +32,7 @@ async def verify_claims(ctx, payload: dict) -> dict:
     if len(sources) > MAX_SOURCES:
         raise runtime.InvalidRequest(f"At most {MAX_SOURCES} sources per call.")
     urls = [extract_skill.validate_url(u, field="sources") for u in sources]
+    system = llm_skill.in_language(_VERIFIER, llm_skill.validate_language(payload))
 
     read, unread = [], []
     for url in urls:
@@ -61,7 +63,7 @@ async def verify_claims(ctx, payload: dict) -> dict:
     )
 
     async def call(provider):
-        return await provider.generate_json(prompt, system=_VERIFIER, temperature=0.0)
+        return await provider.generate_json(prompt, system=system, temperature=0.0)
 
     value = await ctx.run("verify", gemini.PROVIDERS, call, per_attempt_seconds=90)
     parsed = value["json"]
@@ -80,3 +82,4 @@ async def verify_claims(ctx, payload: dict) -> dict:
 
 
 SKILLS = {"verify.claims": verify_claims}
+PRECHECKS = {"verify.claims": llm_skill.validate_language}

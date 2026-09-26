@@ -1,7 +1,7 @@
 # HubVibe
 
-**One node, 43 machine-payable jobs, one price per call, one receipt per job.**
-HubVibe sells work to autonomous agents over HTTP 402: 38 workers under
+**One node, 44 machine-payable jobs, one price per call, one receipt per job.**
+HubVibe sells work to autonomous agents over HTTP 402: 39 workers under
 `/work/*` — LLM inference, live web search and page extraction, Base chain
 reads, spot and prediction-market data, BigQuery analysis and forecasting,
 deterministic regression and probability statistics,
@@ -157,7 +157,7 @@ Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
 The same payment gate sells a wider catalog beside the audits — each worker
 validated for free before any payment is read, never billed for a call that
 produced no result, with per-provider retries, exponential backoff, failover
-and a circuit breaker behind it. All 38 are live on the public node at hubvibe-io.com (`GET /work` lists
+and a circuit breaker behind it. All 39 are live on the public node at hubvibe-io.com (`GET /work` lists
 them, free). On any other deployment a worker whose provider is not
 configured is absent, with a specific reason, until it is.
 
@@ -181,6 +181,7 @@ configured is absent, with a specific reason, until it is.
 | `research.web` / `verify.claims` / `security.mcp_inspect` | $5.00 | Web-search brief with citations; claims-vs-sources fact check; MCP endpoint audit |
 | `research.company` | $10.00 | Company research brief from live web sources, cited |
 | `monitor.snapshot` / `monitor.check` | $0.50 | Baseline a page, then get a diff summary later |
+| `commerce.availability` | $0.50 | Live buy/book check on any product or booking page: availability, price, options, quantity and ship-to eligibility, with evidence and `checked_at` |
 | `maps.places` / `maps.route` / `maps.weather` | $0.10 | Google's managed Maps Grounding Lite MCP server |
 | `video.generate` | $10.00 | Veo, 4-second clip |
 

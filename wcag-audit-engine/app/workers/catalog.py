@@ -15,6 +15,17 @@ calls whose cost was actually measured.
 maxTimeoutSeconds (300, verified live 2026-09-15). A job that cannot finish
 inside the payment window is not sellable synchronously, so nothing here
 exceeds 240s.
+
+ALWAYS CURRENT. No worker serves a stored answer: every call reads its
+source at call time (the router keeps no result cache; monitor.snapshot's
+baseline is the one deliberate exception, and it is the product). A worker
+that reports on the live world carries `checked_at` (UTC) in its result, and
+`as_of` when the source stamps its own data, so a buyer can see when the
+answer was true.
+
+LANGUAGE IS NOT A BARRIER. Every worker whose result contains prose takes
+the optional `language` below (a BCP-47 tag) and answers in it; the rule is
+implemented once, in skills/llm.py, and the composites inherit it.
 """
 
 from typing import Optional
@@ -47,6 +58,16 @@ _URL = {
 def _obj(properties: dict, required: list) -> dict:
     return {"type": "object", "properties": properties, "required": required,
             "additionalProperties": False}
+
+
+_LANGUAGE = {
+    "type": "string", "maxLength": 35,
+    "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+    "description": ("Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose "
+                    "field of the answer is written in this language. Default: the "
+                    "language of the material or question."),
+}
+_URL_LANG = _obj({"url": _URL["properties"]["url"], "language": _LANGUAGE}, ["url"])
 
 
 _POINT = {"oneOf": [
@@ -280,6 +301,7 @@ CATALOG = [
         input_schema=_obj({
             "text": {"type": "string", "description": "Material to analyse."},
             "question": {"type": "string", "description": "What to answer. Optional."},
+            "language": _LANGUAGE,
         }, ["text"]),
         returns="answer, model, tokens{prompt,output}.",
         skill="llm.analyze", max_seconds=150,
@@ -298,6 +320,7 @@ CATALOG = [
             "text": {"type": "string"},
             "fields": {"type": "array", "items": {"type": "string"},
                        "description": "Field names to extract."},
+            "language": _LANGUAGE,
         }, ["text", "fields"]),
         returns="fields{} with one key per requested field.",
         skill="llm.extract", max_seconds=150,
@@ -339,6 +362,7 @@ CATALOG = [
                       "description": "Fully qualified: project.dataset.table."},
             "columns": {"type": "array", "items": {"type": "string"},
                         "description": "Optional column hints."},
+            "language": _LANGUAGE,
         }, ["question", "table"]),
         returns="answer, sql, columns[], rows[], gib_processed.",
         skill="data.question", max_seconds=240,
@@ -360,6 +384,7 @@ CATALOG = [
         input_schema=_obj({
             "url": {"type": "string"},
             "question": {"type": "string", "description": "Optional; defaults to an overview."},
+            "language": _LANGUAGE,
         }, ["url"]),
         returns="brief, title, final_url, source{}, model.",
         skill="research.brief", max_seconds=200,
@@ -379,6 +404,7 @@ CATALOG = [
         input_schema=_obj({
             "url": {"type": "string"},
             "fields": {"type": "array", "items": {"type": "string"}},
+            "language": _LANGUAGE,
         }, ["url", "fields"]),
         returns="fields{} with one key per requested field, plus title and final_url.",
         skill="research.page_facts", max_seconds=200,
@@ -399,6 +425,7 @@ CATALOG = [
             "query": {"type": "string", "description": "Prediction-market topic. Optional."},
             "question": {"type": "string", "description": "Optional analysis question."},
             "limit": {"type": "integer"},
+            "language": _LANGUAGE,
         }, []),
         returns="spot{}, prediction_markets[], analysis, disclaimer.",
         skill="market.intel", max_seconds=200,
@@ -415,7 +442,7 @@ CATALOG = [
             "used, never the model's own memory. Input: query. Use research.web when "
             'you need the sources read in full and a cited brief.'),
         tags=["search", "web", "google", "grounding", "current"],
-        input_schema=_obj({"query": {"type": "string"}}, ["query"]),
+        input_schema=_obj({"query": {"type": "string"}, "language": _LANGUAGE}, ["query"]),
         returns="query, answer, sources[{url,title}], search_queries_used[], model.",
         skill="search.web", max_seconds=60,
         pricing_basis="Provisional. Token usage measured; Google's own search-grounding surcharge is not yet measured here.",
@@ -437,6 +464,7 @@ CATALOG = [
             "temperature": {"type": "number", "description": "0-2, default 0.7."},
             "provider": {"type": "string", "description": "Optional: gemini or anthropic."},
             "model": {"type": "string", "description": "Optional: a specific model from that provider."},
+            "language": _LANGUAGE,
         }, ["prompt"]),
         returns="text, model, provider, finish_reason, usage{input_tokens,output_tokens}.",
         skill="llm.generate", max_seconds=120,
@@ -587,6 +615,7 @@ CATALOG = [
         input_schema=_obj({
             "claims": {"type": "array", "items": {"type": "string"}},
             "sources": {"type": "array", "items": {"type": "string"}},
+            "language": _LANGUAGE,
         }, ["claims", "sources"]),
         returns="claims[], verdicts[{claim,verdict,quote,source_n}], sources_read[], sources_unread[], model.",
         skill="verify.claims", max_seconds=200,
@@ -605,6 +634,7 @@ CATALOG = [
         input_schema=_obj({
             "question": {"type": "string"},
             "max_sources": {"type": "integer", "description": "1-4, default 3."},
+            "language": _LANGUAGE,
         }, ["question"]),
         returns="question, answer, sources[{n,url,title}], partial[], model.",
         skill="research.web", max_seconds=220,
@@ -623,6 +653,7 @@ CATALOG = [
         input_schema=_obj({
             "company": {"type": "string"},
             "max_sources": {"type": "integer", "description": "1-4, default 4."},
+            "language": _LANGUAGE,
         }, ["company"]),
         returns="company, report, sources[{n,url,title}], partial[], model.",
         skill="research.company", max_seconds=220,
@@ -648,12 +679,44 @@ CATALOG = [
         description=(
             'Website change monitoring, step two: re-fetch a page saved with '
             'monitor.snapshot and get whether it changed, how old the baseline is, '
-            'and a written summary of the differences. Input: url.'),
+            'and a written summary of the differences. Input: url, optional '
+            'language.'),
         tags=["monitor", "change-detection", "diff", "web"],
-        input_schema=_URL,
+        input_schema=_URL_LANG,
         returns="url, title, changed, baseline_age_seconds, change_summary, model.",
         skill="monitor.check", max_seconds=150,
         pricing_basis="Provisional. Browser fetch plus one inference call when something changed; usage measured.",
+        requires=("web", "gemini")),
+    # --- live transactional availability -----------------------------------
+    Worker(
+        name="commerce.availability", price_usd=0.50, tier="standard",
+        title="Live availability: can this be bought or booked right now?",
+        description=(
+            'Live buy/book check on any product or booking page: can it be purchased '
+            'right now, at what price, in which options (sizes, colours, dates, rooms), '
+            'which option matches the variant you name, quantity and ship-to '
+            'eligibility where the page states them, with evidence and a checked_at '
+            'stamp. Read at call time: schema.org JSON-LD, Open Graph and Shopify '
+            'product JSON first; a browser render and Gemini only when the page gives '
+            'machines nothing. Input: url; optional variant, quantity, ship_to, language.'),
+        tags=["commerce", "availability", "stock", "price", "booking", "live", "shopping"],
+        input_schema=_obj({
+            "url": {"type": "string", "description": "The product, listing or booking page."},
+            "variant": {"type": "string", "maxLength": 200,
+                        "description": "Optional: the option you want, in words (size 9 natural black; double room 12 Oct; economy)."},
+            "quantity": {"type": "integer", "minimum": 1, "maximum": 100000,
+                         "description": "Optional: how many you need."},
+            "ship_to": {"type": "string", "minLength": 2, "maxLength": 2,
+                        "description": "Optional: ISO 3166-1 alpha-2 country the order ships to."},
+            "language": _LANGUAGE,
+        }, ["url"]),
+        returns=("available, availability, price, currency, options[], matched_option, "
+                 "quantity_ok, ship_to_ok, shipping, eligibility_notes[], evidence[], "
+                 "source, confidence, checked_at."),
+        skill="commerce.availability", max_seconds=200,
+        pricing_basis=("Provisional, standard tier. One or two plain fetches on most pages; "
+                       "a browser render and one inference call only when the page has no "
+                       "structured data; usage measured."),
         requires=("web", "gemini")),
     Worker(
         name="security.mcp_inspect", price_usd=5.00, tier="advanced",
@@ -887,6 +950,10 @@ _EXAMPLE_VALUES = {
 _DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 
 _EXAMPLE_OVERRIDES = {
+    # A live Shopify product page that publishes JSON-LD variants, so the
+    # example runs and returns per-size availability.
+    "commerce.availability": {"url": "https://www.allbirds.com/products/mens-wool-runners",
+                              "variant": "size 10"},
     # Either source is valid, so nothing is `required`; the example shows the
     # inline form with a prediction and a probability query.
     "stats.probability": {"points": [[1, 2.1], [2, 3.9], [3, 6.2], [4, 7.8], [5, 10.1]],
