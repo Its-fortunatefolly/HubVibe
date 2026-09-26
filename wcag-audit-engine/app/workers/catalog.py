@@ -812,7 +812,8 @@ def price_of(path: str) -> Optional[float]:
 _EXAMPLE_VALUES = {
     "url": "https://example.com",
     "address": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd",
-    "hash": "0x" + "ab" * 32,
+    # A real Base transaction (a settled HubVibe sale), so the example runs.
+    "hash": "0x9e61e3fce3efad669a236b8d6a0351162c572808026d1a5ffdededd31caad113",
     "product_id": "BTC-USD",
     "text": "HubVibe sells machine-payable site audits at $0.05 per call.",
     "question": "What does it sell, and at what price?",
@@ -851,6 +852,8 @@ _EXAMPLE_OVERRIDES = {
     # sharing one example would make one of the two look like a mistake.
     "image.generate": {"prompt": "A beehive built from circuit boards, isometric illustration"},
     "video.generate": {"prompt": "A single bee landing on a circuit-board flower, slow motion"},
+    # maps.places shares "query" with search.web; a place search needs a place.
+    "maps.places": {"query": "coffee near the Ferry Building, San Francisco"},
     # AI.FORECAST / AI.DETECT_ANOMALIES need a DATE/TIMESTAMP column (the
     # usa_names `year` is INT64 and is refused); this is a real daily series.
     "data.forecast": {"table": _DAILY_SERIES, "timestamp_col": "date",

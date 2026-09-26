@@ -48,6 +48,9 @@ ALLOWED = {
     # written out in full in the static MCP manifest -- not a key.
     # wcag-audit-engine/app/static/mcp.json
     "0x" + "ab" * 32,
+    # A settled HubVibe sale on Base (public), chain.transaction's example.
+    # wcag-audit-engine/app/workers/catalog.py
+    "0x9e61e3fce3efad669a236b8d6a0351162c572808026d1a5ffdededd31caad113",
 }
 
 # Identifiers that are not credentials but should not sit in a public repo.

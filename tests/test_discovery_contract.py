@@ -173,6 +173,19 @@ def test_work_index_carries_each_workers_output_schema(client):
         assert row["output_schema"] == W.catalog.BY_NAME[row["name"]].output_schema, row["name"]
 
 
+def test_the_bazaar_record_on_a_worker_402_carries_a_body_the_route_runs_on(client):
+    """The input example an agent copies is the catalog's own example, never
+    the literal "example" -- {"product_id": "example"} paid-verified and then
+    failed at execution for an outside buyer (2026-09-24)."""
+    import json
+
+    for worker in W.catalog.live():
+        body = client.post(worker.path, json={}).json()
+        example = body["extensions"]["bazaar"]["info"]["input"]["body"]
+        assert example == W.catalog.example_for(worker), worker.path
+        assert '"example"' not in json.dumps(example), worker.path
+
+
 def test_the_bazaar_record_on_a_worker_402_shows_the_real_response(client):
     """Not `{"status": "ok"}`: the envelope with this worker's result, and
     the schema the library's own discovery validator accepts."""

@@ -659,33 +659,17 @@ class AuthContext:
 
 
 def _worker_input_example(worker) -> dict:
-    """A plausible body for a worker, built from its own JSON Schema.
+    """The body the Bazaar record shows an agent for a worker: the catalog's
+    own example (the one openapi.json and the MCP tools carry), which fills
+    every required field with a value the route runs on.
 
-    The Bazaar record carries an example an agent may generate its first
-    request from, so the example has to satisfy the route's required fields --
-    an example the route would 400 on is worse than none.
+    This used to be generated from the schema, with the literal string
+    "example" in every required string field -- {"product_id": "example"},
+    {"sql": "example"} -- on 27 of the 38 routes. An agent that copied it
+    paid-verified and then failed at execution, as an outside buyer's
+    market.ticker call did on 2026-09-24 (not charged, not delivered).
     """
-    if not worker.input_schema.get("required"):
-        # Nothing is required at the top level because the schema chooses
-        # between alternatives (oneOf); the catalog's own example is the
-        # body that satisfies it, and {} would not.
-        return dict(workers.catalog.example_for(worker))
-    example = {}
-    properties = worker.input_schema.get("properties") or {}
-    for field in worker.input_schema.get("required") or []:
-        spec = properties.get(field) or {}
-        kind = spec.get("type")
-        if kind == "array":
-            example[field] = ["example"]
-        elif kind == "integer":
-            example[field] = 10
-        elif kind == "number":
-            example[field] = 1.0
-        elif field in ("url", "final_url"):
-            example[field] = "https://example.com"
-        else:
-            example[field] = "example"
-    return example
+    return dict(workers.catalog.example_for(worker))
 
 
 def _bazaar_extension_for_path(path: Optional[str]) -> dict:
