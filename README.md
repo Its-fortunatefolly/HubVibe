@@ -231,6 +231,15 @@ Only a job that produced a result.
   bundled `hubvibe_tollbooth.py` keeps it as `last_settlement`.
 - One signed payment buys one job. A replayed x402 authorization is
   refused with a 402 before it reaches the facilitator.
+- Before paying, `GET /contracts/{capability}` (free) is the Purchase
+  Verification Contract: the exact capability, its input and output
+  schemas, price, and every rail's network, asset and pay-to, from the same
+  catalog the 402 charges from, under one `contract_hash`. The 402 names
+  it. `POST /contracts/{capability}/verify` checks your expected terms and
+  your request body. A paid request carrying `X-HubVibe-Contract:
+  <contract_hash>` is refused before any payment is touched if the route
+  no longer sells that contract. The bundled router does all of this
+  before it signs anything.
 - Every result is checked against the route's published output schema
   (`openapi.json`, the MCP `outputSchema`, the 402's Bazaar record, the A2A
   skill) before it is billed. A result that does not match is not delivered

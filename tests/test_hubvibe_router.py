@@ -72,6 +72,11 @@ class FakeNode:
             def do_GET(self):
                 if self.path == "/work":
                     return self._send(200, {"count": len(node.prices), "workers": []})
+                if self.path.startswith("/contracts/"):
+                    route = self.path[len("/contracts"):]
+                    if route not in node.prices or route in node.no_contract:
+                        return self._send(404, {"status": "error", "reason": "unknown_capability"})
+                    return self._send(200, node.contract_for(route))
                 return self._send(404, {"detail": "Not Found"})
 
             def do_POST(self):
@@ -79,17 +84,33 @@ class FakeNode:
                 body = json.loads(self.rfile.read(length) or b"{}")
                 if self.path == "/a2a":
                     return self._a2a(body)
+                if self.path.startswith("/contracts/") and self.path.endswith("/verify"):
+                    route = self.path[len("/contracts"):-len("/verify")]
+                    if route not in node.prices:
+                        return self._send(404, {"status": "error", "reason": "unknown_capability"})
+                    node.verify_requests.append((route, body))
+                    mismatches = []
+                    if body.get("input") is not None and node.reject_input:
+                        mismatches.append({"field": "input", "actual": "rejected by the fake"})
+                    return self._send(200, {"capability": route, "contract_hash": node.contract_for(route)["contract_hash"],
+                                            "verified": not mismatches, "mismatches": mismatches, "checks": []})
                 price = node.prices.get(self.path)
                 if price is None:
                     return self._send(404, {"detail": "Not Found"})
                 paid = self.headers.get("PAYMENT-SIGNATURE")
+                if paid:
+                    node.paid_headers.append(dict(self.headers))
+                    bound = self.headers.get("X-HubVibe-Contract")
+                    if bound and bound != node.contract_for(self.path)["contract_hash"]:
+                        return self._send(402, {"error": "contract_mismatch", "price_usd": price, "billed": False})
                 if price > 0 and (not paid or node.refuse_payment):
+                    quoted = price + 0.01 if node.tamper_price else price
                     challenge = {"x402Version": 2, "accepts": [
-                        {"scheme": "exact", "network": "eip155:8453", "amount": str(int(price * 1_000_000)),
-                         "payTo": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd", "asset": "0x8335"},
+                        {"scheme": "exact", "network": "eip155:8453", "amount": str(int(quoted * 1_000_000)),
+                         "payTo": node.tamper_payto or "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd", "asset": "0x8335"},
                         {"scheme": "exact", "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
                          "amount": str(int(price * 1_000_000)), "payTo": "J1K4", "asset": "EPjF"}]}
-                    return self._send(402, {"error": "payment_required", "price_usd": price,
+                    return self._send(402, {"error": "payment_required", "price_usd": quoted,
                                             "detail": "facilitator refused" if paid else "pay first"},
                                       {"PAYMENT-REQUIRED": _b64(challenge)})
                 node.executions.append((self.path, body))
@@ -124,7 +145,8 @@ class FakeNode:
                     md = {"x402.payment.status": "payment-failed" if paid else "payment-required",
                           "x402.payment.required": {"x402Version": 2, "price_usd": price, "accepts": [
                               {"scheme": "exact", "network": "eip155:8453", "amount": str(int(price * 1_000_000)),
-                               "payTo": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd", "asset": "0x8335"}]}}
+                               "payTo": node.tamper_payto or "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd",
+                               "asset": "0x8335"}]}}
                     if paid:
                         md["x402.payment.error"] = "SETTLEMENT_FAILED"
                     return self._send(200, {"jsonrpc": "2.0", "id": rpc["id"], "result": {"task": {
@@ -153,9 +175,37 @@ class FakeNode:
                 pass
 
         self.a2a_requests = []
+        self.verify_requests = []
+        self.paid_headers = []
+        self.tamper_payto = None
+        self.tamper_price = False
+        self.reject_input = False
+        self.no_contract = set()
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.url = "http://127.0.0.1:%d" % self.httpd.server_address[1]
+
+    def contract_for(self, route: str) -> dict:
+        """The node's purchase contract for a route: the shape hubvibe-io.com
+        serves at /contracts/{capability}, with the terms the fake's 402 offers."""
+        price = self.prices[route]
+        amount = str(int(price * 1_000_000))
+        return {
+            "contract_version": "1",
+            "capability": {"id": route.replace("/work/", "").replace("/", "."), "path": route,
+                           "url": self.url + route, "method": "POST"},
+            "provider": {"name": "HubVibe", "base_url": self.url},
+            "input_schema": {"type": "object"},
+            "output_schema": {"type": "object"},
+            "price": {"usd": price, "currency": "USD"},
+            "payment": {"rails": [
+                {"protocol": "x402", "x402_version": 2, "network": "eip155:8453", "asset": "0x8335",
+                 "pay_to": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd", "amount_atomic": amount},
+                {"protocol": "x402", "x402_version": 2, "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                 "asset": "EPjF", "pay_to": "J1K4", "amount_atomic": amount},
+            ]},
+            "contract_hash": "sha256:fake-" + route.strip("/").replace("/", "-"),
+        }
 
     def close(self):
         self.httpd.shutdown()
@@ -381,6 +431,88 @@ def test_every_catalog_name_and_mcp_tool_name_routes_to_its_own_path():
         assert R.Router.route_for(tool) == worker.path, tool
     for audit in ("wcag", "seo", "security", "performance", "bundle"):
         assert R.Router.route_for("audit_" + audit) == "/audit/" + audit
+
+
+# --- VERIFY before PAY ----------------------------------------------------------------
+
+
+def test_a_purchase_is_verified_against_the_contract_before_anything_is_signed(router, node):
+    out = router.call("/work/market/quote", {"product_id": "BTC-USD"})
+    assert out["status"] == "ok"
+    # The node checked the body against the input schema before the signature existed...
+    assert node.verify_requests == [("/work/market/quote", {"input": {"product_id": "BTC-USD"}})]
+    # ...and the paid request was bound to the contract that was verified.
+    assert node.paid_headers[-1].get("X-HubVibe-Contract") == node.contract_for("/work/market/quote")["contract_hash"]
+    assert router.signed == [(node.url + "/work/market/quote", 0.02)]
+
+
+def test_a_402_whose_pay_to_differs_from_the_contract_is_never_signed(router, node):
+    node.tamper_payto = "0x000000000000000000000000000000000000dEaD"
+    with pytest.raises(R.VerificationFailed) as err:
+        router.call("/work/market/quote", {"product_id": "BTC-USD"})
+    assert "payTo" in str(err.value)
+    assert router.signed == [] and router.spent_usd == 0.0 and node.paid_headers == []
+
+
+def test_a_402_whose_price_differs_from_the_contract_is_never_signed(router, node):
+    node.tamper_price = True
+    with pytest.raises(R.VerificationFailed) as err:
+        router.call("/work/market/quote", {"product_id": "BTC-USD"})
+    assert "quotes" in str(err.value)
+    assert router.signed == [] and node.paid_headers == []
+
+
+def test_a_body_the_node_rejects_against_the_input_schema_is_never_paid_for(router, node):
+    node.reject_input = True
+    with pytest.raises(R.VerificationFailed):
+        router.call("/work/market/quote", {"product_id": "BTC-USD"})
+    assert router.signed == [] and node.paid_headers == []
+
+
+def test_a_capability_without_a_contract_is_never_paid_for(router, node):
+    node.prices["/work/no/contract"] = 0.02
+    node.no_contract.add("/work/no/contract")
+    with pytest.raises(R.VerificationFailed) as err:
+        router.call("/work/no/contract", {})
+    assert "sells no capability" in str(err.value)
+    assert router.signed == [] and node.paid_headers == []
+
+
+def test_verify_alone_is_free_and_reports_the_contract(router, node):
+    result = router.verify("market.quote", {"product_id": "BTC-USD"}, expect={"price_usd": 0.02})
+    assert result["verification"]["verified"] is True
+    assert result["contract"]["capability"]["path"] == "/work/market/quote"
+    assert router.signed == [] and node.executions == []
+
+
+def test_a2a_purchases_are_verified_the_same_way(router, node):
+    node.tamper_payto = "0x000000000000000000000000000000000000dEaD"
+    with pytest.raises(R.VerificationFailed):
+        router.a2a("market.quote", {"product_id": "BTC-USD"})
+    assert router.signed == [] and router.spent_usd == 0.0
+    node.tamper_payto = None
+    out = router.a2a("market.quote", {"product_id": "BTC-USD"})
+    assert out["status"] == "ok" and router.signed == [("a2a", 0.02)]
+
+
+def test_the_proxy_verifies_on_request_and_refuses_a_bad_purchase(router, node):
+    import socket
+
+    def free_port():
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+    port = free_port()
+    threading.Thread(target=R.serve, args=(router, "127.0.0.1", port), daemon=True).start()
+    time.sleep(0.3)
+    with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=10) as agent:
+        ok = agent.post("/router/verify", json={"tool": "market.quote", "body": {"product_id": "BTC-USD"}})
+        assert ok.status_code == 200 and ok.json()["verification"]["verified"] is True
+        contract = agent.get("/contracts/work/market/quote")
+        assert contract.status_code == 200 and contract.json()["capability"]["path"] == "/work/market/quote"
+        node.tamper_payto = "0x000000000000000000000000000000000000dEaD"
+        refused = agent.post("/work/market/quote", json={"product_id": "BTC-USD"})
+        assert refused.status_code == 409 and refused.json()["reason"] == "verification_failed"
+        assert node.paid_headers == []
 
 
 # --- the same job over A2A --------------------------------------------------------
