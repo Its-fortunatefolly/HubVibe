@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """HubVibe Router -- the buyer-side gateway an agent runs on its own machine.
 
-What it does, in one loop, for any of the node's paid routes (the 37
-/work/* workers and the /audit/* checks):
+What it does, in one loop, for any of the node's paid routes (the 38
+/work/* workers and the /audit/* checks), over plain HTTP or over the
+node's A2A endpoint:
 
   1. POST the request to hubvibe-io.com. A 200 is the result.
   2. On 402, clear it locally: sign the payment with the agent's OWN wallet
@@ -31,9 +32,12 @@ the files named below):
     client = HubVibeRouter(endpoint="https://hubvibe-io.com", wallet_type="base")
     response = client.execute_task(tool="stats.probability", payload={...})
 
-`tool` is a catalog name ("stats.probability", "market.quote") or a route
+`tool` is a catalog name ("stats.probability", "market.quote"), an MCP tool
+name ("hubvibe_market_quote", "audit_wcag") or a route
 ("/work/stats/probability", "/audit/wcag"); `payload` is the route's JSON
-body. `wallet_type` is "base" or "solana". `response` is the node's
+body. `client.a2a("market.quote", {...})` buys the same job through the
+node's A2A endpoint (/a2a, JSON-RPC SendMessage) and clears the a2a-x402
+payment task the same way; the delivered body is identical. `wallet_type` is "base" or "solana". `response` is the node's
 delivered body: status, worker, price_usd, result, provenance, receipt_url.
 
 The same object under its plain name:
@@ -48,6 +52,7 @@ it and it never has to know x402 exists):
 
     python hubvibe_router.py serve --port 8402
     curl -X POST http://127.0.0.1:8402/work/market/quote -d '{"product_id":"BTC-USD"}'
+    curl -X POST http://127.0.0.1:8402/a2a -d '{"skill":"market.quote","arguments":{"product_id":"BTC-USD"}}'
 
 Configuration (environment; a CLI flag of the same name overrides it)
 --------------------------------------------------------------------
@@ -92,12 +97,14 @@ from typing import Any, Optional
 
 import httpx
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 _ATOMIC_PER_USD = 1_000_000  # USDC has 6 decimals on Base and on Solana
 _DEFAULT_CACHE_PATHS = ("/work/data/", "/work/stats/")
 _FREE_GET_PATHS = ("/work", "/work/receipts/", "/.well-known/", "/openapi.json",
                    "/mcp.json", "/llms.txt", "/health")
+_A2A_X402_EXTENSION = "https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2"
+_A2A_VERSION = "1.0"
 
 
 # --- errors: machine-readable, never carrying a local path -------------------
@@ -204,6 +211,7 @@ class Router:
         self.timeout = timeout
         self._http = httpx.Client(timeout=timeout, headers={"User-Agent": user_agent})
         self._x402_http = None
+        self._x402_core = None
         self._lock = threading.Lock()
         self._spent_usd = 0.0
         self.home.mkdir(parents=True, exist_ok=True)
@@ -288,6 +296,7 @@ class Router:
                 raise NotConfigured("Solana rail needs: pip install 'x402[svm]'") from exc
             register_exact_svm_client(client, KeypairSigner(Keypair.from_base58_string(self._solana_key)),
                                       policies=[max_amount(cap_atomic)], rpc_url=self.solana_rpc)
+        self._x402_core = client
         self._x402_http = x402HTTPClientSync(client)
         return self._x402_http
 
@@ -296,6 +305,17 @@ class Router:
         rail. Produced by the official client; nothing here touches the key."""
         headers, _payload = self._x402().handle_402_response(dict(response.headers), response.content, url)
         return dict(headers)
+
+    def _sign_challenge(self, required: dict) -> dict:
+        """The signed PaymentPayload for a v2 PaymentRequired object -- the
+        challenge an A2A task carries in x402.payment.required. Same client,
+        same key handling as _sign; the payload goes back in message metadata
+        rather than a header."""
+        self._x402()
+        from x402.schemas import PaymentRequired
+
+        payload = self._x402_core.create_payment_payload(PaymentRequired.model_validate(required))
+        return payload.model_dump(by_alias=True, exclude_none=True)
 
     # ---- caps ------------------------------------------------------------------
 
@@ -432,15 +452,25 @@ class Router:
 
     @staticmethod
     def route_for(tool: str) -> str:
-        """A catalog name or a route, to the route: "stats.probability" ->
-        /work/stats/probability, "audit.wcag" -> /audit/wcag, a path is kept."""
+        """A catalog name, an MCP tool name or a route, to the route:
+        "stats.probability" and "hubvibe_predictive_probability_engine" ->
+        /work/stats/probability, "research.page_facts" and
+        "hubvibe_research_page_facts" -> /work/research/page_facts,
+        "audit.wcag" and "audit_wcag" -> /audit/wcag; a path is kept."""
         tool = tool.strip()
         if tool.startswith("/"):
             return tool
-        if tool.startswith("audit."):
-            return "/audit/" + tool.split(".", 1)[1]
+        if tool == "hubvibe_predictive_probability_engine":
+            return "/work/stats/probability"
+        if tool.startswith("audit.") or tool.startswith("audit_"):
+            return "/audit/" + tool[len("audit."):]
         if tool in ("bundle", "wcag", "seo", "security", "performance"):
             return "/audit/" + tool
+        if tool.startswith("hubvibe_"):
+            # MCP tool names are hubvibe_<group>_<name>; only the first
+            # underscore splits the group (security_mcp_inspect stays whole).
+            group, _, name = tool[len("hubvibe_"):].partition("_")
+            return f"/work/{group}/{name}" if name else f"/work/{group}"
         return "/work/" + tool.replace(".", "/")
 
     def execute_task(self, tool: str, payload: Any = None, *, use_cache: bool = True) -> dict:
@@ -499,6 +529,135 @@ class Router:
             self._cache_put(key, path, payload)
             payload = {**payload, "router": {"cache": "miss", "ttl_seconds": self.cache_ttl}}
         return payload
+
+    # ---- the same job over A2A ------------------------------------------------
+
+    def a2a(self, skill: str, arguments: Any = None, *, use_cache: bool = True) -> dict:
+        """Buy one skill through the node's A2A endpoint (JSON-RPC SendMessage
+        at /a2a, A2A 1.0) and return the delivered body -- the same envelope
+        `call` returns for the route.
+
+        The a2a-x402 standalone flow, cleared locally: an unpaid SendMessage
+        comes back as a task in input-required with the v2 challenge in its
+        metadata; the payload is signed here and sent back in a second
+        message on the same task; the completed task's artifact is the
+        result and its metadata carries the settlement receipt. A prepaid
+        key (HUBVIBE_API_KEY) completes on the first message. Caps, cache
+        and ledger are the ones `call` uses.
+        """
+        path = self.route_for(skill)
+        body = arguments if arguments is not None else {}
+        key = self.cache_key(path, body) if (use_cache and self.cacheable(path)) else None
+        if key:
+            hit = self._cache_get(key)
+            if hit is not None:
+                payload = hit["payload"]
+                if isinstance(payload, dict):
+                    payload = {**payload, "router": {"cache": "hit", "age_seconds": hit["age_seconds"], "ttl_seconds": self.cache_ttl}}
+                return payload
+
+        task = self._a2a_send(path, skill, body)
+        price, settlement = 0.0, None
+        metadata = self._a2a_metadata(task)
+        if task["state"] == "TASK_STATE_INPUT_REQUIRED" and metadata.get("x402.payment.status") == "payment-required":
+            required = metadata.get("x402.payment.required") or {}
+            price = self._price_of_challenge(required)
+            if price is None:
+                raise PaymentRefused("the A2A task asked for payment without a readable price", path=path)
+            self._check_caps(price, path)
+            try:
+                signed = self._sign_challenge(required)
+            except RouterError:
+                raise
+            except Exception as exc:
+                raise PaymentRefused(f"could not sign the payment: {type(exc).__name__}: {str(exc)[:160]}", path=path, price_usd=price)
+            task = self._a2a_send(path, skill, body, task_id=task["id"], payment=signed)
+            metadata = self._a2a_metadata(task)
+            if metadata.get("x402.payment.status") in ("payment-failed", "payment-rejected") \
+                    or task["state"] == "TASK_STATE_INPUT_REQUIRED":
+                self._record({"path": path, "price_usd": price, "rail": self.rail, "settled": False,
+                              "outcome": "refused", "detail": task["text"][:200], "transport": "a2a"})
+                raise PaymentRefused(f"payment refused: {task['text'][:200]}", path=path, price_usd=price)
+            receipts = metadata.get("x402.payment.receipts") or []
+            settlement = receipts[0] if receipts and isinstance(receipts[0], dict) else None
+
+        if task["state"] != "TASK_STATE_COMPLETED":
+            raise Upstream(f"A2A task {task['state']}: {task['text'][:200]}", path=path,
+                           http_status=502, billed=False, task_id=task["id"])
+        payload = task["data"] if task["data"] is not None else {"status": "ok", "text": task["text"]}
+        if price:
+            with self._lock:
+                self._spent_usd += price
+            self._record({"path": path, "price_usd": price, "rail": self.rail, "settled": True,
+                          "tx": (settlement or {}).get("transaction"), "payer": (settlement or {}).get("payer"),
+                          "receipt_url": payload.get("receipt_url") if isinstance(payload, dict) else None,
+                          "transport": "a2a", "task_id": task["id"]})
+        if key and isinstance(payload, dict):
+            self._cache_put(key, path, payload)
+            payload = {**payload, "router": {"cache": "miss", "ttl_seconds": self.cache_ttl}}
+        return payload
+
+    def _a2a_send(self, path: str, skill: str, arguments: Any, *, task_id: Optional[str] = None,
+                  payment: Optional[dict] = None) -> dict:
+        """One SendMessage; the task it returns, flattened to id, state, text,
+        metadata and the first artifact's data."""
+        message: dict = {"messageId": f"m-{int(time.time() * 1000)}", "role": "ROLE_USER",
+                         "parts": [{"data": {"skill": skill, "arguments": arguments}}]}
+        if task_id:
+            message["taskId"] = task_id
+        if payment is not None:
+            message["metadata"] = {"x402.payment.status": "payment-submitted", "x402.payment.payload": payment}
+        headers = {"Content-Type": "application/json", "A2A-Version": _A2A_VERSION,
+                   "A2A-Extensions": _A2A_X402_EXTENSION, **self._headers()}
+        response = self._http.post(self.base_url + "/a2a", headers=headers, json={
+            "jsonrpc": "2.0", "id": message["messageId"], "method": "SendMessage",
+            "params": {"message": message}})
+        if response.status_code != 200:
+            raise Upstream(f"HTTP {response.status_code} from /a2a: {self._short_error(response)}",
+                           path=path, http_status=response.status_code, billed=False)
+        body = self._safe_json(response)
+        if not isinstance(body, dict):
+            raise Upstream("non-JSON-RPC answer from /a2a", path=path, http_status=502, billed=False)
+        if "error" in body:
+            err = body["error"] if isinstance(body["error"], dict) else {"message": str(body["error"])}
+            raise Upstream(f"A2A error {err.get('code')}: {err.get('message')}", path=path,
+                           http_status=502, billed=False, a2a_code=err.get("code"))
+        result = body.get("result") or {}
+        task = result.get("task") if isinstance(result, dict) and "task" in result else result
+        if not isinstance(task, dict) or "status" not in task:
+            raise Upstream("A2A answered with a message, not a task; name a skill the card lists",
+                           path=path, http_status=502, billed=False)
+        status = task.get("status") or {}
+        agent_message = status.get("message") or {}
+        text = " ".join(str(p.get("text")) for p in (agent_message.get("parts") or [])
+                        if isinstance(p, dict) and p.get("text"))
+        data = None
+        for artifact in task.get("artifacts") or []:
+            for part in (artifact.get("parts") or []):
+                if isinstance(part, dict) and isinstance(part.get("data"), dict):
+                    data = part["data"]
+                    break
+            if data is not None:
+                break
+        return {"id": task.get("id"), "state": status.get("state"), "text": text,
+                "metadata": agent_message.get("metadata") or {}, "data": data}
+
+    @staticmethod
+    def _a2a_metadata(task: dict) -> dict:
+        return task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+
+    @staticmethod
+    def _price_of_challenge(required: dict) -> Optional[float]:
+        if required.get("price_usd") is not None:
+            try:
+                return float(required["price_usd"])
+            except (TypeError, ValueError):
+                pass
+        for accepted in required.get("accepts") or []:
+            amount = accepted.get("amount") or accepted.get("maxAmountRequired")
+            if amount is not None:
+                return int(amount) / _ATOMIC_PER_USD
+        return None
 
     def get(self, path: str) -> Any:
         """A free GET on the node (discovery, receipts, health)."""
@@ -605,6 +764,13 @@ def serve(router: Router, host: str = "127.0.0.1", port: int = 8402) -> None:
                 return self._send(200, {"status": "ok", "cleared": router.cache_clear()})
             use_cache = self.headers.get("X-HubVibe-Cache", "").lower() != "bypass"
             try:
+                if path == "/a2a":
+                    # {"skill": ..., "arguments": {...}} -> the same job over the
+                    # node's A2A endpoint, payment task cleared here.
+                    if not isinstance(body, dict) or not isinstance(body.get("skill"), str):
+                        return self._send(400, {"status": "error", "reason": "invalid_request",
+                                                "detail": 'body must be {"skill": "<name>", "arguments": {...}}'})
+                    return self._send(200, router.a2a(body["skill"], body.get("arguments") or {}, use_cache=use_cache))
                 return self._send(200, router.call(path, body, use_cache=use_cache))
             except CapExceeded as exc:
                 return self._send(402, exc.as_json())
@@ -644,6 +810,9 @@ def _cli(argv: Optional[list] = None) -> int:
     p_call = sub.add_parser("call", help="buy one job (pays if the node asks)")
     p_call.add_argument("path"); p_call.add_argument("body", nargs="?", default="{}")
     p_call.add_argument("--no-cache", action="store_true")
+    p_a2a = sub.add_parser("a2a", help="buy one skill over the node's A2A endpoint")
+    p_a2a.add_argument("skill"); p_a2a.add_argument("body", nargs="?", default="{}")
+    p_a2a.add_argument("--no-cache", action="store_true")
     p_serve = sub.add_parser("serve", help="local proxy for agents")
     p_serve.add_argument("--host", default="127.0.0.1"); p_serve.add_argument("--port", type=int, default=8402)
     sub.add_parser("status", help="wallet, caps, spend")
@@ -659,6 +828,8 @@ def _cli(argv: Optional[list] = None) -> int:
             print(json.dumps(router.quote(args.path, json.loads(args.body)), indent=2))
         elif args.cmd == "call":
             print(json.dumps(router.call(args.path, json.loads(args.body), use_cache=not args.no_cache), indent=2, default=str))
+        elif args.cmd == "a2a":
+            print(json.dumps(router.a2a(args.skill, json.loads(args.body), use_cache=not args.no_cache), indent=2, default=str))
         elif args.cmd == "serve":
             serve(router, args.host, args.port)
         elif args.cmd == "status":

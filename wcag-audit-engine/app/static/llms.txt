@@ -43,7 +43,7 @@ nothing is billed -- the limit is checked before any payment is settled.
 
 ## Endpoints
 
-All endpoints below are POST, priced per call, and accept a Stripe API
+All endpoints below are POST, priced per call, and accept a prepaid API
 key, an x402 on-chain payment, or an MPP (Machine Payments Protocol)
 payment. There is no free tier and no unauthenticated access: every audit
 costs a real browser page load, so every audit is paid for.
@@ -122,18 +122,18 @@ Utility (one live read, $0.02-$0.10):
   code (unlike extract/page, a 404/500 from the target is a result)
 - POST /work/search/web -- live web search, grounded via Gemini's Google
   Search tool
-- POST /work/maps/places -- search places via Google's managed Maps
-  Grounding Lite MCP server (needs an operator-set key)
-- POST /work/maps/route -- directions between two places (same server)
-- POST /work/maps/weather -- weather at a named place (same server)
+- POST /work/maps/places -- places search by free-text query (Google Maps
+  Grounding Lite)
+- POST /work/maps/route -- directions and travel time between two places
+- POST /work/maps/weather -- current or forecast weather at a named place
 
 Standard (inference and data, $0.25-$0.50):
 - POST /work/llm/analyze -- answer a question from text you supply, saying
   so when the text does not contain the answer (Gemini)
 - POST /work/llm/extract -- named fields from text as JSON, null when not
   stated (Gemini)
-- POST /work/llm/generate -- raw completion, your prompt and model choice
-  (Gemini; Claude via Vertex Model Garden once enabled)
+- POST /work/llm/generate -- raw completion from your prompt; Gemini by
+  default, provider and model selectable
 - POST /work/code/execute -- run Python in Google's own hosted sandbox
 - POST /work/stats/probability -- deterministic linear regression, normal
   distribution model and p-values over [x, y] points or two BigQuery columns
