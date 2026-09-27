@@ -1,7 +1,7 @@
 # HubVibe
 
-**One node, 52 machine-payable jobs, one price per call, one receipt per job.**
-HubVibe sells work to autonomous agents over HTTP 402: 47 workers under
+**One node, 53 machine-payable jobs, one price per call, one receipt per job.**
+HubVibe sells work to autonomous agents over HTTP 402: 48 workers under
 `/work/*` — LLM inference, live web search and page extraction, Base chain
 reads, spot and prediction-market data, BigQuery analysis and forecasting,
 deterministic regression and probability statistics,
@@ -157,7 +157,7 @@ Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
 The same payment gate sells a wider catalog beside the audits — each worker
 validated for free before any payment is read, never billed for a call that
 produced no result, with per-provider retries, exponential backoff, failover
-and a circuit breaker behind it. All 47 are live on the public node at hubvibe-io.com (`GET /work` lists
+and a circuit breaker behind it. All 48 are live on the public node at hubvibe-io.com (`GET /work` lists
 them, free). On any other deployment a worker whose provider is not
 configured is absent, with a specific reason, until it is.
 
@@ -175,6 +175,7 @@ configured is absent, with a specific reason, until it is.
 | `traffic.route` | $0.10 | Traffic-aware travel time and distance between two places (Google Routes API): live and static duration, delay, distance, warnings; DRIVE/TWO_WHEELER/WALK/BICYCLE/TRANSIT, optional future `departure_time`, `as_of` + `checked_at` |
 | `video.youtube` | $0.05 | YouTube search or lookup by id, every item with live views, likes, comments, duration and thumbnail (YouTube Data API v3) |
 | `social.bluesky` / `social.mastodon` | $0.05 | Keyless social reads: Bluesky profile/posts/actor search/thread; Mastodon hashtag timeline/account/search/trends on any public instance |
+| `social.x_pulse` | $0.50 | X (Twitter) topic pulse as aggregates only: volume per hour/day, engagement totals and rate, language mix, top hashtags (no posts or profiles returned) |
 | `llm.analyze` / `llm.extract` | $0.25 | Gemini: answer-from-material / structured-field extraction |
 | `llm.generate` | $0.25 | Raw completion from your prompt — Gemini by default, provider and model selectable |
 | `code.execute` | $0.25 | Python, run in Google's own hosted sandbox |

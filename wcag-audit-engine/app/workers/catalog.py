@@ -1009,6 +1009,34 @@ CATALOG = [
         pricing_basis="Provisional. Provider cost zero (public instance API); two requests at most.",
         requires=("mastodon",)),
     Worker(
+        name="social.x_pulse", price_usd=0.50, tier="standard",
+        title="X (Twitter) topic pulse: volume and engagement as aggregates",
+        description=(
+            'What X (Twitter) is saying about a topic, as numbers only, live: post '
+            'volume per hour or day over the last 1-7 days, and over a sample of recent '
+            'posts the engagement totals, averages and rate (likes, reposts, replies, '
+            'quotes, impressions), language mix, top hashtags and link/media share. '
+            'Aggregates only: no post text, ids, authors or profiles are returned. '
+            'Input: query (X operators allowed); optional days, granularity, sample '
+            '(0-100 posts read), lang, include_retweets.'),
+        tags=["x", "twitter", "social", "engagement", "trend", "volume", "aggregate", "live"],
+        input_schema=_obj({
+            "query": {"type": "string", "minLength": 1, "maxLength": 400,
+                      "description": "Words or X search operators (\"machine learning\" from:nasa has:links)."},
+            "days": {"type": "integer", "minimum": 1, "maximum": 7, "description": "Window ending now, default 7 (X's recent limit)."},
+            "granularity": {"type": "string", "enum": ["hour", "day"], "description": "Volume buckets, default day."},
+            "sample": {"type": "integer", "minimum": 0, "maximum": 100,
+                       "description": "Recent posts read for the engagement aggregates, default 40; 0 = volume only."},
+            "lang": {"type": "string", "minLength": 2, "maxLength": 2, "description": "Restrict to a language (en, ja...)."},
+            "include_retweets": {"type": "boolean", "description": "Default false: reposts are excluded from volume and sample."},
+        }, ["query"]),
+        returns=("query, effective_query, window{}, granularity, volume{total, buckets[]}, sample{requested, read, "
+                 "pages, x_cost_usd}, engagement{likes_total, ..., languages{}, top_hashtags[]}, source, as_of, checked_at."),
+        skill="social.x_pulse", max_seconds=60,
+        pricing_basis=("Provisional, standard tier. X bills $0.005 per post read (the sample, max $0.50) and "
+                       "nothing for recent counts; measured per call."),
+        requires=("x_api",)),
+    Worker(
         name="security.mcp_inspect", price_usd=5.00, tier="advanced",
         title="Inspect an MCP endpoint",
         description=(
@@ -1244,6 +1272,7 @@ _EXAMPLE_OVERRIDES = {
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},
+    "social.x_pulse": {"query": "open source", "days": 3, "sample": 20, "lang": "en"},
     "social.mastodon": {"mode": "hashtag", "tag": "opensource", "limit": 3},
     "opendata.search": {"query": "人口", "region": "jp", "limit": 5},
     "market.stock": {"symbol": "AAPL", "range": "1mo"},

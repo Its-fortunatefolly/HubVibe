@@ -180,6 +180,10 @@ Standard (inference and data, $0.25-$0.50):
 - POST /work/monitor/snapshot -- save a page as a baseline to check later
 - POST /work/monitor/check -- re-fetch a baselined page and get a change
   summary
+- POST /work/social/x_pulse -- X (Twitter) topic pulse as aggregates only:
+  post volume per hour/day over 1-7 days, engagement totals and rate,
+  language mix, top hashtags over a capped sample (no posts, ids, authors
+  or profiles are returned, by HubVibe's X developer agreement)
 - POST /work/commerce/availability -- can this be bought or booked right
   now? Live check of any product or booking page: availability, price,
   options, the one matching your variant, quantity and ship-to eligibility,
