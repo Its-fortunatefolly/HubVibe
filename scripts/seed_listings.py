@@ -94,6 +94,7 @@ ROUTES = [
         "url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10"}),
     ("utility", "/work/opendata/search", {"query": "인구", "region": "kr", "limit": 3}),
     ("utility", "/work/opendata/table", {"url": "https://www.data.go.kr/data/15005995/fileData.do", "max_rows": 5}),
+    ("standard", "/work/search/results", {"query": "東京 天気予報", "country": "JP", "language": "ja", "count": 5}),
     ("standard", "/work/news/search", {"query": "半導体", "language": "ja", "limit": 5}),
     ("utility", "/work/data/macro", {"indicator": "inflation", "country": "JP", "last": 5}),
     ("standard", "/work/commerce/shipping", {"url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10", "ship_to": {"country": "US", "province": "NY", "postal_code": "10001"}}),

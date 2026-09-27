@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -13152,6 +13152,533 @@
         "method": "POST",
         "path": "/work/opendata/table",
         "price_usd": 0.1
+      }
+    },
+    {
+      "name": "hubvibe_search_results",
+      "title": "Web and news results in any language and country (Brave index)",
+      "description": "Independent web and news results for a query from Brave's own index, in any language and country: title, URL, description, age and extra snippets for the web; headline, source and age for news. Use language for the search language and interface, country for the market, freshness to keep to the last day, week, month or year. Results, not an answer: pick what to read next with fetch.raw or extract.page. Input: query; optional country, language, count, freshness, news, safesearch. $0.25 per call. Returns: query, country, language, freshness, web[{title, url, description, age, page_age, language, site_name, hostname, extra_snippets[]}], web_count, news[{title, url, description, age, page_age, source, breaking}], news_count, more_results_available, source, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400,
+            "description": "Words to search for, in any language."
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2}$",
+            "description": "Market, ISO 3166-1 alpha-2 (US, JP, DE). Default: the engine's."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Results per block, default 10."
+          },
+          "freshness": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month",
+              "year"
+            ],
+            "description": "Only results from this window."
+          },
+          "news": {
+            "type": "boolean",
+            "description": "Include news results. Default true."
+          },
+          "safesearch": {
+            "type": "string",
+            "enum": [
+              "off",
+              "moderate",
+              "strict"
+            ],
+            "description": "Default moderate."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Query as given.",
+                "examples": [
+                  "東京 天気予報"
+                ]
+              },
+              "country": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Market searched.",
+                "examples": [
+                  "JP"
+                ]
+              },
+              "language": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Search language when given.",
+                "examples": [
+                  "ja"
+                ]
+              },
+              "freshness": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Window applied.",
+                "examples": [
+                  "week"
+                ]
+              },
+              "web": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Page title.",
+                      "examples": [
+                        "Tokyo, Tokyo, Japan Weather Forecast | AccuWeather"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Page URL.",
+                      "examples": [
+                        "https://www.accuweather.com/en/jp/tokyo/226396/weather-forecast/226396"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Engine snippet.",
+                      "examples": [
+                        "Tokyo weather forecast with current conditions..."
+                      ]
+                    },
+                    "age": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Age as the engine words it.",
+                      "examples": [
+                        "4 日前"
+                      ]
+                    },
+                    "page_age": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Page date when known.",
+                      "examples": [
+                        "2026-09-23T10:38:54"
+                      ]
+                    },
+                    "language": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Page language.",
+                      "examples": [
+                        "en"
+                      ]
+                    },
+                    "site_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Site name.",
+                      "examples": [
+                        "AccuWeather"
+                      ]
+                    },
+                    "hostname": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Host.",
+                      "examples": [
+                        "www.accuweather.com"
+                      ]
+                    },
+                    "extra_snippets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "Another snippet from the page.",
+                        "examples": [
+                          "Wind: 10 km/h"
+                        ]
+                      },
+                      "description": "Up to 5 extra snippets.",
+                      "examples": [
+                        []
+                      ]
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "url",
+                    "description",
+                    "age",
+                    "page_age",
+                    "language",
+                    "site_name",
+                    "hostname",
+                    "extra_snippets"
+                  ],
+                  "description": "One web result."
+                },
+                "description": "Web results in engine order."
+              },
+              "web_count": {
+                "type": "integer",
+                "description": "Web results returned.",
+                "examples": [
+                  5
+                ]
+              },
+              "news": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Headline.",
+                      "examples": [
+                        "Typhoon nears Tokyo"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Article URL.",
+                      "examples": [
+                        "https://example.com/news/1"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Snippet.",
+                      "examples": [
+                        "..."
+                      ]
+                    },
+                    "age": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Age as worded.",
+                      "examples": [
+                        "2 hours ago"
+                      ]
+                    },
+                    "page_age": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Article date when known.",
+                      "examples": [
+                        "2026-09-27T09:00:00"
+                      ]
+                    },
+                    "source": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publisher or host.",
+                      "examples": [
+                        "Reuters"
+                      ]
+                    },
+                    "breaking": {
+                      "type": "boolean",
+                      "description": "Flagged breaking by the engine.",
+                      "examples": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "url",
+                    "description",
+                    "age",
+                    "page_age",
+                    "source",
+                    "breaking"
+                  ],
+                  "description": "One news result."
+                },
+                "description": "News results; empty when not asked or none."
+              },
+              "news_count": {
+                "type": "integer",
+                "description": "News results returned.",
+                "examples": [
+                  3
+                ]
+              },
+              "more_results_available": {
+                "type": "boolean",
+                "description": "The engine has more pages.",
+                "examples": [
+                  true
+                ]
+              },
+              "source": {
+                "type": "string",
+                "const": "brave",
+                "description": "Data source."
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "No result matched the query."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "country",
+              "language",
+              "freshness",
+              "web",
+              "web_count",
+              "news",
+              "news_count",
+              "more_results_available",
+              "source",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "search.results response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Web and news results in any language and country (Brave index)"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/search/results",
+        "price_usd": 0.25
       }
     },
     {
