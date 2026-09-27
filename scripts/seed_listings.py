@@ -92,6 +92,10 @@ ROUTES = [
     ("standard", "/work/monitor/check", {"url": "https://example.com"}),
     ("standard", "/work/commerce/availability", {
         "url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10"}),
+    ("utility", "/work/market/stock", {"symbol": "AAPL", "range": "1mo"}),
+    ("utility", "/work/market/fundamentals", {"symbol": "AAPL", "periods": 4}),
+    ("standard", "/work/finance/analytics", {"symbol": "AAPL", "range": "6mo", "benchmark_symbol": "SPY",
+                                             "option": {"type": "put", "strike": 300, "time_to_expiry_years": 0.25}}),
     ("advanced", "/work/security/mcp_inspect", {"url": "https://hubvibe-io.com/mcp"}),
     # --- wave 2a: keyless bees ported from the (now-removed) /svc catalog ---
     ("utility", "/work/fetch/raw", {"url": "https://example.com"}),

@@ -1,7 +1,7 @@
 # HubVibe
 
-**One node, 44 machine-payable jobs, one price per call, one receipt per job.**
-HubVibe sells work to autonomous agents over HTTP 402: 39 workers under
+**One node, 47 machine-payable jobs, one price per call, one receipt per job.**
+HubVibe sells work to autonomous agents over HTTP 402: 42 workers under
 `/work/*` — LLM inference, live web search and page extraction, Base chain
 reads, spot and prediction-market data, BigQuery analysis and forecasting,
 deterministic regression and probability statistics,
@@ -157,7 +157,7 @@ Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
 The same payment gate sells a wider catalog beside the audits — each worker
 validated for free before any payment is read, never billed for a call that
 produced no result, with per-provider retries, exponential backoff, failover
-and a circuit breaker behind it. All 39 are live on the public node at hubvibe-io.com (`GET /work` lists
+and a circuit breaker behind it. All 42 are live on the public node at hubvibe-io.com (`GET /work` lists
 them, free). On any other deployment a worker whose provider is not
 configured is absent, with a specific reason, until it is.
 
@@ -167,6 +167,8 @@ configured is absent, with a specific reason, until it is.
 | `chain.rpc` | $0.05 | Generic allowlisted JSON-RPC passthrough on Base |
 | `market.quote` / `market.rates` / `market.ticker` | $0.02 | Coinbase spot price, exchange rates, bid/ask/volume |
 | `market.prediction` / `prediction.market` / `prediction.events` | $0.05 | Polymarket odds — top-volume, by slug, or by event |
+| `market.stock` / `market.fundamentals` | $0.05 | Live equity quote + daily history (Nasdaq, Yahoo fallback); SEC EDGAR XBRL fundamentals by period |
+| `finance.analytics` | $0.50 | Deterministic trading math: returns, volatility, Sharpe/Sortino, drawdown, VaR/CVaR, beta, SMA/EMA/RSI/Bollinger, Black-Scholes Greeks, Kelly |
 | `extract.page` / `fetch.raw` | $0.10 | Rendered-page extraction, or raw status/headers/body |
 | `search.web` | $0.10 | Live web search, grounded via Gemini's Google Search tool |
 | `llm.analyze` / `llm.extract` | $0.25 | Gemini: answer-from-material / structured-field extraction |

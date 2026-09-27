@@ -114,6 +114,60 @@ _STATS_INPUT = dict(_obj({
 }, []), oneOf=[{"required": ["points"]}, {"required": ["table", "x_column", "y_column"]}])
 
 
+_SYMBOL = {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9.\\-]{0,11}$",
+           "description": "Ticker symbol, e.g. AAPL, BRK.B, RY-PC."}
+_RANGES = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"]
+_PRICE_ITEM = {"oneOf": [
+    {"type": "number", "exclusiveMinimum": 0, "description": "A price."},
+    {"type": "object", "properties": {"date": {"type": "string"}, "close": {"type": "number", "exclusiveMinimum": 0}},
+     "required": ["close"], "additionalProperties": True, "description": "{date, close}."},
+]}
+_PRICES = {"type": "array", "items": _PRICE_ITEM, "minItems": 2, "maxItems": 100000,
+           "description": "Prices oldest first: numbers, or {date, close} objects. Use this OR `symbol`."}
+_FINANCE_METRICS = ["returns", "volatility", "sharpe", "sortino", "drawdown", "var", "beta",
+                    "moving_averages", "rsi", "bollinger", "black_scholes", "kelly"]
+_WINDOW = {"oneOf": [{"type": "integer", "minimum": 2, "maximum": 5000},
+                     {"type": "array", "items": {"type": "integer", "minimum": 2, "maximum": 5000},
+                      "minItems": 1, "maxItems": 10}]}
+_FINANCE_INPUT = dict(_obj({
+    "prices": _PRICES,
+    "symbol": dict(_SYMBOL, description="Fetch the series live instead of `prices` (daily closes). Use this OR `prices`."),
+    "range": {"type": "string", "enum": _RANGES, "description": "History range with `symbol`, default 1y."},
+    "benchmark_prices": dict(_PRICES, description="Benchmark series for beta/alpha/correlation, same order as `prices`."),
+    "benchmark_symbol": dict(_SYMBOL, description="Benchmark fetched live (e.g. SPY) for beta/alpha/correlation."),
+    "metrics": {"type": "array", "items": {"type": "string", "enum": _FINANCE_METRICS}, "minItems": 1,
+                "uniqueItems": True,
+                "description": ("Which results to compute. Default: returns, volatility, sharpe, sortino, drawdown, "
+                                "var, moving_averages, rsi, bollinger, plus beta/black_scholes/kelly when their "
+                                "inputs are given.")},
+    "periods_per_year": {"type": "integer", "minimum": 1, "maximum": 100000,
+                         "description": "Annualization basis: 252 trading days (default), 12 months, 365 days, 52 weeks."},
+    "risk_free_rate": {"type": "number", "minimum": -1, "maximum": 10,
+                       "description": "Annual risk-free rate as a fraction (0.04 = 4%). Default 0."},
+    "alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.5,
+              "description": "Tail probability for VaR/CVaR. Default 0.05."},
+    "windows": {"type": "object", "properties": {"sma": _WINDOW, "ema": _WINDOW, "rsi": _WINDOW, "bollinger": _WINDOW},
+                "additionalProperties": False,
+                "description": "Indicator windows. Default sma [20,50,200], ema [12,26], rsi 14, bollinger 20."},
+    "option": {"type": "object", "properties": {
+        "type": {"type": "string", "enum": ["call", "put"]},
+        "strike": {"type": "number", "exclusiveMinimum": 0},
+        "spot": {"type": "number", "exclusiveMinimum": 0, "description": "Default: the last price of the series."},
+        "rate": {"type": "number", "description": "Continuous risk-free rate; default risk_free_rate."},
+        "volatility": {"type": "number", "exclusiveMinimum": 0,
+                       "description": "Annual volatility as a fraction; default: the series' annualized log-return volatility."},
+        "time_to_expiry_years": {"type": "number", "exclusiveMinimum": 0},
+        "dividend_yield": {"type": "number", "minimum": 0, "description": "Continuous yield, default 0."},
+    }, "required": ["type", "strike", "time_to_expiry_years"], "additionalProperties": False,
+        "description": "European option to price with Black-Scholes-Merton (enables black_scholes)."},
+    "kelly": {"type": "object", "properties": {
+        "win_probability": {"type": "number", "minimum": 0, "maximum": 1},
+        "win_loss_ratio": {"type": "number", "exclusiveMinimum": 0, "description": "Average win / average loss (b in b:1)."},
+    }, "required": ["win_probability", "win_loss_ratio"], "additionalProperties": False,
+        "description": "Bet parameters for the Kelly fraction (enables kelly)."},
+}, []), oneOf=[{"required": ["prices"]}, {"required": ["symbol"]}])
+
+
 class Worker:
     """A sellable unit of completed work."""
 
@@ -718,6 +772,80 @@ CATALOG = [
                        "a browser render and one inference call only when the page has no "
                        "structured data; usage measured."),
         requires=("web", "gemini")),
+    # --- markets and trading mathematics -----------------------------------
+    Worker(
+        name="market.stock", price_usd=0.05, tier="utility",
+        title="Live stock quote and daily history",
+        description=(
+            'Live equity quote for a US-listed ticker: last price, change, day range, '
+            'volume and market state, plus daily OHLCV history for the range you choose '
+            "(1d to 5y), read at call time from Nasdaq's public data API with Yahoo "
+            'Finance as the fallback. Every answer names the source that answered, the '
+            "source's own timestamp (as_of), its delay in minutes, and when this node "
+            'read it (checked_at). Input: symbol; optional range (default 1mo), '
+            'include_history.'),
+        tags=["market", "stocks", "equities", "quote", "ohlcv", "history", "live"],
+        input_schema=_obj({
+            "symbol": _SYMBOL,
+            "range": {"type": "string", "enum": _RANGES, "description": "History range, default 1mo."},
+            "include_history": {"type": "boolean", "description": "Default true."},
+        }, ["symbol"]),
+        returns=("symbol, name, exchange, currency, price, change, change_pct, previous_close, "
+                 "day_high, day_low, volume, market_state, as_of, delayed_minutes, history[], "
+                 "history_rows, source, checked_at."),
+        skill="market.stock", max_seconds=45,
+        pricing_basis="Provisional. Provider cost zero (public endpoints); two requests at most.",
+        requires=("equities",)),
+    Worker(
+        name="market.fundamentals", price_usd=0.05, tier="utility",
+        title="SEC-filed fundamentals (XBRL company facts)",
+        description=(
+            'Company fundamentals as the filer reported them to the SEC: revenue, net '
+            'income, diluted EPS, operating income, assets, liabilities, equity, cash and '
+            'shares outstanding by reporting period (10-K and 10-Q), from EDGAR\'s official '
+            'XBRL company-facts API, read at call time. Name your own XBRL concepts for any '
+            'other line item; restatements resolve to the latest filing. Input: symbol (US '
+            'ticker) or cik; optional concepts, periods, forms.'),
+        tags=["market", "fundamentals", "sec", "edgar", "xbrl", "financials", "earnings"],
+        input_schema=dict(_obj({
+            "symbol": dict(_SYMBOL, description="US ticker in the SEC's table, e.g. AAPL. Use this OR `cik`."),
+            "cik": {"type": ["integer", "string"], "description": "SEC Central Index Key, e.g. 320193."},
+            "concepts": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 25,
+                         "description": ("XBRL concept names (us-gaap, ifrs-full or dei). Default: Revenues, "
+                                         "NetIncomeLoss, EarningsPerShareDiluted, OperatingIncomeLoss, Assets, "
+                                         "Liabilities, StockholdersEquity, CashAndCashEquivalentsAtCarryingValue, "
+                                         "EntityCommonStockSharesOutstanding.")},
+            "periods": {"type": "integer", "minimum": 1, "maximum": 40,
+                        "description": "Most recent reporting periods per concept, default 8."},
+            "forms": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                      "description": "Restrict to these forms, e.g. [\"10-K\"] for annual figures only."},
+        }, []), anyOf=[{"required": ["symbol"]}, {"required": ["cik"]}]),
+        returns=("symbol, cik, entity_name, concepts{name: {concept, taxonomy, label, unit, values[]}}, "
+                 "concepts_missing[], periods, forms, as_of, source, checked_at."),
+        skill="market.fundamentals", max_seconds=60,
+        pricing_basis="Provisional. Provider cost zero (official public API); two requests at most.",
+        requires=("sec_edgar",)),
+    Worker(
+        name="finance.analytics", price_usd=0.50, tier="standard",
+        title="Trading mathematics: returns, risk, drawdown, VaR, beta, indicators, options, Kelly",
+        description=(
+            'Deterministic trading mathematics over a price series you supply or a ticker '
+            'fetched live: returns and CAGR, annualized volatility, Sharpe and Sortino, '
+            'max drawdown, historical and parametric VaR/CVaR, beta, alpha and correlation '
+            'vs a benchmark, SMA/EMA, RSI, Bollinger bands, Black-Scholes price with Greeks, '
+            'and the Kelly fraction. Exactly rounded sums, every formula named in the '
+            'result, the same input always the same numbers; no LLM in the path. Input: '
+            'prices or symbol, plus options.'),
+        tags=["finance", "quant", "volatility", "sharpe", "drawdown", "var", "beta",
+              "black-scholes", "indicators", "deterministic"],
+        input_schema=_FINANCE_INPUT,
+        returns=("source{}, n, n_returns, periods_per_year, metrics_computed[], returns{}, volatility{}, "
+                 "sharpe, sortino, drawdown{}, var{}, beta{}, moving_averages{}, rsi{}, bollinger{}, "
+                 "black_scholes{}, kelly{}, notes[], method, as_of, checked_at."),
+        skill="finance.analytics", max_seconds=60,
+        pricing_basis=("Provisional, standard tier. Inline prices cost nothing to serve; a symbol "
+                       "adds one or two public market reads."),
+        requires=()),
     Worker(
         name="security.mcp_inspect", price_usd=5.00, tier="advanced",
         title="Inspect an MCP endpoint",
@@ -917,6 +1045,7 @@ def price_of(path: str) -> Optional[float]:
 # fails if a required field has no value here.
 _EXAMPLE_VALUES = {
     "url": "https://example.com",
+    "symbol": "AAPL",
     "address": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd",
     # A real Base transaction (a settled HubVibe sale), so the example runs.
     "hash": "0x9e61e3fce3efad669a236b8d6a0351162c572808026d1a5ffdededd31caad113",
@@ -950,6 +1079,16 @@ _EXAMPLE_VALUES = {
 _DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 
 _EXAMPLE_OVERRIDES = {
+    "market.stock": {"symbol": "AAPL", "range": "1mo"},
+    # Either symbol or cik is valid, so nothing is `required`.
+    "market.fundamentals": {"symbol": "AAPL", "periods": 4, "forms": ["10-K", "10-Q"]},
+    # Inline prices with an option and a bet, so the example computes offline.
+    "finance.analytics": {
+        "prices": [100, 101.5, 99.8, 102.2, 103.9, 103.1, 105.4, 104.2, 106.8, 108.0, 107.1,
+                   109.5, 111.2, 110.4, 112.9, 114.3, 113.0, 115.8, 117.1, 116.2, 118.6, 120.0],
+        "risk_free_rate": 0.04, "windows": {"sma": [5, 10], "ema": [5], "rsi": 14, "bollinger": 10},
+        "option": {"type": "call", "strike": 120, "rate": 0.04, "time_to_expiry_years": 0.5},
+        "kelly": {"win_probability": 0.55, "win_loss_ratio": 1.5}},
     # A live Shopify product page that publishes JSON-LD variants, so the
     # example runs and returns per-size availability.
     "commerce.availability": {"url": "https://www.allbirds.com/products/mens-wool-runners",

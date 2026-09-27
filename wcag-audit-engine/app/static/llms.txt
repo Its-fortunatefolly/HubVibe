@@ -126,6 +126,10 @@ Utility (one live read, $0.02-$0.10):
   probabilities
 - POST /work/prediction/market -- one Polymarket market by slug
 - POST /work/prediction/events -- live Polymarket events by volume
+- POST /work/market/stock -- live US equity quote and daily OHLCV history
+  (Nasdaq data API, Yahoo Finance fallback; as_of, delayed_minutes, source)
+- POST /work/market/fundamentals -- SEC EDGAR XBRL company facts by
+  reporting period (revenue, net income, EPS, balance sheet; any concept)
 - POST /work/extract/page -- readable text, title and links from any page,
   rendered in a real browser
 - POST /work/fetch/raw -- raw HTTP fetch: status, headers, body, any status
@@ -148,6 +152,10 @@ Standard (inference and data, $0.25-$0.50):
 - POST /work/stats/probability -- deterministic linear regression, normal
   distribution model and p-values over [x, y] points or two BigQuery columns
   (also the MCP tool hubvibe_predictive_probability_engine)
+- POST /work/finance/analytics -- deterministic trading mathematics over a
+  price series or a live ticker: returns, volatility, Sharpe/Sortino, max
+  drawdown, VaR/CVaR, beta vs a benchmark, SMA/EMA/RSI/Bollinger,
+  Black-Scholes-Merton with Greeks, Kelly; every formula named in `method`
 - POST /work/image/generate -- one image from a text prompt (Imagen 4)
 - POST /work/speech/synthesize -- text to speech (Cloud Text-to-Speech)
 - POST /work/speech/transcribe -- speech to text, up to 60s/10MB (STT v2)
