@@ -903,6 +903,33 @@ CATALOG = [
         skill="opendata.table", max_seconds=90,
         pricing_basis="Provisional. Provider cost zero (one file fetch; one page fetch first for a data.go.kr page).",
         requires=("tabular",)),
+    Worker(
+        name="search.results", price_usd=0.25, tier="standard",
+        title="Web and news results in any language and country (Brave index)",
+        description=(
+            "Independent web and news results for a query from Brave's own index, in "
+            "any language and country: title, URL, description, age and extra "
+            "snippets for the web; headline, source and age for news. Use language "
+            "for the search language and interface, country for the market, freshness "
+            "to keep to the last day, week, month or year. Results, not an answer: "
+            "pick what to read next with fetch.raw or extract.page. Input: query; "
+            "optional country, language, count, freshness, news, safesearch."),
+        tags=["search", "web", "news", "serp", "results", "multilingual", "brave", "live"],
+        input_schema=_obj({
+            "query": {"type": "string", "minLength": 1, "maxLength": 400, "description": "Words to search for, in any language."},
+            "country": {"type": "string", "pattern": "^[A-Za-z]{2}$", "description": "Market, ISO 3166-1 alpha-2 (US, JP, DE). Default: the engine's."},
+            "language": _LANGUAGE,
+            "count": {"type": "integer", "minimum": 1, "maximum": 20, "description": "Results per block, default 10."},
+            "freshness": {"type": "string", "enum": ["day", "week", "month", "year"], "description": "Only results from this window."},
+            "news": {"type": "boolean", "description": "Include news results. Default true."},
+            "safesearch": {"type": "string", "enum": ["off", "moderate", "strict"], "description": "Default moderate."},
+        }, ["query"]),
+        returns=("query, country, language, freshness, web[{title, url, description, age, page_age, language, site_name, hostname, "
+                 "extra_snippets[]}], web_count, news[{title, url, description, age, page_age, source, breaking}], news_count, "
+                 "more_results_available, source, notes[], checked_at."),
+        skill="search.results", max_seconds=40,
+        pricing_basis="Provisional. Brave Search plan bills $0.005 per request; one request, two when news needs its own.",
+        requires=("brave",)),
     # --- news and official numbers, keyless ----------------------------------
     Worker(
         name="news.search", price_usd=0.25, tier="standard",
@@ -1419,6 +1446,8 @@ NATIVE_LANGUAGE_WORKERS = frozenset({
     "commerce.availability",
     # news.search's `language` picks the publishers' edition, so its articles already arrive in that language.
     "news.search",
+    # search.results' `language` is the search language: results come back in it.
+    "search.results",
 })
 _TRANSLATED_LANGUAGE = {
     "type": "string", "maxLength": 35,
@@ -1497,6 +1526,7 @@ _EXAMPLE_OVERRIDES = {
     "travel.flights": {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3},
     "travel.hotels": {"place": "hotel near Shibuya station Tokyo", "days_ahead": 30, "nights": 2, "max_hotels": 3},
     "news.search": {"query": "半導体", "language": "ja", "limit": 5},
+    "search.results": {"query": "東京 天気予報", "country": "JP", "language": "ja", "count": 5},
     "data.macro": {"indicator": "inflation", "country": "JP", "last": 5},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
