@@ -16,12 +16,15 @@ maxTimeoutSeconds (300, verified live 2026-09-15). A job that cannot finish
 inside the payment window is not sellable synchronously, so nothing here
 exceeds 240s.
 
-ALWAYS CURRENT. No worker serves a stored answer: every call reads its
-source at call time (the router keeps no result cache; monitor.snapshot's
-baseline is the one deliberate exception, and it is the product). A worker
-that reports on the live world carries `checked_at` (UTC) in its result, and
-`as_of` when the source stamps its own data, so a buyer can see when the
-answer was true.
+ALWAYS CURRENT. Every call reads its source at call time; the node serves
+no result from a cache. Two deliberate exceptions, both documented: a
+repeated Idempotency-Key returns the stored result of that same request
+(never charged twice), and monitor.check compares against the baseline
+monitor.snapshot saved. The workers whose contracts carry `checked_at`
+(UTC) -- commerce.availability, market.stock, market.fundamentals,
+finance.analytics -- say when the answer was true; the market/finance
+three also carry `as_of` when the source stamps its own data. A new
+live-world worker should carry both.
 
 LANGUAGE IS NOT A BARRIER. Every worker whose result contains prose takes
 the optional `language` below (a BCP-47 tag) and answers in it; the rule is
