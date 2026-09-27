@@ -11915,7 +11915,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 300,
-            "description": "Words to search for, in any language (e.g. \u4eba\u53e3, rainfall, \u4ea4\u901a)."
+            "description": "Words to search for, in any language (e.g. 人口, rainfall, 交通)."
           },
           "region": {
             "type": "string",
@@ -11987,7 +11987,7 @@
                 "type": "string",
                 "description": "The query as given.",
                 "examples": [
-                  "\u4eba\u53e3"
+                  "人口"
                 ]
               },
               "region": {
@@ -12124,7 +12124,7 @@
                       "type": "string",
                       "description": "Dataset title, in the portal's language.",
                       "examples": [
-                        "\u4ee4\u548c2\u5e74\u56fd\u52e2\u8abf\u67fb \u4eba\u53e3\u7b49\u57fa\u672c\u96c6\u8a08"
+                        "令和2年国勢調査 人口等基本集計"
                       ]
                     },
                     "description": {
@@ -12134,7 +12134,7 @@
                       ],
                       "description": "Description, up to 1000 characters.",
                       "examples": [
-                        "\u56fd\u52e2\u8abf\u67fb\u306e\u4eba\u53e3\u7b49\u57fa\u672c\u96c6\u8a08..."
+                        "国勢調査の人口等基本集計..."
                       ]
                     },
                     "organization": {
@@ -12144,7 +12144,7 @@
                       ],
                       "description": "Publishing organization.",
                       "examples": [
-                        "\u7dcf\u52d9\u7701"
+                        "総務省"
                       ]
                     },
                     "license": {
@@ -12173,14 +12173,14 @@
                         "type": "string",
                         "description": "A tag.",
                         "examples": [
-                          "\u4eba\u53e3"
+                          "人口"
                         ]
                       },
                       "description": "Portal tags.",
                       "examples": [
                         [
-                          "\u4eba\u53e3",
-                          "\u56fd\u52e2\u8abf\u67fb"
+                          "人口",
+                          "国勢調査"
                         ]
                       ]
                     },
@@ -12223,7 +12223,7 @@
                             ],
                             "description": "Resource name.",
                             "examples": [
-                              "\u4eba\u53e3\u7b49\u57fa\u672c\u96c6\u8a08 \u5168\u56fd\u7d50\u679c"
+                              "人口等基本集計 全国結果"
                             ]
                           },
                           "last_modified": {
@@ -12439,6 +12439,1181 @@
         "method": "POST",
         "path": "/work/opendata/search",
         "price_usd": 0.1
+      }
+    },
+    {
+      "name": "hubvibe_travel_flights",
+      "title": "Live flight offers between two places",
+      "description": "Live flight offers from the airlines for a route and date: every offer with price, tax, currency, each segment (carrier, flight number, times, aircraft), stops, refund and change conditions, emissions and the exact time the offer expires. Places are IATA codes or names in any language (Tokyo, 東京, Séoul), resolved before the search. One-way or return, up to 9 adults plus children by age, any cabin class, sorted by price or duration. Input: origin, destination, departure_date or days_ahead. $0.50 per call. Returns: origin{}, destination{}, departure_date, return_date, passengers{}, cabin_class, sort, offers[{id, airline{}, total_amount, base_amount, tax_amount, currency, expires_at, slices[{segments[]}], stops, total_duration_seconds, refund_before_departure{}, change_before_departure{}, emissions_kg, instant_payment_required, ...}], offer_count, offers_available, cheapest_total{}, fastest_duration_seconds, live_mode, source, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80,
+            "description": "IATA code (LHR) or a city/airport name in any language."
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80,
+            "description": "IATA code (JFK) or a city/airport name in any language."
+          },
+          "departure_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "YYYY-MM-DD, today or later. Or give days_ahead."
+          },
+          "days_ahead": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 365,
+            "description": "Departure this many days from today (UTC), instead of departure_date."
+          },
+          "return_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Optional return leg, YYYY-MM-DD."
+          },
+          "adults": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9,
+            "description": "Default 1."
+          },
+          "children_ages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 17
+            },
+            "maxItems": 8,
+            "description": "One age per child; under 2 travel as infants."
+          },
+          "cabin_class": {
+            "type": "string",
+            "enum": [
+              "economy",
+              "premium_economy",
+              "business",
+              "first"
+            ],
+            "description": "Default economy."
+          },
+          "max_connections": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "0 for non-stop only. Default: any."
+          },
+          "max_offers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Default 10."
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "price",
+              "duration"
+            ],
+            "description": "Default price."
+          }
+        },
+        "required": [
+          "origin",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "object",
+                "properties": {
+                  "iata_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Resolved IATA code (city or airport).",
+                    "examples": [
+                      "LHR"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Place name as the provider lists it.",
+                    "examples": [
+                      "Heathrow Airport"
+                    ]
+                  },
+                  "type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "city or airport; null when an IATA code was given directly.",
+                    "examples": [
+                      "airport"
+                    ]
+                  },
+                  "city_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "City name.",
+                    "examples": [
+                      "London"
+                    ]
+                  },
+                  "country_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "ISO 3166-1 alpha-2.",
+                    "examples": [
+                      "GB"
+                    ]
+                  },
+                  "given": {
+                    "type": "string",
+                    "description": "What the caller wrote.",
+                    "examples": [
+                      "LHR"
+                    ]
+                  }
+                },
+                "required": [
+                  "iata_code",
+                  "name",
+                  "type",
+                  "city_name",
+                  "country_code",
+                  "given"
+                ],
+                "description": "A place as resolved for the search."
+              },
+              "destination": {
+                "type": "object",
+                "properties": {
+                  "iata_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Resolved IATA code (city or airport).",
+                    "examples": [
+                      "LHR"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Place name as the provider lists it.",
+                    "examples": [
+                      "Heathrow Airport"
+                    ]
+                  },
+                  "type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "city or airport; null when an IATA code was given directly.",
+                    "examples": [
+                      "airport"
+                    ]
+                  },
+                  "city_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "City name.",
+                    "examples": [
+                      "London"
+                    ]
+                  },
+                  "country_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "ISO 3166-1 alpha-2.",
+                    "examples": [
+                      "GB"
+                    ]
+                  },
+                  "given": {
+                    "type": "string",
+                    "description": "What the caller wrote.",
+                    "examples": [
+                      "LHR"
+                    ]
+                  }
+                },
+                "required": [
+                  "iata_code",
+                  "name",
+                  "type",
+                  "city_name",
+                  "country_code",
+                  "given"
+                ],
+                "description": "A place as resolved for the search."
+              },
+              "departure_date": {
+                "type": "string",
+                "description": "Outbound date, YYYY-MM-DD.",
+                "examples": [
+                  "2026-11-10"
+                ]
+              },
+              "return_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Return date when a return leg was searched.",
+                "examples": [
+                  "2026-11-17"
+                ]
+              },
+              "passengers": {
+                "type": "object",
+                "properties": {
+                  "adults": {
+                    "type": "integer",
+                    "description": "Adults searched for.",
+                    "examples": [
+                      1
+                    ]
+                  },
+                  "children_ages": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "description": "A child's age.",
+                      "examples": [
+                        8
+                      ]
+                    },
+                    "description": "Children by age.",
+                    "examples": [
+                      []
+                    ]
+                  }
+                },
+                "required": [
+                  "adults",
+                  "children_ages"
+                ],
+                "description": "Who the offers are priced for."
+              },
+              "cabin_class": {
+                "type": "string",
+                "enum": [
+                  "economy",
+                  "premium_economy",
+                  "business",
+                  "first"
+                ],
+                "description": "Cabin searched.",
+                "examples": [
+                  "economy"
+                ]
+              },
+              "sort": {
+                "type": "string",
+                "enum": [
+                  "price",
+                  "duration"
+                ],
+                "description": "Sort order applied.",
+                "examples": [
+                  "price"
+                ]
+              },
+              "offers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Provider offer id (quote it to book).",
+                      "examples": [
+                        "off_0000BAq4P2Ku1h9eps72O0"
+                      ]
+                    },
+                    "airline": {
+                      "type": "object",
+                      "properties": {
+                        "iata_code": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Airline IATA code.",
+                          "examples": [
+                            "BA"
+                          ]
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Airline name.",
+                          "examples": [
+                            "British Airways"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "iata_code",
+                        "name"
+                      ],
+                      "description": "An airline."
+                    },
+                    "total_amount": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Total price including tax.",
+                      "examples": [
+                        218.93
+                      ]
+                    },
+                    "base_amount": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Fare before tax.",
+                      "examples": [
+                        185.53
+                      ]
+                    },
+                    "tax_amount": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Tax and fees.",
+                      "examples": [
+                        33.4
+                      ]
+                    },
+                    "currency": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO 4217 currency of the amounts.",
+                      "examples": [
+                        "USD"
+                      ]
+                    },
+                    "expires_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "When the airline withdraws this offer (UTC).",
+                      "examples": [
+                        "2026-09-27T16:18:23Z"
+                      ]
+                    },
+                    "slices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "origin": {
+                            "type": "object",
+                            "properties": {
+                              "iata_code": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "IATA code.",
+                                "examples": [
+                                  "LHR"
+                                ]
+                              },
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "Airport name.",
+                                "examples": [
+                                  "Heathrow Airport"
+                                ]
+                              },
+                              "city_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "City served.",
+                                "examples": [
+                                  "London"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "iata_code",
+                              "name",
+                              "city_name"
+                            ],
+                            "description": "An airport."
+                          },
+                          "destination": {
+                            "type": "object",
+                            "properties": {
+                              "iata_code": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "IATA code.",
+                                "examples": [
+                                  "LHR"
+                                ]
+                              },
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "Airport name.",
+                                "examples": [
+                                  "Heathrow Airport"
+                                ]
+                              },
+                              "city_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "City served.",
+                                "examples": [
+                                  "London"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "iata_code",
+                              "name",
+                              "city_name"
+                            ],
+                            "description": "An airport."
+                          },
+                          "duration_seconds": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "Door-to-door duration of this leg.",
+                            "examples": [
+                              28680
+                            ]
+                          },
+                          "fare_brand": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "Airline fare brand.",
+                            "examples": [
+                              "Basic"
+                            ]
+                          },
+                          "segments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "carrier": {
+                                  "type": "object",
+                                  "properties": {
+                                    "iata_code": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "Airline IATA code.",
+                                      "examples": [
+                                        "BA"
+                                      ]
+                                    },
+                                    "name": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "Airline name.",
+                                      "examples": [
+                                        "British Airways"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "iata_code",
+                                    "name"
+                                  ],
+                                  "description": "An airline."
+                                },
+                                "flight_number": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "description": "Marketing flight number.",
+                                  "examples": [
+                                    "9368"
+                                  ]
+                                },
+                                "operating_carrier": {
+                                  "type": "object",
+                                  "properties": {
+                                    "iata_code": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "Airline IATA code.",
+                                      "examples": [
+                                        "BA"
+                                      ]
+                                    },
+                                    "name": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "Airline name.",
+                                      "examples": [
+                                        "British Airways"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "iata_code",
+                                    "name"
+                                  ],
+                                  "description": "An airline."
+                                },
+                                "origin": {
+                                  "type": "object",
+                                  "properties": {
+                                    "iata_code": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "IATA code.",
+                                      "examples": [
+                                        "LHR"
+                                      ]
+                                    },
+                                    "name": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "Airport name.",
+                                      "examples": [
+                                        "Heathrow Airport"
+                                      ]
+                                    },
+                                    "city_name": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "City served.",
+                                      "examples": [
+                                        "London"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "iata_code",
+                                    "name",
+                                    "city_name"
+                                  ],
+                                  "description": "An airport."
+                                },
+                                "destination": {
+                                  "type": "object",
+                                  "properties": {
+                                    "iata_code": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "IATA code.",
+                                      "examples": [
+                                        "LHR"
+                                      ]
+                                    },
+                                    "name": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "Airport name.",
+                                      "examples": [
+                                        "Heathrow Airport"
+                                      ]
+                                    },
+                                    "city_name": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "City served.",
+                                      "examples": [
+                                        "London"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "iata_code",
+                                    "name",
+                                    "city_name"
+                                  ],
+                                  "description": "An airport."
+                                },
+                                "departing_at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "description": "Local departure time.",
+                                  "examples": [
+                                    "2026-11-10T06:58:00"
+                                  ]
+                                },
+                                "arriving_at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "description": "Local arrival time.",
+                                  "examples": [
+                                    "2026-11-10T09:56:00"
+                                  ]
+                                },
+                                "duration_seconds": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "description": "Flight time.",
+                                  "examples": [
+                                    28680
+                                  ]
+                                },
+                                "aircraft": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "description": "Aircraft name when stated.",
+                                  "examples": [
+                                    "Boeing 777-300"
+                                  ]
+                                },
+                                "distance_km": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ],
+                                  "description": "Great-circle distance when stated.",
+                                  "examples": [
+                                    5539.8
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "carrier",
+                                "flight_number",
+                                "operating_carrier",
+                                "origin",
+                                "destination",
+                                "departing_at",
+                                "arriving_at",
+                                "duration_seconds",
+                                "aircraft",
+                                "distance_km"
+                              ],
+                              "description": "One flight."
+                            },
+                            "description": "Flights in order."
+                          }
+                        },
+                        "required": [
+                          "origin",
+                          "destination",
+                          "duration_seconds",
+                          "fare_brand",
+                          "segments"
+                        ],
+                        "description": "One leg of the journey."
+                      },
+                      "description": "Outbound leg, then the return leg when searched."
+                    },
+                    "stops": {
+                      "type": "integer",
+                      "description": "Most connections on any leg (0 = non-stop).",
+                      "examples": [
+                        0
+                      ]
+                    },
+                    "total_duration_seconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "All legs' durations added.",
+                      "examples": [
+                        28680
+                      ]
+                    },
+                    "refund_before_departure": {
+                      "type": "object",
+                      "properties": {
+                        "allowed": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ],
+                          "description": "Whether the airline allows it; null when unstated.",
+                          "examples": [
+                            true
+                          ]
+                        },
+                        "penalty_amount": {
+                          "type": [
+                            "number",
+                            "null"
+                          ],
+                          "description": "Fee charged when allowed.",
+                          "examples": [
+                            40.0
+                          ]
+                        },
+                        "penalty_currency": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Fee currency.",
+                          "examples": [
+                            "USD"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "allowed",
+                        "penalty_amount",
+                        "penalty_currency"
+                      ],
+                      "description": "A fare condition."
+                    },
+                    "change_before_departure": {
+                      "type": "object",
+                      "properties": {
+                        "allowed": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ],
+                          "description": "Whether the airline allows it; null when unstated.",
+                          "examples": [
+                            true
+                          ]
+                        },
+                        "penalty_amount": {
+                          "type": [
+                            "number",
+                            "null"
+                          ],
+                          "description": "Fee charged when allowed.",
+                          "examples": [
+                            40.0
+                          ]
+                        },
+                        "penalty_currency": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Fee currency.",
+                          "examples": [
+                            "USD"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "allowed",
+                        "penalty_amount",
+                        "penalty_currency"
+                      ],
+                      "description": "A fare condition."
+                    },
+                    "emissions_kg": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Estimated CO2 for all passengers.",
+                      "examples": [
+                        637.0
+                      ]
+                    },
+                    "instant_payment_required": {
+                      "type": "boolean",
+                      "description": "True when the airline demands payment at booking time.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "price_guarantee_expires_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Until when the price is held once an order is started.",
+                      "examples": [
+                        "2026-09-29T15:48:23Z"
+                      ]
+                    },
+                    "identity_documents_required": {
+                      "type": "boolean",
+                      "description": "True when passport details are needed to book.",
+                      "examples": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "airline",
+                    "total_amount",
+                    "base_amount",
+                    "tax_amount",
+                    "currency",
+                    "expires_at",
+                    "slices",
+                    "stops",
+                    "total_duration_seconds",
+                    "refund_before_departure",
+                    "change_before_departure",
+                    "emissions_kg",
+                    "instant_payment_required",
+                    "price_guarantee_expires_at",
+                    "identity_documents_required"
+                  ],
+                  "description": "One airline offer."
+                },
+                "description": "Offers in the requested order, up to max_offers."
+              },
+              "offer_count": {
+                "type": "integer",
+                "description": "Offers returned.",
+                "examples": [
+                  3
+                ]
+              },
+              "offers_available": {
+                "type": "integer",
+                "description": "Offers the airlines returned before max_offers was applied.",
+                "examples": [
+                  198
+                ]
+              },
+              "cheapest_total": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "description": "Lowest total price.",
+                    "examples": [
+                      218.93
+                    ]
+                  },
+                  "currency": {
+                    "type": "string",
+                    "description": "Its currency.",
+                    "examples": [
+                      "USD"
+                    ]
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "description": "Cheapest offer's total; null when no offer was priced."
+              },
+              "fastest_duration_seconds": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Shortest total duration across offers.",
+                "examples": [
+                  28680
+                ]
+              },
+              "live_mode": {
+                "type": "boolean",
+                "description": "True: bookable airline offers. False: the provider's practice data, never sold on the public node.",
+                "examples": [
+                  true
+                ]
+              },
+              "offer_request_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Provider search id.",
+                "examples": [
+                  "orq_0000BAq4P2Ku1h9eps72NZ"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "const": "duffel",
+                "description": "Data source."
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "No airline returned an offer for this search."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "origin",
+              "destination",
+              "departure_date",
+              "return_date",
+              "passengers",
+              "cabin_class",
+              "sort",
+              "offers",
+              "offer_count",
+              "offers_available",
+              "cheapest_total",
+              "fastest_duration_seconds",
+              "live_mode",
+              "offer_request_id",
+              "source",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "travel.flights response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Live flight offers between two places"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/travel/flights",
+        "price_usd": 0.5
       }
     },
     {

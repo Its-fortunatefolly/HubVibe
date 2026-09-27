@@ -878,6 +878,49 @@ CATALOG = [
         skill="opendata.search", max_seconds=60,
         pricing_basis="Provisional. Provider cost zero (public CKAN APIs); one request per portal.",
         requires=("opendata",)),
+    # --- travel: live flight offers (Duffel) --------------------------------
+    Worker(
+        name="travel.flights", price_usd=0.50, tier="standard",
+        title="Live flight offers between two places",
+        description=(
+            "Live flight offers from the airlines for a route and date: every offer "
+            "with price, tax, currency, each segment (carrier, flight number, times, "
+            "aircraft), stops, refund and change conditions, emissions and the exact "
+            "time the offer expires. Places are IATA codes or names in any language "
+            "(Tokyo, 東京, Séoul), resolved before the search. One-way or return, up "
+            "to 9 adults plus children by age, any cabin class, sorted by price or "
+            "duration. Input: origin, destination, departure_date or days_ahead."),
+        tags=["travel", "flights", "airfare", "availability", "booking", "airlines", "duffel", "live"],
+        input_schema=_obj({
+            "origin": {"type": "string", "minLength": 2, "maxLength": 80,
+                       "description": "IATA code (LHR) or a city/airport name in any language."},
+            "destination": {"type": "string", "minLength": 2, "maxLength": 80,
+                            "description": "IATA code (JFK) or a city/airport name in any language."},
+            "departure_date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                               "description": "YYYY-MM-DD, today or later. Or give days_ahead."},
+            "days_ahead": {"type": "integer", "minimum": 0, "maximum": 365,
+                           "description": "Departure this many days from today (UTC), instead of departure_date."},
+            "return_date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                            "description": "Optional return leg, YYYY-MM-DD."},
+            "adults": {"type": "integer", "minimum": 1, "maximum": 9, "description": "Default 1."},
+            "children_ages": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 17},
+                              "maxItems": 8, "description": "One age per child; under 2 travel as infants."},
+            "cabin_class": {"type": "string", "enum": ["economy", "premium_economy", "business", "first"],
+                            "description": "Default economy."},
+            "max_connections": {"type": "integer", "minimum": 0, "maximum": 2,
+                                "description": "0 for non-stop only. Default: any."},
+            "max_offers": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Default 10."},
+            "sort": {"type": "string", "enum": ["price", "duration"], "description": "Default price."},
+        }, ["origin", "destination"]),
+        returns=("origin{}, destination{}, departure_date, return_date, passengers{}, cabin_class, sort, "
+                 "offers[{id, airline{}, total_amount, base_amount, tax_amount, currency, expires_at, "
+                 "slices[{segments[]}], stops, total_duration_seconds, refund_before_departure{}, "
+                 "change_before_departure{}, emissions_kg, instant_payment_required, ...}], offer_count, "
+                 "offers_available, cheapest_total{}, fastest_duration_seconds, live_mode, source, notes[], checked_at."),
+        skill="travel.flights", max_seconds=90,
+        pricing_basis=("Provisional. Provider search is free within Duffel's search-to-book ratio; "
+                       "one place lookup per named place plus one offer request."),
+        requires=("duffel",)),
     # --- traffic-aware routing (Google Routes API) ---------------------------
     Worker(
         name="traffic.route", price_usd=0.10, tier="utility",
@@ -1269,6 +1312,7 @@ _EXAMPLE_VALUES = {
 _DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 
 _EXAMPLE_OVERRIDES = {
+    "travel.flights": {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},

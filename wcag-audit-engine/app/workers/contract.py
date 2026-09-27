@@ -360,6 +360,24 @@ def _nobj(properties: dict, required: list, description: str) -> dict:
 
 # --- one schema per worker, keyed by catalog name -------------------------------
 
+_AIRPORT = _obj({"iata_code": _s("IATA code.", "LHR", nullable=True), "name": _s("Airport name.", "Heathrow Airport", nullable=True),
+                 "city_name": _s("City served.", "London", nullable=True)}, ["iata_code", "name", "city_name"], "An airport.")
+_CARRIER = _obj({"iata_code": _s("Airline IATA code.", "BA", nullable=True), "name": _s("Airline name.", "British Airways", nullable=True)},
+                ["iata_code", "name"], "An airline.")
+_PLACE = _obj({"iata_code": _s("Resolved IATA code (city or airport).", "LHR", nullable=True),
+               "name": _s("Place name as the provider lists it.", "Heathrow Airport", nullable=True),
+               "type": _s("city or airport; null when an IATA code was given directly.", "airport", nullable=True),
+               "city_name": _s("City name.", "London", nullable=True),
+               "country_code": _s("ISO 3166-1 alpha-2.", "GB", nullable=True),
+               "given": _s("What the caller wrote.", "LHR")},
+              ["iata_code", "name", "type", "city_name", "country_code", "given"], "A place as resolved for the search.")
+_CONDITION = _obj({"allowed": _b("Whether the airline allows it; null when unstated.", True),
+                   "penalty_amount": _n("Fee charged when allowed.", 40.0, nullable=True),
+                   "penalty_currency": _s("Fee currency.", "USD", nullable=True)},
+                  ["allowed", "penalty_amount", "penalty_currency"], "A fare condition.")
+_CONDITION["properties"]["allowed"] = {"type": ["boolean", "null"], "description": "Whether the airline allows it; null when unstated.", "examples": [True]}
+
+
 OUTPUT_SCHEMAS = {
     "chain.network": _obj({
         "network": _const("base-mainnet", "Chain read."),
@@ -949,6 +967,69 @@ OUTPUT_SCHEMAS = {
     }, ["query", "region", "portals_searched", "portals_ok", "portals_failed", "total_matches", "results",
         "result_count", "limit_per_portal", "checked_at"]),
 
+    "travel.flights": _obj({
+        "origin": _PLACE,
+        "destination": _PLACE,
+        "departure_date": _s("Outbound date, YYYY-MM-DD.", "2026-11-10"),
+        "return_date": _s("Return date when a return leg was searched.", "2026-11-17", nullable=True),
+        "passengers": _obj({"adults": _i("Adults searched for.", 1),
+                            "children_ages": _arr(_i("A child's age.", 8), "Children by age.", [])},
+                           ["adults", "children_ages"], "Who the offers are priced for."),
+        "cabin_class": _enum(["economy", "premium_economy", "business", "first"], "Cabin searched.", "economy"),
+        "sort": _enum(["price", "duration"], "Sort order applied.", "price"),
+        "offers": _arr(_obj({
+            "id": _s("Provider offer id (quote it to book).", "off_0000BAq4P2Ku1h9eps72O0"),
+            "airline": _CARRIER,
+            "total_amount": _n("Total price including tax.", 218.93, nullable=True),
+            "base_amount": _n("Fare before tax.", 185.53, nullable=True),
+            "tax_amount": _n("Tax and fees.", 33.40, nullable=True),
+            "currency": _s("ISO 4217 currency of the amounts.", "USD", nullable=True),
+            "expires_at": _s("When the airline withdraws this offer (UTC).", "2026-09-27T16:18:23Z", nullable=True),
+            "slices": _arr(_obj({
+                "origin": _AIRPORT, "destination": _AIRPORT,
+                "duration_seconds": _i("Door-to-door duration of this leg.", 28680, nullable=True),
+                "fare_brand": _s("Airline fare brand.", "Basic", nullable=True),
+                "segments": _arr(_obj({
+                    "carrier": _CARRIER,
+                    "flight_number": _s("Marketing flight number.", "9368", nullable=True),
+                    "operating_carrier": _CARRIER,
+                    "origin": _AIRPORT, "destination": _AIRPORT,
+                    "departing_at": _s("Local departure time.", "2026-11-10T06:58:00", nullable=True),
+                    "arriving_at": _s("Local arrival time.", "2026-11-10T09:56:00", nullable=True),
+                    "duration_seconds": _i("Flight time.", 28680, nullable=True),
+                    "aircraft": _s("Aircraft name when stated.", "Boeing 777-300", nullable=True),
+                    "distance_km": _n("Great-circle distance when stated.", 5539.8, nullable=True),
+                }, ["carrier", "flight_number", "operating_carrier", "origin", "destination", "departing_at",
+                    "arriving_at", "duration_seconds", "aircraft", "distance_km"], "One flight."), "Flights in order."),
+            }, ["origin", "destination", "duration_seconds", "fare_brand", "segments"], "One leg of the journey."),
+                "Outbound leg, then the return leg when searched."),
+            "stops": _i("Most connections on any leg (0 = non-stop).", 0),
+            "total_duration_seconds": _i("All legs' durations added.", 28680, nullable=True),
+            "refund_before_departure": _CONDITION,
+            "change_before_departure": _CONDITION,
+            "emissions_kg": _n("Estimated CO2 for all passengers.", 637.0, nullable=True),
+            "instant_payment_required": _b("True when the airline demands payment at booking time.", False),
+            "price_guarantee_expires_at": _s("Until when the price is held once an order is started.",
+                                             "2026-09-29T15:48:23Z", nullable=True),
+            "identity_documents_required": _b("True when passport details are needed to book.", False),
+        }, ["id", "airline", "total_amount", "base_amount", "tax_amount", "currency", "expires_at", "slices",
+            "stops", "total_duration_seconds", "refund_before_departure", "change_before_departure",
+            "emissions_kg", "instant_payment_required", "price_guarantee_expires_at",
+            "identity_documents_required"], "One airline offer."), "Offers in the requested order, up to max_offers."),
+        "offer_count": _i("Offers returned.", 3),
+        "offers_available": _i("Offers the airlines returned before max_offers was applied.", 198),
+        "cheapest_total": _nobj({"amount": _n("Lowest total price.", 218.93), "currency": _s("Its currency.", "USD")},
+                                ["amount", "currency"], "Cheapest offer's total; null when no offer was priced."),
+        "fastest_duration_seconds": _i("Shortest total duration across offers.", 28680, nullable=True),
+        "live_mode": _b("True: bookable airline offers. False: the provider's practice data, never sold on the public node.", True),
+        "offer_request_id": _s("Provider search id.", "orq_0000BAq4P2Ku1h9eps72NZ", nullable=True),
+        "source": _const("duffel", "Data source."),
+        "notes": _arr(_s("A caveat.", "No airline returned an offer for this search."), "Caveats; empty when none.", []),
+        "checked_at": _CHECKED_AT,
+    }, ["origin", "destination", "departure_date", "return_date", "passengers", "cabin_class", "sort", "offers",
+        "offer_count", "offers_available", "cheapest_total", "fastest_duration_seconds", "live_mode",
+        "offer_request_id", "source", "notes", "checked_at"]),
+
     "traffic.route": _obj({
         "origin": _s("Origin as given.", "Ferry Building, San Francisco, CA"),
         "destination": _s("Destination as given.", "Oakland City Hall, Oakland, CA"),
@@ -1477,6 +1558,12 @@ REPRESENTATIVE_QUERIES = {
         "a Mastodon account's recent statuses and follower count",
         "trending hashtags on mastodon.social right now",
         "search Mastodon for accounts or hashtags",
+    ],
+    "travel.flights": [
+        "flights from London to New York next month, cheapest first",
+        "non-stop business class offers Tokyo to Seoul on a date",
+        "what does it cost to fly two adults and a child from Sydney to Singapore",
+        "live airfare with refund and change conditions and offer expiry",
     ],
     "opendata.search": [
         "find government datasets about population in Japan",

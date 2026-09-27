@@ -93,6 +93,7 @@ ROUTES = [
     ("standard", "/work/commerce/availability", {
         "url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10"}),
     ("utility", "/work/opendata/search", {"query": "人口", "region": "jp", "limit": 3}),
+    ("standard", "/work/travel/flights", {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3}),
     ("utility", "/work/traffic/route", {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA"}),
     ("utility", "/work/video/youtube", {"query": "x402 payments", "max_results": 3}),
     ("utility", "/work/social/bluesky", {"mode": "profile", "actor": "bsky.app", "posts": 3}),
