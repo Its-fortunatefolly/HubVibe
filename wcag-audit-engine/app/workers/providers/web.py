@@ -32,6 +32,9 @@ from .base_rpc import USER_AGENT
 
 _TIMEOUT = float(os.environ.get("WORKER_FETCH_TIMEOUT_SECONDS", "45"))
 MAX_TEXT_CHARS = int(os.environ.get("WORKER_MAX_EXTRACT_CHARS", "40000"))
+# The page's HTML rides along with the text, for workers that read the
+# structured data a page publishes (JSON-LD, meta tags) off the rendered DOM.
+MAX_HTML_CHARS = int(os.environ.get("WORKER_MAX_EXTRACT_HTML_CHARS", "1500000"))
 
 _with_page: Optional[Callable] = None
 _executor = None
@@ -170,6 +173,8 @@ class _BrowserExtractor:
                 "title": page.title(),
                 "text": page.evaluate("document.body ? document.body.innerText : ''"),
                 "html_length": page.evaluate("document.documentElement.outerHTML.length"),
+                "html": page.evaluate(
+                    f"document.documentElement.outerHTML.slice(0, {MAX_HTML_CHARS})"),
                 "links": page.evaluate(
                     "Array.from(document.querySelectorAll('a[href]')).slice(0,100)"
                     ".map(a => ({text: (a.innerText||'').trim().slice(0,120), href: a.href}))"),
@@ -194,7 +199,8 @@ class _BrowserExtractor:
             value={"url": url, "final_url": rendered.get("final_url") or url,
                    "title": rendered.get("title"), "description": rendered.get("description"),
                    "text": text, "text_chars": len(text), "truncated": truncated,
-                   "links": rendered.get("links") or [], "rendered": True},
+                   "links": rendered.get("links") or [], "rendered": True,
+                   "html": (rendered.get("html") or "")[:MAX_HTML_CHARS]},
             # Our own flat-rate box: the marginal provider cost really is zero.
             cost_micros=0, cost_measured=True, usage=f"chars={len(text)}")
 
@@ -231,7 +237,7 @@ class _HttpExtractor:
             value={"url": url, "final_url": current, "title": _title_of(html),
                    "description": _meta_description(html), "text": text,
                    "text_chars": len(text), "truncated": truncated, "links": [],
-                   "rendered": False},
+                   "rendered": False, "html": html[:MAX_HTML_CHARS]},
             cost_micros=0, cost_measured=True, usage=f"chars={len(text)}")
 
 
@@ -259,16 +265,21 @@ class _RawFetcher:
     def unavailable_reason(self) -> str:
         return ""
 
-    async def fetch(self, url: str) -> runtime.ProviderResult:
+    async def fetch(self, url: str, max_chars: Optional[int] = None) -> runtime.ProviderResult:
+        """`max_chars` lets a worker that parses the whole document (the
+        structured data a product page carries can sit past the default
+        ceiling) raise the cap for its own call; the default stays the
+        fetch.raw contract."""
         response, final_url = await _get_guarded(url)
 
         content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
         textual = any(content_type.startswith(t) for t in _TEXTUAL_TYPES) or not content_type
         text, truncated = None, False
+        cap = max_chars or MAX_FETCH_TEXT_CHARS
         if textual:
             body = response.text or ""
-            truncated = len(body) > MAX_FETCH_TEXT_CHARS
-            text = body[:MAX_FETCH_TEXT_CHARS]
+            truncated = len(body) > cap
+            text = body[:cap]
 
         return runtime.ProviderResult(
             value={"url": url, "final_url": final_url, "status": response.status_code,

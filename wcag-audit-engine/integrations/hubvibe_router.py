@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """HubVibe Router -- the buyer-side gateway an agent runs on its own machine.
 
-What it does, in one loop, for any of the node's paid routes (the 38
+What it does, in one loop, for any of the node's paid routes (the 39
 /work/* workers and the /audit/* checks), over plain HTTP or over the
 node's A2A endpoint:
 

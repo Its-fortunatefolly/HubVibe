@@ -15,8 +15,8 @@ rather than merely coexist.
 """
 
 from . import (  # noqa: F401
-    chain, code, composites, data, extract, fetch, llm, maps, market, media,
-    monitor, search, security, stats, verify,
+    chain, code, commerce, composites, data, extract, fetch, llm, maps, market,
+    media, monitor, search, security, stats, verify,
 )
 
 REGISTRY = {}
@@ -26,6 +26,6 @@ REGISTRY = {}
 # Refusing there costs the caller nothing and burns no x402 nonce.
 PRECHECKS = {}
 for _module in (extract, llm, chain, market, data, composites, search, code,
-                media, security, monitor, verify, fetch, maps, stats):
+                media, security, monitor, verify, fetch, maps, stats, commerce):
     REGISTRY.update(_module.SKILLS)
     PRECHECKS.update(getattr(_module, "PRECHECKS", {}))

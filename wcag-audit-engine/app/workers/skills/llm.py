@@ -1,15 +1,54 @@
-"""Inference workers backed by Gemini on Vertex."""
+"""Inference workers backed by Gemini on Vertex.
+
+LANGUAGE IS NOT A BARRIER. Every worker whose answer contains prose takes an
+optional `language` (a BCP-47 tag) and writes its prose fields in that
+language; with none given, the answer follows the language of the material
+or question. The rule lives here, once, in `in_language`, and the composites
+reach it by calling these skills. `validate_language` is the PRECHECK the
+router runs before the payment gate, so a bad tag is a free 400.
+"""
+
+import re
+from typing import Optional
 
 from .. import runtime
 from ..providers import completion, gemini
 
 MAX_INPUT_CHARS = 200_000
+MAX_LANGUAGE_CHARS = 35
+_LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
 
 _ANALYST = (
     "You are a precise analyst. Answer only from the material provided. "
     "If the material does not contain the answer, say so explicitly rather "
     "than inferring it. Be specific and concise."
 )
+
+
+def validate_language(payload: dict) -> Optional[str]:
+    """The caller's `language`, checked: None when absent, the trimmed tag
+    when it is a plausible BCP-47 tag (en, ja, pt-BR, zh-Hant), else
+    InvalidRequest -- raised before payment when used as a PRECHECK."""
+    language = payload.get("language") if isinstance(payload, dict) else None
+    if language is None:
+        return None
+    if (not isinstance(language, str) or len(language) > MAX_LANGUAGE_CHARS
+            or not _LANGUAGE_TAG.match(language.strip())):
+        raise runtime.InvalidRequest(
+            "`language`, when given, must be a BCP-47 language tag such as en, ja, "
+            "pt-BR or zh-Hant.")
+    return language.strip()
+
+
+def in_language(system: Optional[str], language: Optional[str]) -> Optional[str]:
+    """The system instruction with the language rule appended: prose in the
+    requested language, everything quoted or coded left exactly as found."""
+    if not language:
+        return system
+    rule = (f"Write every prose field of the answer in the language with BCP-47 tag "
+            f"'{language}', translating as needed. Keep quotations, names, codes, "
+            "identifiers, JSON keys and numbers exactly as they appear in the material.")
+    return f"{system.rstrip()} {rule}" if system else rule
 
 
 def _require_text(payload: dict) -> str:
@@ -31,13 +70,15 @@ async def analyze(ctx, payload: dict) -> dict:
     a check that could not run is never reported as a pass.
     """
     text = _require_text(payload)
+    language = validate_language(payload)
     question = (payload.get("question") or "Summarize the key points.").strip()
 
     prompt = f"Material:\n\n{text}\n\n---\n\nTask: {question}"
+    system = in_language(_ANALYST, language)
 
     async def call(provider):
         return await provider.generate(
-            prompt, system=_ANALYST,
+            prompt, system=system,
             temperature=float(payload.get("temperature", 0.2)))
 
     value = await ctx.run("analyze", gemini.PROVIDERS, call, per_attempt_seconds=120)
@@ -59,10 +100,12 @@ async def extract_structured(ctx, payload: dict) -> dict:
     asked for instead of parsing prose.
     """
     text = _require_text(payload)
+    language = validate_language(payload)
     fields = payload.get("fields")
     if (not isinstance(fields, list) or not fields
             or not all(isinstance(f, str) and f.strip() for f in fields)):
         raise runtime.InvalidRequest("`fields` must be a non-empty list of field names.")
+    system = in_language(_ANALYST, language)
 
     prompt = (
         f"Material:\n\n{text}\n\n---\n\n"
@@ -71,7 +114,7 @@ async def extract_structured(ctx, payload: dict) -> dict:
     )
 
     async def call(provider):
-        return await provider.generate_json(prompt, system=_ANALYST, temperature=0.0)
+        return await provider.generate_json(prompt, system=system, temperature=0.0)
 
     value = await ctx.run("extract_structured", gemini.PROVIDERS, call,
                           per_attempt_seconds=120)
@@ -101,6 +144,7 @@ async def generate(ctx, payload: dict) -> dict:
     if system is not None and (not isinstance(system, str) or len(system) > 2000):
         raise runtime.InvalidRequest(
             "`system`, when given, must be a string up to 2000 characters.")
+    system = in_language(system, validate_language(payload))
     try:
         max_tokens = int(payload.get("max_tokens", 1024))
     except (TypeError, ValueError):
@@ -144,4 +188,5 @@ async def generate(ctx, payload: dict) -> dict:
 
 
 SKILLS = {"llm.analyze": analyze, "llm.extract": extract_structured, "llm.generate": generate}
+PRECHECKS = {name: validate_language for name in SKILLS}
 

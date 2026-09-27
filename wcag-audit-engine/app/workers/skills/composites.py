@@ -39,6 +39,7 @@ async def research_brief(ctx, payload: dict) -> dict:
         "question": (
             f"{question}\n\n(The material is the page at {page['final_url'] or url}, "
             f"titled {page.get('title') or 'untitled'}.)"),
+        "language": payload.get("language"),
     })
 
     return {
@@ -72,7 +73,9 @@ async def page_facts(ctx, payload: dict) -> dict:
 
     page = await extract_skill.extract_page(ctx, {"url": url})
     structured = await llm_skill.extract_structured(ctx, {
-        "text": page["text"], "fields": fields})
+        "text": page["text"], "fields": fields,
+        "language": payload.get("language"),
+    })
 
     return {
         "url": url,
@@ -118,6 +121,7 @@ async def market_intel(ctx, payload: dict) -> dict:
         "question": (
             f"{question} Be explicit about what the numbers do and do not support. "
             "This is market data, not investment advice."),
+        "language": payload.get("language"),
     })
 
     return {
@@ -200,6 +204,7 @@ async def research_web(ctx, payload: dict) -> dict:
         "text": _numbered_material(read),
         "question": (f"{question}\n\nCite every claim with [n] matching the source "
                     "number above. If the sources do not answer the question, say so."),
+        "language": payload.get("language"),
     })
     return {
         "question": question,
@@ -238,6 +243,7 @@ async def research_company(ctx, payload: dict) -> dict:
             "services, and anything notable from these sources (funding, reputation, "
             "recent news). Cite every claim with [n]. If the sources conflict or are "
             "thin, say so explicitly rather than filling gaps with assumptions."),
+        "language": payload.get("language"),
     })
     return {
         "company": company,
@@ -256,3 +262,5 @@ SKILLS = {
     "research.web": research_web,
     "research.company": research_company,
 }
+# A bad `language` is refused before the payment gate, like any bad input.
+PRECHECKS = {name: llm_skill.validate_language for name in SKILLS}

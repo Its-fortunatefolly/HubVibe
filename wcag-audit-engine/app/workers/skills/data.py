@@ -17,6 +17,7 @@ import re
 
 from .. import runtime
 from ..providers import bigquery, gemini
+from . import llm as llm_skill
 
 _TABLE = re.compile(r"^[A-Za-z0-9_\-]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -65,6 +66,7 @@ async def answer_question(ctx, payload: dict) -> dict:
     question = (payload.get("question") or "").strip()
     if not question:
         raise runtime.InvalidRequest("`question` is required.")
+    language = llm_skill.validate_language(payload)
     table = (payload.get("table") or "").strip()
     if not _TABLE.match(table):
         raise runtime.InvalidRequest(
@@ -110,8 +112,9 @@ async def answer_question(ctx, payload: dict) -> dict:
     async def summarize(provider):
         return await provider.generate(
             answer_prompt,
-            system=("You are a data analyst. Use only the rows provided. "
-                    "Never invent numbers."),
+            system=llm_skill.in_language(
+                "You are a data analyst. Use only the rows provided. Never invent numbers.",
+                language),
             temperature=0.1)
 
     summary = await ctx.run("summarize", gemini.PROVIDERS, summarize, per_attempt_seconds=90)
@@ -232,3 +235,4 @@ async def detect_anomalies(ctx, payload: dict) -> dict:
 
 SKILLS = {"data.query": run_sql, "data.question": answer_question,
           "data.forecast": forecast, "data.anomalies": detect_anomalies}
+PRECHECKS = {"data.question": llm_skill.validate_language}

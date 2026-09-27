@@ -90,6 +90,8 @@ ROUTES = [
     ("premium", "/work/research/company", {"company": "Anthropic", "max_sources": 2}),
     ("standard", "/work/monitor/snapshot", {"url": "https://example.com"}),
     ("standard", "/work/monitor/check", {"url": "https://example.com"}),
+    ("standard", "/work/commerce/availability", {
+        "url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10"}),
     ("advanced", "/work/security/mcp_inspect", {"url": "https://hubvibe-io.com/mcp"}),
     # --- wave 2a: keyless bees ported from the (now-removed) /svc catalog ---
     ("utility", "/work/fetch/raw", {"url": "https://example.com"}),

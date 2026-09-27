@@ -2,6 +2,7 @@
 
 from .. import runtime
 from ..providers import search_grounding
+from . import llm as llm_skill
 
 MAX_QUERY_CHARS = 400
 
@@ -14,8 +15,10 @@ async def web_search(ctx, payload: dict) -> dict:
         raise runtime.InvalidRequest(
             f"`query` is {len(query)} characters, over the {MAX_QUERY_CHARS} limit.")
 
+    language = llm_skill.validate_language(payload)
+
     async def call(provider):
-        return await provider.search(query)
+        return await provider.search(query, language=language)
 
     value = await ctx.run("search", search_grounding.PROVIDERS, call, per_attempt_seconds=45)
     return {
@@ -28,3 +31,4 @@ async def web_search(ctx, payload: dict) -> dict:
 
 
 SKILLS = {"search.web": web_search}
+PRECHECKS = {"search.web": llm_skill.validate_language}
