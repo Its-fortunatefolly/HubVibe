@@ -144,6 +144,18 @@ Utility (one live read, $0.02-$0.10):
   Grounding Lite)
 - POST /work/maps/route -- directions and travel time between two places
 - POST /work/maps/weather -- current or forecast weather at a named place
+- POST /work/traffic/route -- traffic-aware travel time and distance between
+  two places (Google Routes API computeRoutes): duration with live traffic,
+  duration without, the delay, distance, warnings; DRIVE, TWO_WHEELER, WALK,
+  BICYCLE or TRANSIT; optional future departure_time; as_of and checked_at
+- POST /work/video/youtube -- YouTube search (or lookup by id) with live
+  views, likes, comments, duration and thumbnail on every video (YouTube
+  Data API v3; sort and date, country, language filters; requires the
+  node's YouTube key)
+- POST /work/social/bluesky -- Bluesky profile + latest posts, account
+  search, or a post thread (public AppView, keyless)
+- POST /work/social/mastodon -- Mastodon hashtag timeline, account +
+  statuses, account/hashtag search, or trending tags on any public instance
 
 Standard (inference and data, $0.25-$0.50):
 - POST /work/llm/analyze -- answer a question from text you supply, saying

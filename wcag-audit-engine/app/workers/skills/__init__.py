@@ -15,8 +15,9 @@ rather than merely coexist.
 """
 
 from . import (  # noqa: F401
-    chain, code, commerce, composites, data, extract, fetch, finance, llm, maps,
-    market, media, monitor, opendata, search, security, stats, verify,
+    bluesky, chain, code, commerce, composites, data, extract, fetch, finance, llm,
+    maps, market, mastodon, media, monitor, opendata, search, security, stats,
+    traffic, verify, video,
 )
 
 REGISTRY = {}
@@ -27,6 +28,6 @@ REGISTRY = {}
 PRECHECKS = {}
 for _module in (extract, llm, chain, market, data, composites, search, code,
                 media, security, monitor, verify, fetch, maps, stats, commerce, finance,
-                opendata):
+                opendata, traffic, video, bluesky, mastodon):
     REGISTRY.update(_module.SKILLS)
     PRECHECKS.update(getattr(_module, "PRECHECKS", {}))

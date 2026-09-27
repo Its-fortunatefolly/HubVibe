@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -12464,6 +12464,2837 @@
         "method": "POST",
         "path": "/work/opendata/search",
         "price_usd": 0.1
+      }
+    },
+    {
+      "name": "hubvibe_traffic_route",
+      "title": "Traffic-aware travel time and distance between two places",
+      "description": "Travel time and distance between two places with live traffic, from the Google Routes API at call time: duration with traffic, duration without, the delay between them, distance, Google's localized texts, route description, warnings and advisory. Places are addresses, place names or \"lat,lng\". Input: origin, destination; optional travel_mode (DRIVE, TWO_WHEELER, WALK, BICYCLE, TRANSIT), departure_time (RFC 3339, future; omit to leave now), traffic (aware, optimal, none). $0.10 per call. Returns: origin, destination, travel_mode, traffic, departure_time, distance_meters, duration_seconds, static_duration_seconds, delay_seconds, duration_text, static_duration_text, distance_text, description, warnings[], advisory, source, as_of, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Where the trip starts: an address, a place name, or \"lat,lng\"."
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Where the trip ends: an address, a place name, or \"lat,lng\"."
+          },
+          "travel_mode": {
+            "type": "string",
+            "enum": [
+              "DRIVE",
+              "TWO_WHEELER",
+              "WALK",
+              "BICYCLE",
+              "TRANSIT"
+            ],
+            "description": "Default DRIVE. Traffic applies to DRIVE and TWO_WHEELER only."
+          },
+          "departure_time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC 3339 departure time in the future (2026-09-27T16:30:00Z); omit to leave now."
+          },
+          "traffic": {
+            "type": "string",
+            "enum": [
+              "aware",
+              "optimal",
+              "none"
+            ],
+            "description": "aware (default): live traffic; optimal: live traffic with the best route quality, slower; none: no traffic."
+          }
+        },
+        "required": [
+          "origin",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "Origin as given.",
+                "examples": [
+                  "Ferry Building, San Francisco, CA"
+                ]
+              },
+              "destination": {
+                "type": "string",
+                "description": "Destination as given.",
+                "examples": [
+                  "Oakland City Hall, Oakland, CA"
+                ]
+              },
+              "travel_mode": {
+                "type": "string",
+                "enum": [
+                  "DRIVE",
+                  "TWO_WHEELER",
+                  "WALK",
+                  "BICYCLE",
+                  "TRANSIT"
+                ],
+                "description": "Travel mode used.",
+                "examples": [
+                  "DRIVE"
+                ]
+              },
+              "traffic": {
+                "type": "string",
+                "enum": [
+                  "aware",
+                  "optimal",
+                  "none"
+                ],
+                "description": "Traffic handling used: aware (live traffic), optimal (live traffic, best route quality), none (no traffic; always none for WALK, BICYCLE and TRANSIT).",
+                "examples": [
+                  "aware"
+                ]
+              },
+              "departure_time": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Departure time sent to Google (RFC 3339, UTC); null when the trip starts now.",
+                "examples": [
+                  "2026-09-27T16:30:00Z"
+                ]
+              },
+              "distance_meters": {
+                "type": "integer",
+                "description": "Route length in metres.",
+                "examples": [
+                  17011
+                ]
+              },
+              "duration_seconds": {
+                "type": "integer",
+                "description": "Travel time in seconds, with traffic when `traffic` is aware or optimal.",
+                "examples": [
+                  1152
+                ]
+              },
+              "static_duration_seconds": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Travel time in seconds without traffic; null when Google does not state it.",
+                "examples": [
+                  1281
+                ]
+              },
+              "delay_seconds": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "duration_seconds minus static_duration_seconds (negative when traffic is lighter than typical); null when either is unknown.",
+                "examples": [
+                  -129
+                ]
+              },
+              "duration_text": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Google's localized travel time.",
+                "examples": [
+                  "19 mins"
+                ]
+              },
+              "static_duration_text": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Google's localized travel time without traffic.",
+                "examples": [
+                  "21 mins"
+                ]
+              },
+              "distance_text": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Google's localized distance (metric).",
+                "examples": [
+                  "17.0 km"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Route description as Google names it (main roads); null when not given.",
+                "examples": [
+                  "I-80 E and I-580 E"
+                ]
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A warning Google attaches to the route.",
+                  "examples": [
+                    "This route has tolls."
+                  ]
+                },
+                "description": "Google's warnings for the route, in the order given; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "advisory": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {},
+                "required": [],
+                "description": "Google's travelAdvisory object for the route (tolls, speed reading intervals, fuel) exactly as returned, {} when it has nothing to say; null when absent."
+              },
+              "source": {
+                "type": "string",
+                "const": "google-routes",
+                "description": "Data source: Google Routes API computeRoutes."
+              },
+              "as_of": {
+                "type": "string",
+                "description": "The departure time the answer was computed for: `departure_time`, else `checked_at`.",
+                "examples": [
+                  "2026-09-27T16:30:00Z"
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "origin",
+              "destination",
+              "travel_mode",
+              "traffic",
+              "departure_time",
+              "distance_meters",
+              "duration_seconds",
+              "static_duration_seconds",
+              "delay_seconds",
+              "duration_text",
+              "static_duration_text",
+              "distance_text",
+              "description",
+              "warnings",
+              "advisory",
+              "source",
+              "as_of",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "traffic.route response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Traffic-aware travel time and distance between two places"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/traffic/route",
+        "price_usd": 0.1
+      }
+    },
+    {
+      "name": "hubvibe_video_youtube",
+      "title": "YouTube search and video statistics, live",
+      "description": "Search YouTube or look up videos by id, each with live statistics read at call time from the YouTube Data API v3: title, channel, upload time, duration, views, likes, comments, live flag and thumbnail. A query runs YouTube's own video search (sort by relevance, date, views, rating or title; filter by upload date, country, language) plus one details call; video_ids skips it. Input: query or video_ids; optional max_results, order, published_after, region_code, language. $0.05 per call. Returns: query, video_ids, total_results, items[{video_id, url, title, description, channel_id, channel_title, published_at, duration_seconds, view_count, like_count, comment_count, live, thumbnail_url}], item_count, source, as_of, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Words to search YouTube for, in any language. Use this OR `video_ids`."
+          },
+          "video_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{11}$"
+            },
+            "minItems": 1,
+            "maxItems": 25,
+            "description": "YouTube video ids (11 characters) to look up directly; skips the search."
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "description": "With query: videos to return, default 10."
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "relevance",
+              "date",
+              "viewCount",
+              "rating",
+              "title"
+            ],
+            "description": "With query: YouTube's sort, default relevance."
+          },
+          "published_after": {
+            "type": "string",
+            "format": "date-time",
+            "description": "With query: only videos uploaded at or after this RFC 3339 time, e.g. 2026-01-01T00:00:00Z."
+          },
+          "region_code": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "description": "With query: ISO 3166-1 alpha-2 country whose results to prefer, e.g. US, JP."
+          },
+          "language": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2,3}$",
+            "description": "With query: ISO 639 language code of the results to prefer, e.g. en, ja."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "query"
+            ]
+          },
+          {
+            "required": [
+              "video_ids"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The query as given; null when video_ids were looked up.",
+                "examples": [
+                  "open source licensing"
+                ]
+              },
+              "video_ids": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "description": "The ids asked for, in order; null when a query was searched.",
+                "examples": [
+                  [
+                    "IJhS_fv5Ktk"
+                  ]
+                ]
+              },
+              "total_results": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "YouTube's estimated total matches for the query (pageInfo.totalResults); null when not sent.",
+                "examples": [
+                  19113
+                ]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "video_id": {
+                      "type": "string",
+                      "description": "YouTube video id.",
+                      "examples": [
+                        "IJhS_fv5Ktk"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Watch URL.",
+                      "examples": [
+                        "https://www.youtube.com/watch?v=IJhS_fv5Ktk"
+                      ]
+                    },
+                    "title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Title.",
+                      "examples": [
+                        "Open source licensing explained"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Description, cut at 500 characters; null when empty.",
+                      "examples": [
+                        "A short intro to open source licences."
+                      ]
+                    },
+                    "channel_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Uploading channel id.",
+                      "examples": [
+                        "UCoBPd2jgYzQ5m8k3f1nR9wA"
+                      ]
+                    },
+                    "channel_title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Uploading channel name.",
+                      "examples": [
+                        "Coinbase Developer Platform"
+                      ]
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Upload time as YouTube states it (ISO 8601).",
+                      "examples": [
+                        "2026-05-14T16:00:12Z"
+                      ]
+                    },
+                    "duration_seconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Length in whole seconds from contentDetails.duration; 0 for a live or upcoming stream; null when YouTube did not return the video's details.",
+                      "examples": [
+                        754
+                      ]
+                    },
+                    "view_count": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Views; null when YouTube does not send it.",
+                      "examples": [
+                        52004
+                      ]
+                    },
+                    "like_count": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Likes; null when the uploader hides them.",
+                      "examples": [
+                        2225
+                      ]
+                    },
+                    "comment_count": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Comments; null when hidden or comments are off.",
+                      "examples": [
+                        112
+                      ]
+                    },
+                    "live": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "description": "Live or upcoming broadcast (liveBroadcastContent is not none); null when not stated.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "thumbnail_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Thumbnail URL, the high size when YouTube offers it.",
+                      "examples": [
+                        "https://i.ytimg.com/vi/IJhS_fv5Ktk/hqdefault.jpg"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "video_id",
+                    "url",
+                    "title",
+                    "description",
+                    "channel_id",
+                    "channel_title",
+                    "published_at",
+                    "duration_seconds",
+                    "view_count",
+                    "like_count",
+                    "comment_count",
+                    "live",
+                    "thumbnail_url"
+                  ],
+                  "description": "One video, with its live statistics."
+                },
+                "description": "Videos, in YouTube's search order (or the order of the ids asked); ids YouTube does not know are absent."
+              },
+              "item_count": {
+                "type": "integer",
+                "description": "Videos returned.",
+                "examples": [
+                  3
+                ]
+              },
+              "source": {
+                "type": "string",
+                "const": "youtube-data-api",
+                "description": "Data source."
+              },
+              "as_of": {
+                "type": "string",
+                "description": "The same instant as checked_at: YouTube does not stamp its statistics.",
+                "examples": [
+                  "2026-09-27T12:00:00Z"
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "video_ids",
+              "total_results",
+              "items",
+              "item_count",
+              "source",
+              "as_of",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "video.youtube response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "YouTube search and video statistics, live"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/video/youtube",
+        "price_usd": 0.05
+      }
+    },
+    {
+      "name": "hubvibe_social_bluesky",
+      "title": "Bluesky profile, posts, account search or thread, live",
+      "description": "Bluesky, live and keyless from the public AppView: a profile with its latest posts (likes, reposts, replies, quotes, repost and reply flags, embed type), an account search, or a post thread with its replies. Input: mode (profile, search_actors, thread) with actor, query or uri; optional posts, limit, depth. Post search is not offered: Bluesky refuses it to unauthenticated callers. $0.05 per call. Returns: mode, actor, query, uri, profile{}, posts[], actors[], thread{}, post_count, actor_count, source, as_of, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "profile",
+              "search_actors",
+              "thread"
+            ],
+            "description": "profile: an account and its latest posts; search_actors: accounts matching a query; thread: a post and its replies."
+          },
+          "actor": {
+            "type": "string",
+            "maxLength": 253,
+            "description": "Handle (bsky.app) or DID (did:plc:...); profile mode."
+          },
+          "posts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Latest posts to return in profile mode, default 10."
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Words to match accounts on; search_actors mode."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "description": "Accounts to return in search_actors mode, default 10."
+          },
+          "uri": {
+            "type": "string",
+            "description": "Post AT-URI, at://did:plc:.../app.bsky.feed.post/<rkey>; thread mode."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "Reply depth to flatten in thread mode, default 2."
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "profile",
+                  "search_actors",
+                  "thread"
+                ],
+                "description": "Mode run.",
+                "examples": [
+                  "profile"
+                ]
+              },
+              "actor": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Actor asked for (profile mode).",
+                "examples": [
+                  "bsky.app"
+                ]
+              },
+              "query": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Query asked for (search_actors mode).",
+                "examples": [
+                  "coinbase"
+                ]
+              },
+              "uri": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Post AT-URI asked for (thread mode).",
+                "examples": [
+                  "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.post/3mw2cdr44fc2a"
+                ]
+              },
+              "profile": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "did": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "DID.",
+                    "examples": [
+                      "did:plc:z72i7hdynmk6r22z27h6tvur"
+                    ]
+                  },
+                  "handle": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Handle.",
+                    "examples": [
+                      "bsky.app"
+                    ]
+                  },
+                  "display_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Display name.",
+                    "examples": [
+                      "Bluesky"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Bio.",
+                    "examples": [
+                      "official bluesky account"
+                    ]
+                  },
+                  "avatar_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Avatar URL.",
+                    "examples": [
+                      "https://cdn.bsky.app/img/avatar/plain/did:plc:z72i7hdynmk6r22z27h6tvur/x@jpeg"
+                    ]
+                  },
+                  "followers": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Followers.",
+                    "examples": [
+                      4200000
+                    ]
+                  },
+                  "follows": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Follows.",
+                    "examples": [
+                      3
+                    ]
+                  },
+                  "posts": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Posts.",
+                    "examples": [
+                      1234
+                    ]
+                  },
+                  "created_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Account creation time.",
+                    "examples": [
+                      "2023-04-12T04:53:57.057Z"
+                    ]
+                  }
+                },
+                "required": [
+                  "did",
+                  "handle",
+                  "display_name",
+                  "description",
+                  "avatar_url",
+                  "followers",
+                  "follows",
+                  "posts",
+                  "created_at"
+                ],
+                "description": "The account, in profile mode; null otherwise."
+              },
+              "posts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "uri": {
+                      "type": "string",
+                      "description": "Post AT-URI.",
+                      "examples": [
+                        "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.post/3mw2cdr44fc2a"
+                      ]
+                    },
+                    "cid": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Content id.",
+                      "examples": [
+                        "bafyreicrjbyelww7gvuymagi7g2rirokyrvedwzeh5vflmsvnwhnwjvnyi"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Web URL of the post.",
+                      "examples": [
+                        "https://bsky.app/profile/bsky.app/post/3mw2cdr44fc2a"
+                      ]
+                    },
+                    "author_handle": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Author handle.",
+                      "examples": [
+                        "bsky.app"
+                      ]
+                    },
+                    "author_did": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Author DID.",
+                      "examples": [
+                        "did:plc:z72i7hdynmk6r22z27h6tvur"
+                      ]
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "Post text.",
+                      "examples": [
+                        "hello world"
+                      ]
+                    },
+                    "created_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Author's creation time.",
+                      "examples": [
+                        "2026-09-26T20:00:00.000Z"
+                      ]
+                    },
+                    "indexed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "AppView indexing time.",
+                      "examples": [
+                        "2026-09-26T20:00:00.000Z"
+                      ]
+                    },
+                    "likes": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Likes.",
+                      "examples": [
+                        90
+                      ]
+                    },
+                    "reposts": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Reposts.",
+                      "examples": [
+                        7
+                      ]
+                    },
+                    "replies": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Replies.",
+                      "examples": [
+                        5
+                      ]
+                    },
+                    "quotes": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Quote posts.",
+                      "examples": [
+                        2
+                      ]
+                    },
+                    "langs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "BCP-47 tag.",
+                        "examples": [
+                          "en"
+                        ]
+                      },
+                      "description": "Languages the author declared.",
+                      "examples": [
+                        [
+                          "en"
+                        ]
+                      ]
+                    },
+                    "is_repost": {
+                      "type": "boolean",
+                      "description": "Whether this feed item is a repost by the actor.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "reply_to": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "AT-URI of the parent post when this is a reply.",
+                      "examples": [
+                        null
+                      ]
+                    },
+                    "embed_type": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Embed type ($type) when the post carries one.",
+                      "examples": [
+                        "app.bsky.embed.images#view"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "uri",
+                    "cid",
+                    "url",
+                    "author_handle",
+                    "author_did",
+                    "text",
+                    "created_at",
+                    "indexed_at",
+                    "likes",
+                    "reposts",
+                    "replies",
+                    "quotes",
+                    "langs",
+                    "is_repost",
+                    "reply_to",
+                    "embed_type"
+                  ],
+                  "description": "One Bluesky post."
+                },
+                "description": "Latest posts in profile mode, newest first; empty otherwise."
+              },
+              "actors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "did": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "DID.",
+                      "examples": [
+                        "did:plc:coin"
+                      ]
+                    },
+                    "handle": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Handle.",
+                      "examples": [
+                        "coinbase.com"
+                      ]
+                    },
+                    "display_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Display name.",
+                      "examples": [
+                        "Coinbase"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Bio.",
+                      "examples": [
+                        "Coinbase on Bluesky"
+                      ]
+                    },
+                    "avatar_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Avatar URL.",
+                      "examples": [
+                        "https://cdn.bsky.app/img/avatar/plain/did:plc:coin/y@jpeg"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "did",
+                    "handle",
+                    "display_name",
+                    "description",
+                    "avatar_url"
+                  ],
+                  "description": "An account from actor search."
+                },
+                "description": "Accounts found in search_actors mode; empty otherwise."
+              },
+              "thread": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "post": {
+                    "type": "object",
+                    "properties": {
+                      "uri": {
+                        "type": "string",
+                        "description": "Post AT-URI.",
+                        "examples": [
+                          "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.post/3mw2cdr44fc2a"
+                        ]
+                      },
+                      "cid": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Content id.",
+                        "examples": [
+                          "bafyreicrjbyelww7gvuymagi7g2rirokyrvedwzeh5vflmsvnwhnwjvnyi"
+                        ]
+                      },
+                      "url": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Web URL of the post.",
+                        "examples": [
+                          "https://bsky.app/profile/bsky.app/post/3mw2cdr44fc2a"
+                        ]
+                      },
+                      "author_handle": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Author handle.",
+                        "examples": [
+                          "bsky.app"
+                        ]
+                      },
+                      "author_did": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Author DID.",
+                        "examples": [
+                          "did:plc:z72i7hdynmk6r22z27h6tvur"
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "description": "Post text.",
+                        "examples": [
+                          "hello world"
+                        ]
+                      },
+                      "created_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Author's creation time.",
+                        "examples": [
+                          "2026-09-26T20:00:00.000Z"
+                        ]
+                      },
+                      "indexed_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "AppView indexing time.",
+                        "examples": [
+                          "2026-09-26T20:00:00.000Z"
+                        ]
+                      },
+                      "likes": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Likes.",
+                        "examples": [
+                          90
+                        ]
+                      },
+                      "reposts": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Reposts.",
+                        "examples": [
+                          7
+                        ]
+                      },
+                      "replies": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Replies.",
+                        "examples": [
+                          5
+                        ]
+                      },
+                      "quotes": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Quote posts.",
+                        "examples": [
+                          2
+                        ]
+                      },
+                      "langs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "BCP-47 tag.",
+                          "examples": [
+                            "en"
+                          ]
+                        },
+                        "description": "Languages the author declared.",
+                        "examples": [
+                          [
+                            "en"
+                          ]
+                        ]
+                      },
+                      "is_repost": {
+                        "type": "boolean",
+                        "description": "Whether this feed item is a repost by the actor.",
+                        "examples": [
+                          false
+                        ]
+                      },
+                      "reply_to": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "AT-URI of the parent post when this is a reply.",
+                        "examples": [
+                          null
+                        ]
+                      },
+                      "embed_type": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Embed type ($type) when the post carries one.",
+                        "examples": [
+                          "app.bsky.embed.images#view"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "uri",
+                      "cid",
+                      "url",
+                      "author_handle",
+                      "author_did",
+                      "text",
+                      "created_at",
+                      "indexed_at",
+                      "likes",
+                      "reposts",
+                      "replies",
+                      "quotes",
+                      "langs",
+                      "is_repost",
+                      "reply_to",
+                      "embed_type"
+                    ],
+                    "description": "One Bluesky post."
+                  },
+                  "replies": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "uri": {
+                          "type": "string",
+                          "description": "Post AT-URI.",
+                          "examples": [
+                            "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.post/3mw2cdr44fc2a"
+                          ]
+                        },
+                        "cid": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Content id.",
+                          "examples": [
+                            "bafyreicrjbyelww7gvuymagi7g2rirokyrvedwzeh5vflmsvnwhnwjvnyi"
+                          ]
+                        },
+                        "url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Web URL of the post.",
+                          "examples": [
+                            "https://bsky.app/profile/bsky.app/post/3mw2cdr44fc2a"
+                          ]
+                        },
+                        "author_handle": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Author handle.",
+                          "examples": [
+                            "bsky.app"
+                          ]
+                        },
+                        "author_did": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Author DID.",
+                          "examples": [
+                            "did:plc:z72i7hdynmk6r22z27h6tvur"
+                          ]
+                        },
+                        "text": {
+                          "type": "string",
+                          "description": "Post text.",
+                          "examples": [
+                            "hello world"
+                          ]
+                        },
+                        "created_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Author's creation time.",
+                          "examples": [
+                            "2026-09-26T20:00:00.000Z"
+                          ]
+                        },
+                        "indexed_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "AppView indexing time.",
+                          "examples": [
+                            "2026-09-26T20:00:00.000Z"
+                          ]
+                        },
+                        "likes": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "description": "Likes.",
+                          "examples": [
+                            90
+                          ]
+                        },
+                        "reposts": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "description": "Reposts.",
+                          "examples": [
+                            7
+                          ]
+                        },
+                        "replies": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "description": "Replies.",
+                          "examples": [
+                            5
+                          ]
+                        },
+                        "quotes": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "description": "Quote posts.",
+                          "examples": [
+                            2
+                          ]
+                        },
+                        "langs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "description": "BCP-47 tag.",
+                            "examples": [
+                              "en"
+                            ]
+                          },
+                          "description": "Languages the author declared.",
+                          "examples": [
+                            [
+                              "en"
+                            ]
+                          ]
+                        },
+                        "is_repost": {
+                          "type": "boolean",
+                          "description": "Whether this feed item is a repost by the actor.",
+                          "examples": [
+                            false
+                          ]
+                        },
+                        "reply_to": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "AT-URI of the parent post when this is a reply.",
+                          "examples": [
+                            null
+                          ]
+                        },
+                        "embed_type": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Embed type ($type) when the post carries one.",
+                          "examples": [
+                            "app.bsky.embed.images#view"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "uri",
+                        "cid",
+                        "url",
+                        "author_handle",
+                        "author_did",
+                        "text",
+                        "created_at",
+                        "indexed_at",
+                        "likes",
+                        "reposts",
+                        "replies",
+                        "quotes",
+                        "langs",
+                        "is_repost",
+                        "reply_to",
+                        "embed_type"
+                      ],
+                      "description": "One Bluesky post."
+                    },
+                    "description": "Replies flattened to the requested depth, in thread order."
+                  },
+                  "reply_count": {
+                    "type": "integer",
+                    "description": "Replies returned.",
+                    "examples": [
+                      2
+                    ]
+                  }
+                },
+                "required": [
+                  "post",
+                  "replies",
+                  "reply_count"
+                ],
+                "description": "The thread, in thread mode; null otherwise."
+              },
+              "post_count": {
+                "type": "integer",
+                "description": "Posts returned.",
+                "examples": [
+                  3
+                ]
+              },
+              "actor_count": {
+                "type": "integer",
+                "description": "Accounts returned.",
+                "examples": [
+                  0
+                ]
+              },
+              "source": {
+                "type": "string",
+                "const": "bluesky-public-appview",
+                "description": "Data source."
+              },
+              "as_of": {
+                "type": "string",
+                "description": "Indexing time of the newest post returned, else checked_at.",
+                "examples": [
+                  "2026-09-26T20:00:00.000Z"
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "mode",
+              "actor",
+              "query",
+              "uri",
+              "profile",
+              "posts",
+              "actors",
+              "thread",
+              "post_count",
+              "actor_count",
+              "source",
+              "as_of",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "social.bluesky response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Bluesky profile, posts, account search or thread, live"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/social/bluesky",
+        "price_usd": 0.05
+      }
+    },
+    {
+      "name": "hubvibe_social_mastodon",
+      "title": "Mastodon hashtag timeline, account, search or trends, live",
+      "description": "Mastodon (any public instance, default mastodon.social), live and keyless: a hashtag timeline, an account with its latest statuses, an account or hashtag search, or the trending hashtags, each status as plain text plus its HTML, counts, media, tags and reblog flag. Input: mode (hashtag, account, search, trends) with tag, acct or query; optional instance, limit, statuses, kind. Status search and the public firehose need a token and are not offered. $0.05 per call. Returns: mode, instance, tag, acct, query, kind, account{}, statuses[], accounts[], hashtags[], status_count, source, as_of, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "hashtag",
+              "account",
+              "search",
+              "trends"
+            ],
+            "description": "hashtag: latest statuses under a tag; account: an account and its statuses; search: accounts or hashtags matching a query; trends: trending hashtags."
+          },
+          "instance": {
+            "type": "string",
+            "maxLength": 253,
+            "description": "Mastodon server hostname, default mastodon.social."
+          },
+          "tag": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Hashtag without #; hashtag mode."
+          },
+          "acct": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 320,
+            "description": "Username, optionally @domain (Gargron or Gargron@mastodon.social); account mode."
+          },
+          "statuses": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40,
+            "description": "Latest statuses to return in account mode, default 10."
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Search words; search mode."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "accounts",
+              "hashtags"
+            ],
+            "description": "What to search for, default accounts."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40,
+            "description": "Items to return (hashtag up to 40, search up to 25, trends up to 20), default 10."
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "hashtag",
+                  "account",
+                  "search",
+                  "trends"
+                ],
+                "description": "Mode run.",
+                "examples": [
+                  "hashtag"
+                ]
+              },
+              "instance": {
+                "type": "string",
+                "description": "Instance queried.",
+                "examples": [
+                  "mastodon.social"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Hashtag asked for (hashtag mode).",
+                "examples": [
+                  "opensource"
+                ]
+              },
+              "acct": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Account asked for (account mode).",
+                "examples": [
+                  "Gargron"
+                ]
+              },
+              "query": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Query asked for (search mode).",
+                "examples": [
+                  "opensource"
+                ]
+              },
+              "kind": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "accounts or hashtags (search mode).",
+                "examples": [
+                  "accounts"
+                ]
+              },
+              "account": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Account id on the instance.",
+                    "examples": [
+                      "1"
+                    ]
+                  },
+                  "username": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Username.",
+                    "examples": [
+                      "Gargron"
+                    ]
+                  },
+                  "acct": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "acct (username or username@domain).",
+                    "examples": [
+                      "Gargron"
+                    ]
+                  },
+                  "display_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Display name.",
+                    "examples": [
+                      "Eugen Rochko"
+                    ]
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Profile URL.",
+                    "examples": [
+                      "https://mastodon.social/@Gargron"
+                    ]
+                  },
+                  "bio": {
+                    "type": "string",
+                    "description": "Bio as plain text.",
+                    "examples": [
+                      "Founder of Mastodon"
+                    ]
+                  },
+                  "avatar_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Avatar URL.",
+                    "examples": [
+                      "https://files.mastodon.social/accounts/avatars/x.png"
+                    ]
+                  },
+                  "followers": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Followers.",
+                    "examples": [
+                      500000
+                    ]
+                  },
+                  "following": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Following.",
+                    "examples": [
+                      400
+                    ]
+                  },
+                  "statuses": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Statuses posted.",
+                    "examples": [
+                      75000
+                    ]
+                  },
+                  "created_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Account creation time.",
+                    "examples": [
+                      "2016-03-16T00:00:00.000Z"
+                    ]
+                  },
+                  "bot": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Declared as a bot; null when not stated.",
+                    "examples": [
+                      false
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "username",
+                  "acct",
+                  "display_name",
+                  "url",
+                  "bio",
+                  "avatar_url",
+                  "followers",
+                  "following",
+                  "statuses",
+                  "created_at",
+                  "bot"
+                ],
+                "description": "The account, in account mode; null otherwise."
+              },
+              "statuses": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Status id.",
+                      "examples": [
+                        "115000000000000001"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Web URL.",
+                      "examples": [
+                        "https://mastodon.social/@Gargron/115000000000000001"
+                      ]
+                    },
+                    "created_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Creation time.",
+                      "examples": [
+                        "2026-09-27T01:00:00.000Z"
+                      ]
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "Plain-text content.",
+                      "examples": [
+                        "Open source rocks"
+                      ]
+                    },
+                    "content_html": {
+                      "type": "string",
+                      "description": "Content as the instance serves it (sanitized HTML).",
+                      "examples": [
+                        "<p>Open source rocks</p>"
+                      ]
+                    },
+                    "language": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Language code.",
+                      "examples": [
+                        "en"
+                      ]
+                    },
+                    "visibility": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "public, unlisted...",
+                      "examples": [
+                        "public"
+                      ]
+                    },
+                    "replies": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Replies.",
+                      "examples": [
+                        1
+                      ]
+                    },
+                    "reblogs": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Boosts.",
+                      "examples": [
+                        2
+                      ]
+                    },
+                    "favourites": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Favourites.",
+                      "examples": [
+                        3
+                      ]
+                    },
+                    "is_reblog": {
+                      "type": "boolean",
+                      "description": "Whether this status is a boost of another.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "reblog_of_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "URL of the boosted status when is_reblog.",
+                      "examples": [
+                        null
+                      ]
+                    },
+                    "author_acct": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Author acct.",
+                      "examples": [
+                        "Gargron"
+                      ]
+                    },
+                    "author_display_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Author display name.",
+                      "examples": [
+                        "Eugen Rochko"
+                      ]
+                    },
+                    "media": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "image, video, gifv, audio...",
+                            "examples": [
+                              "image"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "description": "Media URL.",
+                            "examples": [
+                              "https://files.mastodon.social/media_attachments/files/x.png"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "url"
+                        ],
+                        "description": "One attachment."
+                      },
+                      "description": "Media attachments.",
+                      "examples": [
+                        []
+                      ]
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "Hashtag name.",
+                        "examples": [
+                          "opensource"
+                        ]
+                      },
+                      "description": "Hashtags on the status.",
+                      "examples": [
+                        [
+                          "opensource"
+                        ]
+                      ]
+                    },
+                    "sensitive": {
+                      "type": "boolean",
+                      "description": "Marked sensitive.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "spoiler_text": {
+                      "type": "string",
+                      "description": "Content warning text, empty when none.",
+                      "examples": [
+                        ""
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "url",
+                    "created_at",
+                    "text",
+                    "content_html",
+                    "language",
+                    "visibility",
+                    "replies",
+                    "reblogs",
+                    "favourites",
+                    "is_reblog",
+                    "reblog_of_url",
+                    "author_acct",
+                    "author_display_name",
+                    "media",
+                    "tags",
+                    "sensitive",
+                    "spoiler_text"
+                  ],
+                  "description": "One Mastodon status."
+                },
+                "description": "Statuses, newest first (hashtag and account modes); empty otherwise."
+              },
+              "accounts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Account id on the instance.",
+                      "examples": [
+                        "1"
+                      ]
+                    },
+                    "username": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Username.",
+                      "examples": [
+                        "Gargron"
+                      ]
+                    },
+                    "acct": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "acct (username or username@domain).",
+                      "examples": [
+                        "Gargron"
+                      ]
+                    },
+                    "display_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Display name.",
+                      "examples": [
+                        "Eugen Rochko"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Profile URL.",
+                      "examples": [
+                        "https://mastodon.social/@Gargron"
+                      ]
+                    },
+                    "bio": {
+                      "type": "string",
+                      "description": "Bio as plain text.",
+                      "examples": [
+                        "Founder of Mastodon"
+                      ]
+                    },
+                    "avatar_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Avatar URL.",
+                      "examples": [
+                        "https://files.mastodon.social/accounts/avatars/x.png"
+                      ]
+                    },
+                    "followers": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Followers.",
+                      "examples": [
+                        500000
+                      ]
+                    },
+                    "following": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Following.",
+                      "examples": [
+                        400
+                      ]
+                    },
+                    "statuses": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Statuses posted.",
+                      "examples": [
+                        75000
+                      ]
+                    },
+                    "created_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Account creation time.",
+                      "examples": [
+                        "2016-03-16T00:00:00.000Z"
+                      ]
+                    },
+                    "bot": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "description": "Declared as a bot; null when not stated.",
+                      "examples": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "username",
+                    "acct",
+                    "display_name",
+                    "url",
+                    "bio",
+                    "avatar_url",
+                    "followers",
+                    "following",
+                    "statuses",
+                    "created_at",
+                    "bot"
+                  ],
+                  "description": "A Mastodon account."
+                },
+                "description": "Accounts found (search mode, kind accounts); empty otherwise."
+              },
+              "hashtags": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Hashtag name.",
+                      "examples": [
+                        "opensource"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Tag URL on the instance.",
+                      "examples": [
+                        "https://mastodon.social/tags/opensource"
+                      ]
+                    },
+                    "uses_7d": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Uses over the history the instance reports (about a week); null when none.",
+                      "examples": [
+                        120
+                      ]
+                    },
+                    "accounts_7d": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Distinct accounts over that history; null when none.",
+                      "examples": [
+                        90
+                      ]
+                    },
+                    "days": {
+                      "type": "integer",
+                      "description": "Days of history the instance reported.",
+                      "examples": [
+                        7
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "url",
+                    "uses_7d",
+                    "accounts_7d",
+                    "days"
+                  ],
+                  "description": "A hashtag with its recent activity."
+                },
+                "description": "Hashtags (search mode, kind hashtags, or trends); empty otherwise."
+              },
+              "status_count": {
+                "type": "integer",
+                "description": "Statuses returned.",
+                "examples": [
+                  3
+                ]
+              },
+              "source": {
+                "type": "string",
+                "const": "mastodon-public-api",
+                "description": "Data source."
+              },
+              "as_of": {
+                "type": "string",
+                "description": "Creation time of the newest status returned, else checked_at.",
+                "examples": [
+                  "2026-09-27T01:00:00.000Z"
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "mode",
+              "instance",
+              "tag",
+              "acct",
+              "query",
+              "kind",
+              "account",
+              "statuses",
+              "accounts",
+              "hashtags",
+              "status_count",
+              "source",
+              "as_of",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "social.mastodon response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Mastodon hashtag timeline, account, search or trends, live"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/social/mastodon",
+        "price_usd": 0.05
       }
     },
     {
