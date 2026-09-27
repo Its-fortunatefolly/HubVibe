@@ -16,7 +16,7 @@ rather than merely coexist.
 
 from . import (  # noqa: F401
     bluesky, chain, code, commerce, composites, data, extract, fetch, finance, llm,
-    maps, market, mastodon, media, monitor, opendata, search, security, stats,
+    macro, maps, market, mastodon, media, monitor, news, opendata, search, security, stats,
     traffic, travel, verify, video, x_pulse,
 )
 
@@ -28,6 +28,6 @@ REGISTRY = {}
 PRECHECKS = {}
 for _module in (extract, llm, chain, market, data, composites, search, code,
                 media, security, monitor, verify, fetch, maps, stats, commerce, finance,
-                opendata, traffic, video, bluesky, mastodon, x_pulse, travel):
+                opendata, traffic, video, bluesky, mastodon, x_pulse, travel, news, macro):
     REGISTRY.update(_module.SKILLS)
     PRECHECKS.update(getattr(_module, "PRECHECKS", {}))
