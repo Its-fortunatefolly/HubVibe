@@ -92,7 +92,8 @@ ROUTES = [
     ("standard", "/work/monitor/check", {"url": "https://example.com"}),
     ("standard", "/work/commerce/availability", {
         "url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10"}),
-    ("utility", "/work/opendata/search", {"query": "人口", "region": "jp", "limit": 3}),
+    ("utility", "/work/opendata/search", {"query": "인구", "region": "kr", "limit": 3}),
+    ("utility", "/work/opendata/table", {"url": "https://www.data.go.kr/data/15005995/fileData.do", "max_rows": 5}),
     ("standard", "/work/news/search", {"query": "半導体", "language": "ja", "limit": 5}),
     ("utility", "/work/data/macro", {"indicator": "inflation", "country": "JP", "last": 5}),
     ("standard", "/work/travel/flights", {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3}),

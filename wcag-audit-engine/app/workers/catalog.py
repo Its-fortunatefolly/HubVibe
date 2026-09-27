@@ -852,32 +852,57 @@ CATALOG = [
     # --- regional structured data -----------------------------------------
     Worker(
         name="opendata.search", price_usd=0.10, tier="utility",
-        title="Search Asia-Pacific open-data portals for datasets",
+        title="Search 16 government open-data portals for datasets",
         description=(
-            'Find structured government datasets across Asia-Pacific open-data portals '
-            'in one call: data.gov.au (Australia), the e-Gov Data Portal and the Tokyo '
-            'catalog (Japan), DATA.GOV.HK (Hong Kong). Query in any language, the '
-            "portal's own included; every match comes back with its organization, "
-            'licence, update time and the download URLs of its CSV/JSON/XLS resources, '
-            'ready for fetch.raw. Portals that did not answer are listed, never hidden. '
-            'Input: query; optional region (au, jp, hk, all), limit, portals.'),
-        tags=["open-data", "datasets", "apac", "australia", "japan", "hong-kong", "ckan", "government"],
+            "Find government datasets across 16 open-data portals in one call: Korea "
+            "(data.go.kr), Japan (e-Gov, Tokyo, BODIK), Hong Kong, Australia, UK, "
+            "Canada, the EU catalog (139,000+ datasets), Germany, Italy, Ireland, "
+            "Switzerland, Netherlands, Israel, Chile. Query in any language, the "
+            "portal's own included; every match comes back with organization, "
+            "update time and download URLs, ready for opendata.table. Portals that "
+            "did not answer are listed, never hidden. Input: query; optional region, "
+            "limit, portals."),
+        tags=["open-data", "datasets", "government", "korea", "japan", "europe", "uk", "canada", "australia", "ckan"],
         input_schema=_obj({
             "query": {"type": "string", "minLength": 1, "maxLength": 300,
-                      "description": "Words to search for, in any language (e.g. 人口, rainfall, 交通)."},
-            "region": {"type": "string", "enum": ["all", "au", "hk", "jp"],
-                       "description": "Which portals to search. Default all."},
+                      "description": "Words to search for, in any language (인구, 人口, rainfall, Bevölkerung)."},
+            "region": {"type": "string", "enum": ["all", "au", "ca", "ch", "cl", "de", "eu", "gb", "hk", "ie", "il", "it", "jp", "kr", "nl"],
+                       "description": "Which portals to search. Default all (16 portals, concurrently)."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 50,
                       "description": "Results per portal, default 10."},
             "portals": {"type": "array", "items": {"type": "string"}, "minItems": 1,
-                        "description": "Specific portal ids instead of a region, e.g. [\"data.gov.au\"]."},
+                        "description": "Specific portal ids instead of a region, e.g. [\"data.go.kr\", \"data.bodik.jp\"]."},
         }, ["query"]),
         returns=("query, region, portals_searched[], portals_ok[], portals_failed[], total_matches{}, "
-                 "results[{portal, title, description, organization, resources[{url, format}]...}], "
+                 "results[{portal, title, description, organization, landing_url, resources[{url, format}]...}], "
                  "result_count, checked_at."),
         skill="opendata.search", max_seconds=60,
-        pricing_basis="Provisional. Provider cost zero (public CKAN APIs); one request per portal.",
+        pricing_basis="Provisional. Provider cost zero (public portals); one request per portal.",
         requires=("opendata",)),
+    Worker(
+        name="opendata.table", price_usd=0.10, tier="utility",
+        title="Read a government dataset file as JSON rows",
+        description=(
+            "Turn one dataset file into JSON rows: a CSV, TSV, XLSX or JSON link from "
+            "any portal, an e-Stat (Japan) file-download link, or a data.go.kr (Korea) "
+            "dataset page, which is resolved to its keyless file first. Encoding is "
+            "detected (Korean CP949, Japanese Shift_JIS, Chinese Big5/GB18030, "
+            "UTF-8/16, Western code pages), the header row found, numbers typed, "
+            "XLSX sheets selectable, large files capped and disclosed. Input: url; "
+            "optional max_rows, sheet, encoding, delimiter."),
+        tags=["open-data", "csv", "xlsx", "table", "rows", "korea", "japan", "encoding", "government"],
+        input_schema=_obj({
+            "url": {"type": "string", "description": "File link, e-Stat file-download link, or a data.go.kr dataset page."},
+            "max_rows": {"type": "integer", "minimum": 1, "maximum": 2000, "description": "Rows to return, default 200."},
+            "sheet": {"type": ["string", "integer"], "description": "XLSX sheet name or 0-based index. Default: first sheet."},
+            "encoding": {"type": "string", "maxLength": 30, "description": "Force a codec (cp949, shift_jis, big5). Default: detected."},
+            "delimiter": {"type": "string", "minLength": 1, "maxLength": 1, "description": "Force a CSV delimiter. Default: sniffed."},
+        }, ["url"]),
+        returns=("source_url, resolved_from, file_url, final_url, filename, content_type, bytes, format, encoding, "
+                 "sheet, sheets[], columns[], column_count, rows[{...}], row_count, total_rows, truncated, notes[], checked_at."),
+        skill="opendata.table", max_seconds=90,
+        pricing_basis="Provisional. Provider cost zero (one file fetch; one page fetch first for a data.go.kr page).",
+        requires=("tabular",)),
     # --- news and official numbers, keyless ----------------------------------
     Worker(
         name="news.search", price_usd=0.25, tier="standard",
@@ -1381,7 +1406,8 @@ _EXAMPLE_OVERRIDES = {
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},
     "social.x_pulse": {"query": "open source", "days": 3, "sample": 20, "lang": "en"},
     "social.mastodon": {"mode": "hashtag", "tag": "opensource", "limit": 3},
-    "opendata.search": {"query": "人口", "region": "jp", "limit": 5},
+    "opendata.search": {"query": "인구", "region": "kr", "limit": 5},
+    "opendata.table": {"url": "https://www.data.go.kr/data/15005995/fileData.do", "max_rows": 5},
     "market.stock": {"symbol": "AAPL", "range": "1mo"},
     # Either symbol or cik is valid, so nothing is `required`.
     "market.fundamentals": {"symbol": "AAPL", "periods": 4, "forms": ["10-K", "10-Q"]},
