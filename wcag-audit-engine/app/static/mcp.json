@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -9597,6 +9597,2334 @@
       "httpEndpoint": {
         "method": "POST",
         "path": "/work/commerce/availability",
+        "price_usd": 0.5
+      }
+    },
+    {
+      "name": "hubvibe_market_stock",
+      "title": "Live stock quote and daily history",
+      "description": "Live equity quote for a US-listed ticker: last price, change, day range, volume and market state, plus daily OHLCV history for the range you choose (1d to 5y), read at call time from Nasdaq's public data API with Yahoo Finance as the fallback. Every answer names the source that answered, the source's own timestamp (as_of), its delay in minutes, and when this node read it (checked_at). Input: symbol; optional range (default 1mo), include_history. $0.05 per call. Returns: symbol, name, exchange, currency, price, change, change_pct, previous_close, day_high, day_low, volume, market_state, as_of, delayed_minutes, history[], history_rows, source, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.\\-]{0,11}$",
+            "description": "Ticker symbol, e.g. AAPL, BRK.B, RY-PC."
+          },
+          "range": {
+            "type": "string",
+            "enum": [
+              "1d",
+              "5d",
+              "1mo",
+              "3mo",
+              "6mo",
+              "1y",
+              "2y",
+              "5y"
+            ],
+            "description": "History range, default 1mo."
+          },
+          "include_history": {
+            "type": "boolean",
+            "description": "Default true."
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "symbol": {
+                "type": "string",
+                "description": "Ticker.",
+                "examples": [
+                  "AAPL"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Company or instrument name.",
+                "examples": [
+                  "Apple Inc."
+                ]
+              },
+              "exchange": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Listing exchange as the source names it.",
+                "examples": [
+                  "NASDAQ-GS"
+                ]
+              },
+              "asset_class": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "stocks, etf, equity...",
+                "examples": [
+                  "stocks"
+                ]
+              },
+              "currency": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Quote currency.",
+                "examples": [
+                  "USD"
+                ]
+              },
+              "price": {
+                "type": "number",
+                "description": "Last price.",
+                "examples": [
+                  341.07
+                ]
+              },
+              "change": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Change on the day.",
+                "examples": [
+                  5.15
+                ]
+              },
+              "change_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Change on the day, percent.",
+                "examples": [
+                  1.53
+                ]
+              },
+              "previous_close": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Previous close.",
+                "examples": [
+                  335.92
+                ]
+              },
+              "day_high": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Day high.",
+                "examples": [
+                  341.67
+                ]
+              },
+              "day_low": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Day low.",
+                "examples": [
+                  334.53
+                ]
+              },
+              "volume": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Volume.",
+                "examples": [
+                  30002768
+                ]
+              },
+              "market_state": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Open, Closed, Pre-Market... as the source reports it.",
+                "examples": [
+                  "Closed"
+                ]
+              },
+              "as_of": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The source's own timestamp for the price (ISO 8601; a date, or a time with its zone).",
+                "examples": [
+                  "2026-09-25T20:00:01Z"
+                ]
+              },
+              "delayed_minutes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "How delayed the source says the quote is; null when it does not say.",
+                "examples": [
+                  15
+                ]
+              },
+              "history_range": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The range the history covers.",
+                "examples": [
+                  "1mo"
+                ]
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "description": "Trading day (YYYY-MM-DD).",
+                      "examples": [
+                        "2026-09-25"
+                      ]
+                    },
+                    "open": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Open.",
+                      "examples": [
+                        336.04
+                      ]
+                    },
+                    "high": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "High.",
+                      "examples": [
+                        341.67
+                      ]
+                    },
+                    "low": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Low.",
+                      "examples": [
+                        334.53
+                      ]
+                    },
+                    "close": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Close.",
+                      "examples": [
+                        341.07
+                      ]
+                    },
+                    "volume": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Shares traded.",
+                      "examples": [
+                        30002510
+                      ]
+                    }
+                  },
+                  "required": [
+                    "date",
+                    "close"
+                  ],
+                  "description": "One trading day."
+                },
+                "description": "Daily bars, oldest first; empty when include_history is false."
+              },
+              "history_rows": {
+                "type": "integer",
+                "description": "Bars returned.",
+                "examples": [
+                  22
+                ]
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The provider that answered.",
+                "examples": [
+                  "nasdaq-data-api"
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "symbol",
+              "price",
+              "as_of",
+              "delayed_minutes",
+              "history",
+              "history_rows",
+              "source",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "market.stock response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Live stock quote and daily history"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/market/stock",
+        "price_usd": 0.05
+      }
+    },
+    {
+      "name": "hubvibe_market_fundamentals",
+      "title": "SEC-filed fundamentals (XBRL company facts)",
+      "description": "Company fundamentals as the filer reported them to the SEC: revenue, net income, diluted EPS, operating income, assets, liabilities, equity, cash and shares outstanding by reporting period (10-K and 10-Q), from EDGAR's official XBRL company-facts API, read at call time. Name your own XBRL concepts for any other line item; restatements resolve to the latest filing. Input: symbol (US ticker) or cik; optional concepts, periods, forms. $0.05 per call. Returns: symbol, cik, entity_name, concepts{name: {concept, taxonomy, label, unit, values[]}}, concepts_missing[], periods, forms, as_of, source, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.\\-]{0,11}$",
+            "description": "US ticker in the SEC's table, e.g. AAPL. Use this OR `cik`."
+          },
+          "cik": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "SEC Central Index Key, e.g. 320193."
+          },
+          "concepts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 25,
+            "description": "XBRL concept names (us-gaap, ifrs-full or dei). Default: Revenues, NetIncomeLoss, EarningsPerShareDiluted, OperatingIncomeLoss, Assets, Liabilities, StockholdersEquity, CashAndCashEquivalentsAtCarryingValue, EntityCommonStockSharesOutstanding."
+          },
+          "periods": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40,
+            "description": "Most recent reporting periods per concept, default 8."
+          },
+          "forms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Restrict to these forms, e.g. [\"10-K\"] for annual figures only."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "symbol"
+            ]
+          },
+          {
+            "required": [
+              "cik"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "symbol": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Ticker as given.",
+                "examples": [
+                  "AAPL"
+                ]
+              },
+              "cik": {
+                "type": "integer",
+                "description": "SEC Central Index Key.",
+                "examples": [
+                  320193
+                ]
+              },
+              "entity_name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Registrant name.",
+                "examples": [
+                  "Apple Inc."
+                ]
+              },
+              "concepts": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "description": "One entry per concept found, keyed by the name asked for.",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "concept": {
+                      "type": "string",
+                      "description": "The XBRL concept actually used (an alternate may stand in for the one asked).",
+                      "examples": [
+                        "RevenueFromContractWithCustomerExcludingAssessedTax"
+                      ]
+                    },
+                    "taxonomy": {
+                      "type": "string",
+                      "description": "us-gaap, ifrs-full or dei.",
+                      "examples": [
+                        "us-gaap"
+                      ]
+                    },
+                    "label": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The concept's label.",
+                      "examples": [
+                        "Revenue from Contract with Customer, Excluding Assessed Tax"
+                      ]
+                    },
+                    "unit": {
+                      "type": "string",
+                      "description": "Unit of every value.",
+                      "examples": [
+                        "USD"
+                      ]
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "end": {
+                            "type": "string",
+                            "description": "Period end (YYYY-MM-DD).",
+                            "examples": [
+                              "2026-06-27"
+                            ]
+                          },
+                          "start": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "Period start for flows; null for instants (balance-sheet items).",
+                            "examples": [
+                              "2026-03-29"
+                            ]
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The reported value, in `unit`.",
+                            "examples": [
+                              109417000000
+                            ]
+                          },
+                          "unit": {
+                            "type": "string",
+                            "description": "XBRL unit.",
+                            "examples": [
+                              "USD"
+                            ]
+                          },
+                          "fiscal_year": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "Filer's fiscal year.",
+                            "examples": [
+                              2026
+                            ]
+                          },
+                          "fiscal_period": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "FY, Q1, Q2 or Q3.",
+                            "examples": [
+                              "Q3"
+                            ]
+                          },
+                          "form": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "Form it was reported on.",
+                            "examples": [
+                              "10-Q"
+                            ]
+                          },
+                          "filed": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "Filing date.",
+                            "examples": [
+                              "2026-07-31"
+                            ]
+                          },
+                          "frame": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "SEC calendar frame when assigned.",
+                            "examples": [
+                              "CY2026Q2"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "end",
+                          "value",
+                          "unit"
+                        ],
+                        "description": "One reported value."
+                      },
+                      "description": "Reported values, newest period first, one per reported (start, end) period: a quarter and the year-to-date figure that share an end date are separate entries; a restated period shows the latest filing's figure.",
+                      "examples": [
+                        [
+                          {
+                            "end": "2026-06-27",
+                            "start": "2026-03-29",
+                            "value": 109417000000,
+                            "unit": "USD",
+                            "fiscal_year": 2026,
+                            "fiscal_period": "Q3",
+                            "form": "10-Q",
+                            "filed": "2026-07-31",
+                            "frame": "CY2026Q2"
+                          }
+                        ]
+                      ]
+                    }
+                  },
+                  "required": [
+                    "concept",
+                    "taxonomy",
+                    "unit",
+                    "values"
+                  ],
+                  "description": "One concept's reported values."
+                },
+                "examples": [
+                  {
+                    "Revenues": {
+                      "concept": "RevenueFromContractWithCustomerExcludingAssessedTax",
+                      "taxonomy": "us-gaap",
+                      "label": "Revenue from Contract with Customer, Excluding Assessed Tax",
+                      "unit": "USD",
+                      "values": [
+                        {
+                          "end": "2026-06-27",
+                          "start": "2026-03-29",
+                          "value": 109417000000,
+                          "unit": "USD",
+                          "fiscal_year": 2026,
+                          "fiscal_period": "Q3",
+                          "form": "10-Q",
+                          "filed": "2026-07-31",
+                          "frame": "CY2026Q2"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "concepts_missing": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A concept the filer has not reported.",
+                  "examples": [
+                    "Liabilities"
+                  ]
+                },
+                "description": "Concepts asked for that the filer has no facts for.",
+                "examples": [
+                  []
+                ]
+              },
+              "periods": {
+                "type": "integer",
+                "description": "Periods per concept requested.",
+                "examples": [
+                  8
+                ]
+              },
+              "forms": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Form filter applied, or null.",
+                "examples": [
+                  [
+                    "10-K",
+                    "10-Q"
+                  ]
+                ]
+              },
+              "as_of": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Latest filing date among the values returned.",
+                "examples": [
+                  "2026-07-31"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "const": "sec-edgar-xbrl-companyfacts",
+                "description": "Data source."
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "cik",
+              "concepts",
+              "concepts_missing",
+              "periods",
+              "as_of",
+              "source",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "market.fundamentals response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "SEC-filed fundamentals (XBRL company facts)"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/market/fundamentals",
+        "price_usd": 0.05
+      }
+    },
+    {
+      "name": "hubvibe_finance_analytics",
+      "title": "Trading mathematics: returns, risk, drawdown, VaR, beta, indicators, options, Kelly",
+      "description": "Deterministic trading mathematics over a price series you supply or a ticker fetched live: returns and CAGR, annualized volatility, Sharpe and Sortino, max drawdown, historical and parametric VaR/CVaR, beta, alpha and correlation vs a benchmark, SMA/EMA, RSI, Bollinger bands, Black-Scholes price with Greeks, and the Kelly fraction. Exactly rounded sums, every formula named in the result, the same input always the same numbers; no LLM in the path. Input: prices or symbol, plus options. $0.50 per call. Returns: source{}, n, n_returns, periods_per_year, metrics_computed[], returns{}, volatility{}, sharpe, sortino, drawdown{}, var{}, beta{}, moving_averages{}, rsi{}, bollinger{}, black_scholes{}, kelly{}, notes[], method, as_of, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "prices": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "A price."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string"
+                    },
+                    "close": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "close"
+                  ],
+                  "additionalProperties": true,
+                  "description": "{date, close}."
+                }
+              ]
+            },
+            "minItems": 2,
+            "maxItems": 100000,
+            "description": "Prices oldest first: numbers, or {date, close} objects. Use this OR `symbol`."
+          },
+          "symbol": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.\\-]{0,11}$",
+            "description": "Fetch the series live instead of `prices` (daily closes). Use this OR `prices`."
+          },
+          "range": {
+            "type": "string",
+            "enum": [
+              "1d",
+              "5d",
+              "1mo",
+              "3mo",
+              "6mo",
+              "1y",
+              "2y",
+              "5y"
+            ],
+            "description": "History range with `symbol`, default 1y."
+          },
+          "benchmark_prices": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "A price."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string"
+                    },
+                    "close": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "close"
+                  ],
+                  "additionalProperties": true,
+                  "description": "{date, close}."
+                }
+              ]
+            },
+            "minItems": 2,
+            "maxItems": 100000,
+            "description": "Benchmark series for beta/alpha/correlation, same order as `prices`."
+          },
+          "benchmark_symbol": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.\\-]{0,11}$",
+            "description": "Benchmark fetched live (e.g. SPY) for beta/alpha/correlation."
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "returns",
+                "volatility",
+                "sharpe",
+                "sortino",
+                "drawdown",
+                "var",
+                "beta",
+                "moving_averages",
+                "rsi",
+                "bollinger",
+                "black_scholes",
+                "kelly"
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true,
+            "description": "Which results to compute. Default: returns, volatility, sharpe, sortino, drawdown, var, moving_averages, rsi, bollinger, plus beta/black_scholes/kelly when their inputs are given."
+          },
+          "periods_per_year": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000,
+            "description": "Annualization basis: 252 trading days (default), 12 months, 365 days, 52 weeks."
+          },
+          "risk_free_rate": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 10,
+            "description": "Annual risk-free rate as a fraction (0.04 = 4%). Default 0."
+          },
+          "alpha": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 0.5,
+            "description": "Tail probability for VaR/CVaR. Default 0.05."
+          },
+          "windows": {
+            "type": "object",
+            "properties": {
+              "sma": {
+                "oneOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 5000
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 2,
+                      "maximum": 5000
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  }
+                ]
+              },
+              "ema": {
+                "oneOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 5000
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 2,
+                      "maximum": 5000
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  }
+                ]
+              },
+              "rsi": {
+                "oneOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 5000
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 2,
+                      "maximum": 5000
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  }
+                ]
+              },
+              "bollinger": {
+                "oneOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 5000
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 2,
+                      "maximum": 5000
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "description": "Indicator windows. Default sma [20,50,200], ema [12,26], rsi 14, bollinger 20."
+          },
+          "option": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "call",
+                  "put"
+                ]
+              },
+              "strike": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "spot": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Default: the last price of the series."
+              },
+              "rate": {
+                "type": "number",
+                "description": "Continuous risk-free rate; default risk_free_rate."
+              },
+              "volatility": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Annual volatility as a fraction; default: the series' annualized log-return volatility."
+              },
+              "time_to_expiry_years": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "dividend_yield": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Continuous yield, default 0."
+              }
+            },
+            "required": [
+              "type",
+              "strike",
+              "time_to_expiry_years"
+            ],
+            "additionalProperties": false,
+            "description": "European option to price with Black-Scholes-Merton (enables black_scholes)."
+          },
+          "kelly": {
+            "type": "object",
+            "properties": {
+              "win_probability": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "win_loss_ratio": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Average win / average loss (b in b:1)."
+              }
+            },
+            "required": [
+              "win_probability",
+              "win_loss_ratio"
+            ],
+            "additionalProperties": false,
+            "description": "Bet parameters for the Kelly fraction (enables kelly)."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "prices"
+            ]
+          },
+          {
+            "required": [
+              "symbol"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "prices",
+                      "symbol"
+                    ],
+                    "description": "Inline prices or a live-fetched series.",
+                    "examples": [
+                      "prices"
+                    ]
+                  },
+                  "symbol": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Ticker, with type symbol.",
+                    "examples": [
+                      "AAPL"
+                    ]
+                  },
+                  "range": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Range fetched, with type symbol.",
+                    "examples": [
+                      "1y"
+                    ]
+                  },
+                  "provider": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Provider that served the series.",
+                    "examples": [
+                      "nasdaq-data-api"
+                    ]
+                  },
+                  "benchmark_symbol": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Benchmark ticker when fetched.",
+                    "examples": [
+                      "SPY"
+                    ]
+                  },
+                  "benchmark_n": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Benchmark prices used.",
+                    "examples": [
+                      250
+                    ]
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "description": "Where the series came from."
+              },
+              "n": {
+                "type": "integer",
+                "description": "Prices in the series.",
+                "examples": [
+                  22
+                ]
+              },
+              "n_returns": {
+                "type": "integer",
+                "description": "Period returns (n - 1).",
+                "examples": [
+                  21
+                ]
+              },
+              "first_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "First date when dates were given.",
+                "examples": [
+                  "2026-08-26"
+                ]
+              },
+              "last_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Last date when dates were given.",
+                "examples": [
+                  "2026-09-25"
+                ]
+              },
+              "periods_per_year": {
+                "type": "integer",
+                "description": "Annualization basis.",
+                "examples": [
+                  252
+                ]
+              },
+              "risk_free_rate": {
+                "type": "number",
+                "description": "Annual risk-free rate used.",
+                "examples": [
+                  0.04
+                ]
+              },
+              "metrics_computed": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A metric name.",
+                  "examples": [
+                    "returns"
+                  ]
+                },
+                "description": "Metrics present (non-null) in this result.",
+                "examples": [
+                  [
+                    "returns",
+                    "volatility",
+                    "sharpe"
+                  ]
+                ]
+              },
+              "returns": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "n_returns": {
+                    "type": "integer",
+                    "description": "Period returns.",
+                    "examples": [
+                      21
+                    ]
+                  },
+                  "first_price": {
+                    "type": "number",
+                    "description": "First price.",
+                    "examples": [
+                      100.0
+                    ]
+                  },
+                  "last_price": {
+                    "type": "number",
+                    "description": "Last price.",
+                    "examples": [
+                      120.0
+                    ]
+                  },
+                  "total_return": {
+                    "type": "number",
+                    "description": "last/first - 1.",
+                    "examples": [
+                      0.2
+                    ]
+                  },
+                  "cagr": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Compound annual growth rate over n_returns/periods_per_year years.",
+                    "examples": [
+                      7.9
+                    ]
+                  },
+                  "mean_period_return": {
+                    "type": "number",
+                    "description": "Mean simple return per period.",
+                    "examples": [
+                      0.0088
+                    ]
+                  },
+                  "mean_log_return": {
+                    "type": "number",
+                    "description": "Mean log return per period.",
+                    "examples": [
+                      0.0087
+                    ]
+                  },
+                  "annualized_mean_return": {
+                    "type": "number",
+                    "description": "mean_period_return * periods_per_year.",
+                    "examples": [
+                      2.2
+                    ]
+                  },
+                  "best_period": {
+                    "type": "number",
+                    "description": "Largest period return.",
+                    "examples": [
+                      0.0227
+                    ]
+                  },
+                  "worst_period": {
+                    "type": "number",
+                    "description": "Smallest period return.",
+                    "examples": [
+                      -0.0167
+                    ]
+                  }
+                },
+                "required": [
+                  "n_returns",
+                  "first_price",
+                  "last_price",
+                  "total_return",
+                  "mean_period_return"
+                ],
+                "description": "Return statistics."
+              },
+              "volatility": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "period_std": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Sample standard deviation of period returns.",
+                    "examples": [
+                      0.0137
+                    ]
+                  },
+                  "annualized": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "period_std * sqrt(periods_per_year).",
+                    "examples": [
+                      0.217
+                    ]
+                  },
+                  "log_return_std": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Sample standard deviation of log returns.",
+                    "examples": [
+                      0.0136
+                    ]
+                  },
+                  "downside_deviation_annualized": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Annualized downside deviation vs the risk-free rate.",
+                    "examples": [
+                      0.09
+                    ]
+                  }
+                },
+                "required": [
+                  "period_std",
+                  "annualized"
+                ],
+                "description": "Dispersion of returns."
+              },
+              "sharpe": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Annualized Sharpe ratio; null when undefined.",
+                "examples": [
+                  9.8
+                ]
+              },
+              "sortino": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Annualized Sortino ratio; null when undefined.",
+                "examples": [
+                  23.6
+                ]
+              },
+              "drawdown": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "max_drawdown": {
+                    "type": "number",
+                    "description": "Largest peak-to-trough fall as a fraction (negative or 0).",
+                    "examples": [
+                      -0.0167
+                    ]
+                  },
+                  "peak_index": {
+                    "type": "integer",
+                    "description": "Index of the peak.",
+                    "examples": [
+                      3
+                    ]
+                  },
+                  "trough_index": {
+                    "type": "integer",
+                    "description": "Index of the trough.",
+                    "examples": [
+                      4
+                    ]
+                  },
+                  "recovery_index": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "First index back at the peak; null when not recovered.",
+                    "examples": [
+                      6
+                    ]
+                  },
+                  "duration_periods": {
+                    "type": "integer",
+                    "description": "Periods from peak to trough.",
+                    "examples": [
+                      1
+                    ]
+                  }
+                },
+                "required": [
+                  "max_drawdown",
+                  "peak_index",
+                  "trough_index",
+                  "recovery_index",
+                  "duration_periods"
+                ],
+                "description": "Maximum drawdown."
+              },
+              "var": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "alpha": {
+                    "type": "number",
+                    "description": "Tail probability.",
+                    "examples": [
+                      0.05
+                    ]
+                  },
+                  "horizon_periods": {
+                    "type": "integer",
+                    "description": "Horizon in periods.",
+                    "examples": [
+                      1
+                    ]
+                  },
+                  "historical_var": {
+                    "type": "number",
+                    "description": "Loss not exceeded with probability 1-alpha, as a positive fraction.",
+                    "examples": [
+                      0.0158
+                    ]
+                  },
+                  "historical_cvar": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Mean loss beyond the VaR.",
+                    "examples": [
+                      0.0167
+                    ]
+                  },
+                  "parametric_var": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Normal-model VaR, -(mean + z*std).",
+                    "examples": [
+                      0.0137
+                    ]
+                  },
+                  "parametric_z": {
+                    "type": "number",
+                    "description": "z at alpha.",
+                    "examples": [
+                      -1.6449
+                    ]
+                  }
+                },
+                "required": [
+                  "alpha",
+                  "horizon_periods",
+                  "historical_var",
+                  "parametric_z"
+                ],
+                "description": "Value at risk, one period."
+              },
+              "beta": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "n": {
+                    "type": "integer",
+                    "description": "Aligned returns used.",
+                    "examples": [
+                      21
+                    ]
+                  },
+                  "beta": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "cov/var vs the benchmark.",
+                    "examples": [
+                      1.12
+                    ]
+                  },
+                  "alpha_annualized": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Annualized Jensen's alpha.",
+                    "examples": [
+                      0.31
+                    ]
+                  },
+                  "correlation": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Pearson correlation of period returns.",
+                    "examples": [
+                      0.83
+                    ]
+                  },
+                  "benchmark_annualized_volatility": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Benchmark volatility, annualized.",
+                    "examples": [
+                      0.18
+                    ]
+                  }
+                },
+                "required": [
+                  "n",
+                  "beta"
+                ],
+                "description": "Against the benchmark; null unless one was given."
+              },
+              "moving_averages": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "sma": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "description": "Value per window, keyed by the window length.",
+                    "additionalProperties": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "examples": [
+                      {
+                        "20": 116.4,
+                        "50": 110.2
+                      }
+                    ]
+                  },
+                  "ema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "description": "Value per window, keyed by the window length.",
+                    "additionalProperties": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "examples": [
+                      {
+                        "20": 116.4,
+                        "50": 110.2
+                      }
+                    ]
+                  },
+                  "last_price": {
+                    "type": "number",
+                    "description": "Last price, for comparison.",
+                    "examples": [
+                      120.0
+                    ]
+                  }
+                },
+                "required": [
+                  "sma",
+                  "ema",
+                  "last_price"
+                ],
+                "description": "Simple and exponential moving averages at the last price."
+              },
+              "rsi": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "window": {
+                    "type": "integer",
+                    "description": "Window.",
+                    "examples": [
+                      14
+                    ]
+                  },
+                  "value": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Wilder RSI 0-100; null when too few prices.",
+                    "examples": [
+                      71.2
+                    ]
+                  }
+                },
+                "required": [
+                  "window",
+                  "value"
+                ],
+                "description": "Relative strength index."
+              },
+              "bollinger": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "window": {
+                    "type": "integer",
+                    "description": "Window.",
+                    "examples": [
+                      20
+                    ]
+                  },
+                  "k": {
+                    "type": "number",
+                    "description": "Band width in standard deviations.",
+                    "examples": [
+                      2.0
+                    ]
+                  },
+                  "middle": {
+                    "type": "number",
+                    "description": "SMA.",
+                    "examples": [
+                      113.5
+                    ]
+                  },
+                  "upper": {
+                    "type": "number",
+                    "description": "Upper band.",
+                    "examples": [
+                      121.1
+                    ]
+                  },
+                  "lower": {
+                    "type": "number",
+                    "description": "Lower band.",
+                    "examples": [
+                      105.9
+                    ]
+                  },
+                  "bandwidth": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "(upper-lower)/middle.",
+                    "examples": [
+                      0.134
+                    ]
+                  },
+                  "percent_b": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Where the last price sits in the band (0 lower, 1 upper).",
+                    "examples": [
+                      0.93
+                    ]
+                  }
+                },
+                "required": [
+                  "window",
+                  "k",
+                  "middle",
+                  "upper",
+                  "lower"
+                ],
+                "description": "Bollinger bands at the last price."
+              },
+              "black_scholes": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "call",
+                      "put"
+                    ],
+                    "description": "Option type.",
+                    "examples": [
+                      "call"
+                    ]
+                  },
+                  "price": {
+                    "type": "number",
+                    "description": "Option value.",
+                    "examples": [
+                      4.83
+                    ]
+                  },
+                  "delta": {
+                    "type": "number",
+                    "description": "dV/dS.",
+                    "examples": [
+                      0.54
+                    ]
+                  },
+                  "gamma": {
+                    "type": "number",
+                    "description": "d2V/dS2.",
+                    "examples": [
+                      0.024
+                    ]
+                  },
+                  "vega": {
+                    "type": "number",
+                    "description": "dV/dsigma per 1.0 of volatility.",
+                    "examples": [
+                      33.1
+                    ]
+                  },
+                  "theta": {
+                    "type": "number",
+                    "description": "dV/dt per year.",
+                    "examples": [
+                      -6.9
+                    ]
+                  },
+                  "rho": {
+                    "type": "number",
+                    "description": "dV/dr per 1.0 of rate.",
+                    "examples": [
+                      29.8
+                    ]
+                  },
+                  "d1": {
+                    "type": "number",
+                    "description": "d1.",
+                    "examples": [
+                      0.11
+                    ]
+                  },
+                  "d2": {
+                    "type": "number",
+                    "description": "d2.",
+                    "examples": [
+                      -0.04
+                    ]
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "properties": {
+                      "spot": {
+                        "type": "number",
+                        "description": "S.",
+                        "examples": [
+                          120.0
+                        ]
+                      },
+                      "strike": {
+                        "type": "number",
+                        "description": "K.",
+                        "examples": [
+                          120.0
+                        ]
+                      },
+                      "rate": {
+                        "type": "number",
+                        "description": "r.",
+                        "examples": [
+                          0.04
+                        ]
+                      },
+                      "volatility": {
+                        "type": "number",
+                        "description": "sigma.",
+                        "examples": [
+                          0.217
+                        ]
+                      },
+                      "time_to_expiry_years": {
+                        "type": "number",
+                        "description": "T.",
+                        "examples": [
+                          0.5
+                        ]
+                      },
+                      "dividend_yield": {
+                        "type": "number",
+                        "description": "q.",
+                        "examples": [
+                          0.0
+                        ]
+                      }
+                    },
+                    "required": [
+                      "spot",
+                      "strike",
+                      "rate",
+                      "volatility",
+                      "time_to_expiry_years",
+                      "dividend_yield"
+                    ],
+                    "description": "The inputs used, including any defaulted from the series."
+                  }
+                },
+                "required": [
+                  "type",
+                  "price",
+                  "delta",
+                  "gamma",
+                  "vega",
+                  "theta",
+                  "rho",
+                  "inputs"
+                ],
+                "description": "Black-Scholes-Merton."
+              },
+              "kelly": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "win_probability": {
+                    "type": "number",
+                    "description": "p.",
+                    "examples": [
+                      0.55
+                    ]
+                  },
+                  "win_loss_ratio": {
+                    "type": "number",
+                    "description": "b.",
+                    "examples": [
+                      1.5
+                    ]
+                  },
+                  "fraction": {
+                    "type": "number",
+                    "description": "Kelly fraction p - (1-p)/b.",
+                    "examples": [
+                      0.25
+                    ]
+                  },
+                  "half_kelly": {
+                    "type": "number",
+                    "description": "Half Kelly.",
+                    "examples": [
+                      0.125
+                    ]
+                  },
+                  "bet": {
+                    "type": "boolean",
+                    "description": "Whether the fraction is positive.",
+                    "examples": [
+                      true
+                    ]
+                  }
+                },
+                "required": [
+                  "win_probability",
+                  "win_loss_ratio",
+                  "fraction",
+                  "half_kelly",
+                  "bet"
+                ],
+                "description": "Kelly criterion."
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "rsi needs at least 15 prices."
+                  ]
+                },
+                "description": "Caveats about undefined or aligned metrics.",
+                "examples": [
+                  []
+                ]
+              },
+              "method": {
+                "type": "string",
+                "description": "Every formula used, in words.",
+                "examples": [
+                  "simple returns p_t/p_{t-1}-1 and log returns..."
+                ]
+              },
+              "as_of": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Date or timestamp of the last price (from the dates given or the source).",
+                "examples": [
+                  "2026-09-25"
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "source",
+              "n",
+              "n_returns",
+              "periods_per_year",
+              "risk_free_rate",
+              "metrics_computed",
+              "returns",
+              "volatility",
+              "sharpe",
+              "sortino",
+              "drawdown",
+              "var",
+              "beta",
+              "moving_averages",
+              "rsi",
+              "bollinger",
+              "black_scholes",
+              "kelly",
+              "notes",
+              "method",
+              "as_of",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "finance.analytics response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Trading mathematics: returns, risk, drawdown, VaR, beta, indicators, options, Kelly"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/finance/analytics",
         "price_usd": 0.5
       }
     },

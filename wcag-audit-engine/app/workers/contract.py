@@ -158,6 +158,45 @@ _COMMERCE_OPTION = _obj({
     "url": _s("Option-specific URL when the page gives one.", "https://example.com/products/wool-runner?variant=10", nullable=True),
 }, ["name", "available", "availability", "price", "currency"], "One purchasable variation.")
 
+_CHECKED_AT = {"type": "string", "format": "date-time",
+               "description": "When this node read the source (UTC). Nothing here is cached.",
+               "examples": ["2026-09-26T18:00:00Z"]}
+_OHLCV = _obj({
+    "date": _s("Trading day (YYYY-MM-DD).", "2026-09-25"),
+    "open": _n("Open.", 336.04, nullable=True), "high": _n("High.", 341.67, nullable=True),
+    "low": _n("Low.", 334.53, nullable=True), "close": _n("Close.", 341.07, nullable=True),
+    "volume": _n("Shares traded.", 30002510, nullable=True),
+}, ["date", "close"], "One trading day.")
+_XBRL_VALUE = _obj({
+    "end": _s("Period end (YYYY-MM-DD).", "2026-06-27"),
+    "start": _s("Period start for flows; null for instants (balance-sheet items).", "2026-03-29", nullable=True),
+    "value": _n("The reported value, in `unit`.", 109417000000),
+    "unit": _s("XBRL unit.", "USD"),
+    "fiscal_year": _i("Filer's fiscal year.", 2026, nullable=True),
+    "fiscal_period": _s("FY, Q1, Q2 or Q3.", "Q3", nullable=True),
+    "form": _s("Form it was reported on.", "10-Q", nullable=True),
+    "filed": _s("Filing date.", "2026-07-31", nullable=True),
+    "frame": _s("SEC calendar frame when assigned.", "CY2026Q2", nullable=True),
+}, ["end", "value", "unit"], "One reported value.")
+_XBRL_VALUE_EXAMPLE = {"end": "2026-06-27", "start": "2026-03-29", "value": 109417000000, "unit": "USD",
+                       "fiscal_year": 2026, "fiscal_period": "Q3", "form": "10-Q", "filed": "2026-07-31",
+                       "frame": "CY2026Q2"}
+_XBRL_CONCEPT = _obj({
+    "concept": _s("The XBRL concept actually used (an alternate may stand in for the one asked).",
+                  "RevenueFromContractWithCustomerExcludingAssessedTax"),
+    "taxonomy": _s("us-gaap, ifrs-full or dei.", "us-gaap"),
+    "label": _s("The concept's label.", "Revenue from Contract with Customer, Excluding Assessed Tax", nullable=True),
+    "unit": _s("Unit of every value.", "USD"),
+    "values": _arr(_XBRL_VALUE, ("Reported values, newest period first, one per reported (start, end) period: a "
+                                 "quarter and the year-to-date figure that share an end date are separate entries; "
+                                 "a restated period shows the latest filing's figure."), [_XBRL_VALUE_EXAMPLE]),
+}, ["concept", "taxonomy", "unit", "values"], "One concept's reported values.")
+_XBRL_CONCEPT_EXAMPLE = {"concept": "RevenueFromContractWithCustomerExcludingAssessedTax", "taxonomy": "us-gaap",
+                         "label": "Revenue from Contract with Customer, Excluding Assessed Tax", "unit": "USD",
+                         "values": [_XBRL_VALUE_EXAMPLE]}
+_BY_WINDOW = _obj({}, [], "Value per window, keyed by the window length.", additionalProperties={"type": ["number", "null"]},
+                  examples=[{"20": 116.4, "50": 110.2}])
+
 _PROBABILITY = _obj({"outcome": _s("Outcome label.", "Yes"),
                      "probability_pct": _n("Implied probability in percent.", 62.5, nullable=True)},
                     ["outcome"], "One outcome and what the market prices it at.")
@@ -660,6 +699,135 @@ OUTPUT_SCHEMAS = {
         "matched_option", "quantity_ok", "ship_to_ok", "eligibility_notes", "evidence", "source",
         "javascript_rendered", "confidence", "checked_at"]),
 
+    "market.stock": _obj({
+        "symbol": _s("Ticker.", "AAPL"),
+        "name": _s("Company or instrument name.", "Apple Inc.", nullable=True),
+        "exchange": _s("Listing exchange as the source names it.", "NASDAQ-GS", nullable=True),
+        "asset_class": _s("stocks, etf, equity...", "stocks", nullable=True),
+        "currency": _s("Quote currency.", "USD", nullable=True),
+        "price": _n("Last price.", 341.07),
+        "change": _n("Change on the day.", 5.15, nullable=True),
+        "change_pct": _n("Change on the day, percent.", 1.53, nullable=True),
+        "previous_close": _n("Previous close.", 335.92, nullable=True),
+        "day_high": _n("Day high.", 341.67, nullable=True),
+        "day_low": _n("Day low.", 334.53, nullable=True),
+        "volume": _n("Volume.", 30002768, nullable=True),
+        "market_state": _s("Open, Closed, Pre-Market... as the source reports it.", "Closed", nullable=True),
+        "as_of": _s("The source's own timestamp for the price (ISO 8601; a date, or a time with its zone).",
+                    "2026-09-25T20:00:01Z", nullable=True),
+        "delayed_minutes": _i("How delayed the source says the quote is; null when it does not say.", 15, nullable=True),
+        "history_range": _s("The range the history covers.", "1mo", nullable=True),
+        "history": _arr(_OHLCV, "Daily bars, oldest first; empty when include_history is false."),
+        "history_rows": _i("Bars returned.", 22),
+        "source": _s("The provider that answered.", "nasdaq-data-api", nullable=True),
+        "checked_at": _CHECKED_AT,
+    }, ["symbol", "price", "as_of", "delayed_minutes", "history", "history_rows", "source", "checked_at"]),
+
+    "market.fundamentals": _obj({
+        "symbol": _s("Ticker as given.", "AAPL", nullable=True),
+        "cik": _i("SEC Central Index Key.", 320193),
+        "entity_name": _s("Registrant name.", "Apple Inc.", nullable=True),
+        "concepts": _obj({}, [], "One entry per concept found, keyed by the name asked for.",
+                         additionalProperties=_XBRL_CONCEPT, examples=[{"Revenues": _XBRL_CONCEPT_EXAMPLE}]),
+        "concepts_missing": _arr(_s("A concept the filer has not reported.", "Liabilities"),
+                                 "Concepts asked for that the filer has no facts for.", []),
+        "periods": _i("Periods per concept requested.", 8),
+        "forms": {"type": ["array", "null"], "items": {"type": "string"},
+                  "description": "Form filter applied, or null.", "examples": [["10-K", "10-Q"]]},
+        "as_of": _s("Latest filing date among the values returned.", "2026-07-31", nullable=True),
+        "source": _const("sec-edgar-xbrl-companyfacts", "Data source."),
+        "checked_at": _CHECKED_AT,
+    }, ["cik", "concepts", "concepts_missing", "periods", "as_of", "source", "checked_at"]),
+
+    "finance.analytics": _obj({
+        "source": _obj({
+            "type": _enum(["prices", "symbol"], "Inline prices or a live-fetched series.", "prices"),
+            "symbol": _s("Ticker, with type symbol.", "AAPL", nullable=True),
+            "range": _s("Range fetched, with type symbol.", "1y", nullable=True),
+            "provider": _s("Provider that served the series.", "nasdaq-data-api", nullable=True),
+            "benchmark_symbol": _s("Benchmark ticker when fetched.", "SPY", nullable=True),
+            "benchmark_n": _i("Benchmark prices used.", 250, nullable=True),
+        }, ["type"], "Where the series came from."),
+        "n": _i("Prices in the series.", 22),
+        "n_returns": _i("Period returns (n - 1).", 21),
+        "first_date": _s("First date when dates were given.", "2026-08-26", nullable=True),
+        "last_date": _s("Last date when dates were given.", "2026-09-25", nullable=True),
+        "periods_per_year": _i("Annualization basis.", 252),
+        "risk_free_rate": _n("Annual risk-free rate used.", 0.04),
+        "metrics_computed": _arr(_s("A metric name.", "returns"), "Metrics present (non-null) in this result.",
+                                 ["returns", "volatility", "sharpe"]),
+        "returns": _nobj({
+            "n_returns": _i("Period returns.", 21),
+            "first_price": _n("First price.", 100.0), "last_price": _n("Last price.", 120.0),
+            "total_return": _n("last/first - 1.", 0.2),
+            "cagr": _n("Compound annual growth rate over n_returns/periods_per_year years.", 7.9, nullable=True),
+            "mean_period_return": _n("Mean simple return per period.", 0.0088),
+            "mean_log_return": _n("Mean log return per period.", 0.0087),
+            "annualized_mean_return": _n("mean_period_return * periods_per_year.", 2.2),
+            "best_period": _n("Largest period return.", 0.0227), "worst_period": _n("Smallest period return.", -0.0167),
+        }, ["n_returns", "first_price", "last_price", "total_return", "mean_period_return"], "Return statistics."),
+        "volatility": _nobj({
+            "period_std": _n("Sample standard deviation of period returns.", 0.0137, nullable=True),
+            "annualized": _n("period_std * sqrt(periods_per_year).", 0.217, nullable=True),
+            "log_return_std": _n("Sample standard deviation of log returns.", 0.0136, nullable=True),
+            "downside_deviation_annualized": _n("Annualized downside deviation vs the risk-free rate.", 0.09, nullable=True),
+        }, ["period_std", "annualized"], "Dispersion of returns."),
+        "sharpe": _n("Annualized Sharpe ratio; null when undefined.", 9.8, nullable=True),
+        "sortino": _n("Annualized Sortino ratio; null when undefined.", 23.6, nullable=True),
+        "drawdown": _nobj({
+            "max_drawdown": _n("Largest peak-to-trough fall as a fraction (negative or 0).", -0.0167),
+            "peak_index": _i("Index of the peak.", 3), "trough_index": _i("Index of the trough.", 4),
+            "recovery_index": _i("First index back at the peak; null when not recovered.", 6, nullable=True),
+            "duration_periods": _i("Periods from peak to trough.", 1),
+        }, ["max_drawdown", "peak_index", "trough_index", "recovery_index", "duration_periods"], "Maximum drawdown."),
+        "var": _nobj({
+            "alpha": _n("Tail probability.", 0.05), "horizon_periods": _i("Horizon in periods.", 1),
+            "historical_var": _n("Loss not exceeded with probability 1-alpha, as a positive fraction.", 0.0158),
+            "historical_cvar": _n("Mean loss beyond the VaR.", 0.0167, nullable=True),
+            "parametric_var": _n("Normal-model VaR, -(mean + z*std).", 0.0137, nullable=True),
+            "parametric_z": _n("z at alpha.", -1.6449),
+        }, ["alpha", "horizon_periods", "historical_var", "parametric_z"], "Value at risk, one period."),
+        "beta": _nobj({
+            "n": _i("Aligned returns used.", 21), "beta": _n("cov/var vs the benchmark.", 1.12, nullable=True),
+            "alpha_annualized": _n("Annualized Jensen's alpha.", 0.31, nullable=True),
+            "correlation": _n("Pearson correlation of period returns.", 0.83, nullable=True),
+            "benchmark_annualized_volatility": _n("Benchmark volatility, annualized.", 0.18, nullable=True),
+        }, ["n", "beta"], "Against the benchmark; null unless one was given."),
+        "moving_averages": _nobj({
+            "sma": _BY_WINDOW, "ema": _BY_WINDOW, "last_price": _n("Last price, for comparison.", 120.0),
+        }, ["sma", "ema", "last_price"], "Simple and exponential moving averages at the last price."),
+        "rsi": _nobj({"window": _i("Window.", 14), "value": _n("Wilder RSI 0-100; null when too few prices.", 71.2, nullable=True)},
+                     ["window", "value"], "Relative strength index."),
+        "bollinger": _nobj({
+            "window": _i("Window.", 20), "k": _n("Band width in standard deviations.", 2.0),
+            "middle": _n("SMA.", 113.5), "upper": _n("Upper band.", 121.1), "lower": _n("Lower band.", 105.9),
+            "bandwidth": _n("(upper-lower)/middle.", 0.134, nullable=True),
+            "percent_b": _n("Where the last price sits in the band (0 lower, 1 upper).", 0.93, nullable=True),
+        }, ["window", "k", "middle", "upper", "lower"], "Bollinger bands at the last price."),
+        "black_scholes": _nobj({
+            "type": _enum(["call", "put"], "Option type.", "call"),
+            "price": _n("Option value.", 4.83), "delta": _n("dV/dS.", 0.54), "gamma": _n("d2V/dS2.", 0.024),
+            "vega": _n("dV/dsigma per 1.0 of volatility.", 33.1), "theta": _n("dV/dt per year.", -6.9),
+            "rho": _n("dV/dr per 1.0 of rate.", 29.8), "d1": _n("d1.", 0.11), "d2": _n("d2.", -0.04),
+            "inputs": _obj({"spot": _n("S.", 120.0), "strike": _n("K.", 120.0), "rate": _n("r.", 0.04),
+                            "volatility": _n("sigma.", 0.217), "time_to_expiry_years": _n("T.", 0.5),
+                            "dividend_yield": _n("q.", 0.0)},
+                           ["spot", "strike", "rate", "volatility", "time_to_expiry_years", "dividend_yield"],
+                           "The inputs used, including any defaulted from the series."),
+        }, ["type", "price", "delta", "gamma", "vega", "theta", "rho", "inputs"], "Black-Scholes-Merton."),
+        "kelly": _nobj({
+            "win_probability": _n("p.", 0.55), "win_loss_ratio": _n("b.", 1.5),
+            "fraction": _n("Kelly fraction p - (1-p)/b.", 0.25), "half_kelly": _n("Half Kelly.", 0.125),
+            "bet": _b("Whether the fraction is positive.", True),
+        }, ["win_probability", "win_loss_ratio", "fraction", "half_kelly", "bet"], "Kelly criterion."),
+        "notes": _arr(_s("A caveat.", "rsi needs at least 15 prices."), "Caveats about undefined or aligned metrics.", []),
+        "method": _s("Every formula used, in words.", "simple returns p_t/p_{t-1}-1 and log returns..."),
+        "as_of": _s("Date or timestamp of the last price (from the dates given or the source).", "2026-09-25", nullable=True),
+        "checked_at": _CHECKED_AT,
+    }, ["source", "n", "n_returns", "periods_per_year", "risk_free_rate", "metrics_computed", "returns",
+        "volatility", "sharpe", "sortino", "drawdown", "var", "beta", "moving_averages", "rsi", "bollinger",
+        "black_scholes", "kelly", "notes", "method", "as_of", "checked_at"]),
+
     "security.mcp_inspect": _obj({
         "url": _s("The MCP endpoint inspected.", "https://mcp.example.com/mcp"),
         "reachable": _b("Whether the server answered the MCP initialize handshake.", True),
@@ -1016,6 +1184,23 @@ REPRESENTATIVE_QUERIES = {
         "has this web page changed since the last check",
         "summarize what changed on a monitored page",
         "diff a URL against its saved baseline",
+    ],
+    "market.stock": [
+        "live stock price and daily history for a ticker",
+        "what is AAPL trading at right now and how has it moved this month",
+        "OHLCV bars for a US stock over the last year",
+    ],
+    "market.fundamentals": [
+        "revenue, net income and EPS a company reported to the SEC by quarter",
+        "balance sheet items from the latest 10-K and 10-Q filings",
+        "SEC XBRL company facts for a ticker",
+    ],
+    "finance.analytics": [
+        "annualized volatility, Sharpe ratio and max drawdown of a price series",
+        "value at risk and CVaR of a stock at 95 percent",
+        "beta and correlation of a stock against SPY",
+        "Black-Scholes price and Greeks for a call option",
+        "RSI, moving averages and Bollinger bands at the last price",
     ],
     "commerce.availability": [
         "can I buy this product right now and at what price",
