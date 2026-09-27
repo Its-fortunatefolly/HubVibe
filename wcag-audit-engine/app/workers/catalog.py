@@ -1007,6 +1007,46 @@ CATALOG = [
         pricing_basis=("Provisional. Provider search is free within Duffel's search-to-book ratio; "
                        "one place lookup per named place plus one offer request."),
         requires=("duffel",)),
+    Worker(
+        name="travel.hotels", price_usd=0.50, tier="standard",
+        title="Live hotel availability and room rates",
+        description=(
+            "Live hotel availability and room rates for a place and dates, 2M+ properties. "
+            "Give a place in any language (or city + country, a hotel name, or "
+            "coordinates), check-in, nights and guests. Each hotel: stars, rating, address, "
+            "cheapest bookable rate and room options with board, occupancy, total, taxes "
+            "and fees, refundability, cancellation deadlines and the offer id to book. "
+            "Input: place | city+country_code | hotel_name | latitude+longitude; optional "
+            "check_in, nights, adults, children_ages, currency."),
+        tags=["travel", "hotels", "availability", "rates", "booking", "accommodation", "liteapi", "live"],
+        input_schema=_obj({
+            "place": {"type": "string", "minLength": 2, "maxLength": 200,
+                      "description": "Free-text place in any language (hotel near Shibuya station Tokyo, 명동 서울)."},
+            "city": {"type": "string", "minLength": 2, "maxLength": 80, "description": "English city name; needs country_code."},
+            "country_code": {"type": "string", "pattern": "^[A-Za-z]{2}$", "description": "ISO 3166-1 alpha-2."},
+            "hotel_name": {"type": "string", "minLength": 2, "maxLength": 120, "description": "A hotel or chain name."},
+            "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+            "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+            "radius_m": {"type": "integer", "minimum": 100, "maximum": 50000, "description": "With coordinates. Default 5000."},
+            "check_in": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD; or give days_ahead."},
+            "days_ahead": {"type": "integer", "minimum": 0, "maximum": 365, "description": "Check-in this many days from today. Default 30."},
+            "check_out": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD; or give nights."},
+            "nights": {"type": "integer", "minimum": 1, "maximum": 30, "description": "Default 2."},
+            "adults": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Default 2."},
+            "children_ages": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 17}, "maxItems": 6},
+            "currency": {"type": "string", "pattern": "^[A-Za-z]{3}$", "description": "ISO 4217, default USD."},
+            "guest_nationality": {"type": "string", "pattern": "^[A-Za-z]{2}$", "description": "Default US; some rates depend on it."},
+            "max_hotels": {"type": "integer", "minimum": 1, "maximum": 20, "description": "Default 10."},
+            "sort": {"type": "string", "enum": ["price", "rating"], "description": "Default price."},
+        }, []),
+        returns=("query{}, check_in, check_out, nights, guests{}, currency, guest_nationality, sort, hotels[{id, name, stars, "
+                 "rating, review_count, address, city, country_code, latitude, longitude, cheapest{}, rooms[{name, board, "
+                 "max_occupancy, total, currency, taxes_and_fees[], refundable, cancel_free_until, cancellation[], offer_id, "
+                 "rate_id}], room_options_available}], hotel_count, hotels_matched, hotels_without_rates, cheapest_total{}, "
+                 "live_mode, source, notes[], checked_at."),
+        skill="travel.hotels", max_seconds=90,
+        pricing_basis="Provisional. Provider search and rates are free (LiteAPI bills bookings only); two provider calls.",
+        requires=("liteapi",)),
     # --- traffic-aware routing (Google Routes API) ---------------------------
     Worker(
         name="traffic.route", price_usd=0.10, tier="utility",
@@ -1399,6 +1439,7 @@ _DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 
 _EXAMPLE_OVERRIDES = {
     "travel.flights": {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3},
+    "travel.hotels": {"place": "hotel near Shibuya station Tokyo", "days_ahead": 30, "nights": 2, "max_hotels": 3},
     "news.search": {"query": "半導体", "language": "ja", "limit": 5},
     "data.macro": {"indicator": "inflation", "country": "JP", "last": 5},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
