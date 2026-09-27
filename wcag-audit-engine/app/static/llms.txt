@@ -199,9 +199,14 @@ unauthenticated call answers HTTP 402 with the price, requests are
 validated before any payment is read, and a call no provider could
 complete returns HTTP 502 with per-provider reasons and bills nothing.
 
-Always current: no worker serves a stored answer; every call reads its
-source at call time, and workers that report on the live world return
-`checked_at` (UTC) so you know when the answer was true.
+Always current: every call reads its source at call time; no result is
+served from a cache. Two deliberate, documented exceptions: a repeated
+Idempotency-Key returns the stored result of that same request (and is
+not charged again), and monitor.check compares against the baseline that
+monitor.snapshot saved. commerce.availability, market.stock,
+market.fundamentals and finance.analytics return `checked_at` (UTC), and
+the three market/finance workers also `as_of` when the source stamps its
+own data, so you know when the answer was true.
 
 Any language: every worker whose answer contains prose (llm.*, search.web,
 research.*, verify.claims, market.intel, data.question, monitor.check,
