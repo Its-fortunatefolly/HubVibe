@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -776,6 +776,12 @@
               "additionalProperties": false
             },
             "description": "Probabilities to read off the fitted normal model: {\"below\": v}, {\"above\": v} or {\"between\": [a, b]}."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [],
@@ -1796,7 +1802,14 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
-        "properties": {},
+        "properties": {
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
         "required": [],
         "additionalProperties": false
       },
@@ -2010,6 +2023,12 @@
           "address": {
             "type": "string",
             "description": "0x-prefixed Base address."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -2251,6 +2270,12 @@
           "hash": {
             "type": "string",
             "description": "0x-prefixed transaction hash."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -2536,6 +2561,12 @@
           "product_id": {
             "type": "string",
             "description": "e.g. BTC-USD."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -2800,6 +2831,12 @@
           "limit": {
             "type": "integer",
             "description": "1-50, default 10."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [],
@@ -3141,6 +3178,12 @@
           "url": {
             "type": "string",
             "description": "http(s) URL to fetch."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -3939,6 +3982,12 @@
           "max_scan_gib": {
             "type": "number",
             "description": "Optional scan ceiling."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -6089,6 +6138,12 @@
         "properties": {
           "code": {
             "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -6321,6 +6376,12 @@
           "aspect_ratio": {
             "type": "string",
             "description": "1:1, 3:4, 4:3, 16:9 or 9:16. Default 1:1."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -6551,6 +6612,12 @@
           "voice": {
             "type": "string",
             "description": "e.g. en-US-Standard-C. Optional."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -6774,6 +6841,12 @@
           "language_code": {
             "type": "string",
             "description": "BCP-47, default en-US."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -7015,6 +7088,12 @@
           },
           "max_scan_gib": {
             "type": "number"
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -7329,6 +7408,12 @@
           },
           "max_scan_gib": {
             "type": "number"
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -8629,6 +8714,12 @@
           "url": {
             "type": "string",
             "description": "http(s) URL to fetch."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -9760,6 +9851,12 @@
           "include_history": {
             "type": "boolean",
             "description": "Default true."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -10236,6 +10333,12 @@
             },
             "minItems": 1,
             "description": "Restrict to these forms, e.g. [\"10-K\"] for annual figures only."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [],
@@ -10985,6 +11088,12 @@
             ],
             "additionalProperties": false,
             "description": "Bet parameters for the Kelly fraction (enables kelly)."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [],
@@ -12106,6 +12215,12 @@
             },
             "minItems": 1,
             "description": "Specific portal ids instead of a region, e.g. [\"data.go.kr\", \"data.bodik.jp\"]."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -12642,6 +12757,12 @@
             "minLength": 1,
             "maxLength": 1,
             "description": "Force a CSV delimiter. Default: sniffed."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -13558,6 +13679,12 @@
               "monthly"
             ],
             "description": "auto picks monthly where Eurostat publishes it, else annual."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -14094,6 +14221,12 @@
               "duration"
             ],
             "description": "Default price."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -15295,6 +15428,12 @@
               "rating"
             ],
             "description": "Default price."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [],
@@ -16211,6 +16350,12 @@
               "none"
             ],
             "description": "aware (default): live traffic; optimal: live traffic with the best route quality, slower; none: no traffic."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -17083,6 +17228,12 @@
             "minimum": 1,
             "maximum": 6,
             "description": "Reply depth to flatten in thread mode, default 2."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -18157,6 +18308,12 @@
             "minimum": 1,
             "maximum": 40,
             "description": "Items to return (hashtag up to 40, search up to 25, trends up to 20), default 10."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -19041,6 +19198,12 @@
           "include_retweets": {
             "type": "boolean",
             "description": "Default false: reposts are excluded from volume and sample."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -19658,6 +19821,12 @@
           "url": {
             "type": "string",
             "description": "http(s) URL to fetch."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -19988,6 +20157,12 @@
           "url": {
             "type": "string",
             "description": "http(s) URL to fetch."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -20257,6 +20432,12 @@
           "params": {
             "type": "array",
             "description": "JSON-RPC positional params. Default []."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -20479,6 +20660,12 @@
           "currency": {
             "type": "string",
             "description": "e.g. USD, ETH, BTC."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -20697,6 +20884,12 @@
           "product_id": {
             "type": "string",
             "description": "e.g. BTC-USD."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -20951,6 +21144,12 @@
           "slug": {
             "type": "string",
             "description": "The market's Polymarket slug."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -21271,6 +21470,12 @@
           "limit": {
             "type": "integer",
             "description": "1-50, default 10."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [],
@@ -21539,6 +21744,12 @@
           "region_code": {
             "type": "string",
             "description": "Optional ISO 3166-1 alpha-2 bias."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -21755,6 +21966,12 @@
           "travel_mode": {
             "type": "string",
             "description": "DRIVE, WALK, BICYCLE or TRANSIT. Default DRIVE."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -21987,6 +22204,12 @@
         "properties": {
           "location": {
             "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [
@@ -22209,6 +22432,12 @@
           "generate_audio": {
             "type": "boolean",
             "description": "Default false."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
         "required": [

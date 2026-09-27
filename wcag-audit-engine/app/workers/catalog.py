@@ -1377,6 +1377,31 @@ CATALOG = [
 ]
 
 BY_PATH = {worker.path: worker for worker in CATALOG}
+# No language barrier: every worker takes an optional BCP-47 `language`.
+# The prose-producing workers below honour it natively (their answer is
+# written in that language); every other worker's human-readable strings
+# (notes, details, reasons...) are translated on the job by
+# skills/localize.py. Both sets advertise the same property.
+NATIVE_LANGUAGE_WORKERS = frozenset({
+    "llm.generate", "llm.analyze", "llm.extract", "search.web", "research.brief", "research.page_facts",
+    "research.web", "research.company", "verify.claims", "monitor.check", "market.intel", "data.question",
+    "commerce.availability",
+    # news.search's `language` picks the publishers' edition, so its articles already arrive in that language.
+    "news.search",
+})
+_TRANSLATED_LANGUAGE = {
+    "type": "string", "maxLength": 35,
+    "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+    "description": ("Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings "
+                    "of the result (notes, details, reasons) are translated into this language; "
+                    "data, codes, numbers and URLs are untouched. Default: as produced."),
+}
+LOCALIZED_WORKERS = frozenset(w.name for w in CATALOG if w.name not in NATIVE_LANGUAGE_WORKERS)
+for _w in CATALOG:
+    _props = _w.input_schema.setdefault("properties", {})
+    if "language" not in _props:
+        _props["language"] = dict(_TRANSLATED_LANGUAGE)
+
 BY_NAME = {worker.name: worker for worker in CATALOG}
 BY_TOOL = {worker.tool_name: worker for worker in CATALOG}
 
