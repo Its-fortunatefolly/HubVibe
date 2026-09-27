@@ -1,13 +1,17 @@
 # HubVibe -- machine-payable services for autonomous agents
 
-> A machine-service gateway: site compliance audits plus a catalog of
-> per-call capabilities -- LLM inference, web search and extraction,
-> blockchain/market/prediction-market data, media generation, sandboxed
-> compute, composite research -- every one paid per call over HTTP 402
-> with no account and no human in the loop. The audits are deterministic
-> checks against the actual page; a check that couldn't run is never
-> reported as a false pass, and a call that produced no result is never
-> billed.
+> Pay-per-call tools for autonomous agents: live web and news search in
+> any language, official economic numbers, government open data from 16
+> portals (Korea, Japan, the EU, the UK and more) returned as rows,
+> online-store availability and shipping quotes, stocks, company filings
+> and portfolio math, crypto and prediction markets, traffic-aware routes,
+> maps and weather, X, Bluesky, Mastodon and YouTube signals, cited
+> research and claim verification, LLM analysis and extraction, image,
+> speech and video generation, sandboxed Python, BigQuery analysis and
+> forecasting, website monitoring and site checks (accessibility, SEO,
+> security, performance). Every tool takes an optional BCP-47 `language`
+> and answers in it. Each call is paid over HTTP 402 with no account and
+> no human in the loop; a call that produced no result is never billed.
 > Every result is checked against the route's published output schema
 > before it is billed; one that does not match is not delivered and not
 > charged (HTTP 502, reason contract_mismatch).

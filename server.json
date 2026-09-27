@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Its-fortunatefolly/hubvibe",
-  "title": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents",
-  "description": "Pay per call via HTTP 402: 5 site audits + 55 /work jobs as MCP tools and A2A skills, receipts",
+  "title": "HubVibe: Pay-per-Call Live Data, Search, Commerce and Research Tools for AI Agents",
+  "description": "Pay-per-call agent tools: live search, news, economic and open data, commerce, markets",
   "version": "1.18.0",
   "icons": [
     {

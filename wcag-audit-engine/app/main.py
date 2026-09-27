@@ -142,35 +142,41 @@ async def _lifespan(_app: "FastAPI"):
 # ard.json and (by hand, in the static files) mcp.json and the registry entry.
 # Crawlers scored this node as a five-tool audit service while it sold 37
 # more routes, because each surface carried its own audit-era title.
-SERVICE_TITLE = "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents"
+SERVICE_TITLE = "HubVibe: Pay-per-Call Live Data, Search, Commerce and Research Tools for AI Agents"
+# What the node sells, in one sentence, for every surface that describes it.
+# Lead with what agents come for; the site checks are one tool family among
+# many, not the headline (owner, 2026-09-27). Only live, listed tools here.
+SERVICE_CAPABILITIES = (
+    "live web and news search in any language, official economic numbers, government open "
+    "data from 16 portals (Korea, Japan, the EU, the UK and more) returned as rows, "
+    "online-store availability and shipping quotes, stocks, company filings and portfolio "
+    "math, crypto and prediction markets, traffic-aware routes, maps and weather, X, "
+    "Bluesky, Mastodon and YouTube signals, cited research and claim verification, LLM "
+    "analysis and extraction, image, speech and video generation, sandboxed Python, "
+    "BigQuery analysis and forecasting, website monitoring and site checks (accessibility, "
+    "SEO, security, performance)"
+)
 
 app = FastAPI(
     lifespan=_lifespan,
     title=SERVICE_TITLE,
     version=SERVICE_VERSION,
     description=(
-        "55 machine-payable dev utilities under /work -- LLM inference, web "
-        "search and page extraction, Base chain reads, market and "
-        "prediction-market data, BigQuery analysis and forecasting, a "
-        "deterministic regression and probability engine, "
-        "image/speech/video generation, sandboxed Python, maps, and cited "
-        "research, verification and company briefs that compose several of "
-        "them in one call -- plus five deterministic site audits: "
-        "accessibility (axe-core), SEO, security headers, performance, and "
-        "the $0.15 bundle, at $0.05 per single audit. Every /work route "
-        "declares its request schema and a typed 200 response schema with an "
-        "example; every delivered job has a receipt at /work/receipts/{id}.\n\n"
+        "Pay-per-call tools for AI agents: " + SERVICE_CAPABILITIES + ". Every "
+        "tool takes an optional BCP-47 `language` and answers in it. Every /work "
+        "route declares its request schema and a typed 200 response schema with "
+        "an example; every delivered job has a receipt at /work/receipts/{id}.\n\n"
         "Built for agent-to-agent use: every paid route answers an "
         "unauthenticated request with HTTP 402 carrying a machine-readable "
         "payment challenge, so a paying agent can discover the price and "
         "settle without a human in the loop. The challenge names the rails "
         "this deployment can actually settle; see /.well-known/agent.json."
         "\n\n"
-        "Every result is a rule-based check against the actual page. Nothing "
-        "here is an LLM judging quality, and a check that could not run is "
-        "reported as an error, never as a passing result.\n\n"
-        "Discovery: /.well-known/agent.json, /.well-known/ard.json, "
-        "/llms.txt, /mcp.json, /openapi.json"
+        "Every result is checked against the route's published output schema "
+        "before it is billed. A job that could not run, or whose result does "
+        "not match, is reported as an error and never charged.\n\n"
+        "Discovery: /.well-known/agent.json, /.well-known/agent-card.json, "
+        "/.well-known/ard.json, /llms.txt, /mcp.json, /openapi.json"
     ),
     servers=[{"url": PUBLIC_BASE_URL, "description": "Production"}],
     openapi_tags=[
@@ -2252,19 +2258,12 @@ async def agent_manifest(request: Request):
         "name": SERVICE_TITLE,
         "base_url": base,
         "description": (
-            "55 machine-payable dev utilities (the `workers` section: LLM "
-            "inference, web search and extraction, Base chain reads, market "
-            "and prediction-market data, BigQuery analysis and forecasting, "
-            "deterministic regression and probability statistics, "
-            "image/speech/video generation, sandboxed Python, maps, cited "
-            "research and verification) and five deterministic site audits "
-            "(the `endpoints` section: accessibility via axe-core, SEO, "
-            "security headers, performance, bundle). One price per call, "
-            "payable by software over HTTP 402 with no account. Every "
-            "capability carries its input and output JSON Schema here and in "
-            "/openapi.json; every delivered /work job has a receipt. The "
-            "audits are rule-based checks against the actual page; a check "
-            "that could not run is never reported as a pass."
+            "Pay-per-call tools for AI agents (the `workers` and `endpoints` "
+            "sections): " + SERVICE_CAPABILITIES + ". One price per call, payable "
+            "by software over HTTP 402 with no account; every tool takes an "
+            "optional `language`. Every capability carries its input and output "
+            "JSON Schema here and in /openapi.json; every delivered /work job has "
+            "a receipt, and a job that could not run is never billed."
         ),
         "pricing": {
             "model": "per-call",
@@ -3097,13 +3096,9 @@ async def mcp_streamable_http(
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": "hubvibe", "version": SERVICE_VERSION},
                 "instructions": (
-                    "HubVibe: pay-per-call tools for agents -- web search and "
-                    "cited research, LLM completion and extraction, crypto and "
-                    "Base on-chain data, prediction markets, BigQuery SQL and "
-                    "forecasting, a deterministic statistics engine, image, "
-                    "speech and video generation, sandboxed Python, maps and "
-                    "weather, and rule-based site audits (WCAG, SEO, security "
-                    "headers, performance). Every tool costs money. Calls "
+                    "HubVibe: pay-per-call tools for agents -- "
+                    + SERVICE_CAPABILITIES + ". Every tool takes an optional "
+                    "`language` and answers in it. Every tool costs money. Calls "
                     "must be paid for; this deployment currently settles: "
                     f"{', '.join(_payment_methods_live()) or 'no rail is configured'}"
                     f" -- see {PUBLIC_BASE_URL}/.well-known/agent.json and the 402 "
@@ -3390,13 +3385,9 @@ def _a2a_card() -> dict:
     return a2a.build_card(
         base_url=PUBLIC_BASE_URL, name="HubVibe",
         description=(
-            f"{SERVICE_TITLE}. Pay-per-call skills for agents: web search and cited "
-            "research, LLM completion and extraction, crypto prices and Base on-chain "
-            "reads, prediction markets, BigQuery SQL and forecasting, deterministic "
-            "statistics, image, speech and video generation, sandboxed Python, maps "
-            "and weather, and rule-based site audits (WCAG, SEO, security headers, "
-            "performance). One price per call, no account; a delivered job carries "
-            "a receipt. Name a skill in a data part: {\"skill\": <id>, "
+            f"{SERVICE_TITLE}. Pay-per-call skills for agents: {SERVICE_CAPABILITIES}. "
+            "Every skill takes an optional `language`. One price per call, no account; "
+            "a delivered job carries a receipt. Name a skill in a data part: {\"skill\": <id>, "
             "\"arguments\": {...}}."
         ),
         version=SERVICE_VERSION, tools=_mcp_tools(),
