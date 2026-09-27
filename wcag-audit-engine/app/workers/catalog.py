@@ -1242,7 +1242,7 @@ _DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 
 _EXAMPLE_OVERRIDES = {
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
-    "video.youtube": {"query": "x402 payments", "max_results": 3},
+    "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},
     "social.mastodon": {"mode": "hashtag", "tag": "opensource", "limit": 3},
     "opendata.search": {"query": "人口", "region": "jp", "limit": 5},

@@ -48,8 +48,10 @@ def _departure_time(raw) -> Optional[str]:
     if not isinstance(raw, str) or not raw.strip():
         raise runtime.InvalidRequest("`departure_time`, when given, must be an RFC 3339 timestamp such as 2026-09-27T16:30:00Z.")
     text = raw.strip()
+    # Python 3.10's fromisoformat does not accept a trailing Z; spell it out.
+    iso = text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text
     try:
-        parsed = datetime.fromisoformat(text.replace("z", "Z"))
+        parsed = datetime.fromisoformat(iso)
     except ValueError:
         raise runtime.InvalidRequest(
             f"`departure_time` {text!r} is not an RFC 3339 timestamp (e.g. 2026-09-27T16:30:00Z).") from None

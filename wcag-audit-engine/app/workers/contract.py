@@ -981,7 +981,7 @@ OUTPUT_SCHEMAS = {
         "description", "warnings", "advisory", "source", "as_of", "checked_at"]),
 
     "video.youtube": _obj({
-        "query": _s("The query as given; null when video_ids were looked up.", "x402 payments", nullable=True),
+        "query": _s("The query as given; null when video_ids were looked up.", "open source licensing", nullable=True),
         "video_ids": {"type": ["array", "null"], "items": {"type": "string"},
                       "description": "The ids asked for, in order; null when a query was searched.",
                       "examples": [["IJhS_fv5Ktk"]]},
@@ -990,9 +990,9 @@ OUTPUT_SCHEMAS = {
         "items": _arr(_obj({
             "video_id": _s("YouTube video id.", "IJhS_fv5Ktk"),
             "url": _s("Watch URL.", "https://www.youtube.com/watch?v=IJhS_fv5Ktk"),
-            "title": _s("Title.", "What is x402? Internet-native payments for agents", nullable=True),
+            "title": _s("Title.", "Open source licensing explained", nullable=True),
             "description": _s("Description, cut at 500 characters; null when empty.",
-                              "A short intro to the x402 payment protocol.", nullable=True),
+                              "A short intro to open source licences.", nullable=True),
             "channel_id": _s("Uploading channel id.", "UCoBPd2jgYzQ5m8k3f1nR9wA", nullable=True),
             "channel_title": _s("Uploading channel name.", "Coinbase Developer Platform", nullable=True),
             "published_at": _s("Upload time as YouTube states it (ISO 8601).", "2026-05-14T16:00:12Z", nullable=True),
@@ -1042,7 +1042,7 @@ OUTPUT_SCHEMAS = {
         "instance": _s("Instance queried.", "mastodon.social"),
         "tag": _s("Hashtag asked for (hashtag mode).", "opensource", nullable=True),
         "acct": _s("Account asked for (account mode).", "Gargron", nullable=True),
-        "query": _s("Query asked for (search mode).", "x402", nullable=True),
+        "query": _s("Query asked for (search mode).", "opensource", nullable=True),
         "kind": _s("accounts or hashtags (search mode).", "accounts", nullable=True),
         "account": _nobj(_MASTO_ACCOUNT["properties"], _MASTO_ACCOUNT["required"], "The account, in account mode; null otherwise."),
         "statuses": _arr(_MASTO_STATUS, "Statuses, newest first (hashtag and account modes); empty otherwise."),

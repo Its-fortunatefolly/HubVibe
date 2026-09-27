@@ -12963,7 +12963,7 @@
                 ],
                 "description": "The query as given; null when video_ids were looked up.",
                 "examples": [
-                  "x402 payments"
+                  "open source licensing"
                 ]
               },
               "video_ids": {
@@ -13017,7 +13017,7 @@
                       ],
                       "description": "Title.",
                       "examples": [
-                        "What is x402? Internet-native payments for agents"
+                        "Open source licensing explained"
                       ]
                     },
                     "description": {
@@ -13027,7 +13027,7 @@
                       ],
                       "description": "Description, cut at 500 characters; null when empty.",
                       "examples": [
-                        "A short intro to the x402 payment protocol."
+                        "A short intro to open source licences."
                       ]
                     },
                     "channel_id": {
@@ -14521,7 +14521,7 @@
                 ],
                 "description": "Query asked for (search mode).",
                 "examples": [
-                  "x402"
+                  "opensource"
                 ]
               },
               "kind": {
