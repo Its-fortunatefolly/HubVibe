@@ -26,6 +26,8 @@ from typing import Optional
 
 X402_EXTENSION_URI = "https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2"
 SUPPORTED_VERSIONS = ("1.0", "0.3")
+# The patch release 0.3 clients write in a card's top-level protocolVersion.
+V03_PROTOCOL_VERSION = "0.3.0"
 
 # Method name -> operation, in both versions' spellings.
 _OPERATIONS = {
@@ -95,6 +97,15 @@ def build_card(*, base_url: str, name: str, description: str, version: str,
             {"url": endpoint, "protocolBinding": "JSONRPC", "protocolVersion": v}
             for v in SUPPORTED_VERSIONS
         ],
+        # The same endpoint, spelled the way A2A 0.3 clients read a card.
+        # Without a top-level `url` the official 0.3 SDK (a2a-sdk 0.3.26)
+        # refuses the whole card ("url: Field required"), and Gemini
+        # Enterprise documents A2A 0.3. A 1.x client ignores these three
+        # fields: a2a-sdk 1.1.5 loads fetched cards with
+        # ParseDict(..., ignore_unknown_fields=True). Verified 2026-09-27.
+        "url": endpoint,
+        "protocolVersion": V03_PROTOCOL_VERSION,
+        "preferredTransport": "JSONRPC",
         "provider": {"organization": "HubVibe", "url": base_url},
         "version": version,
         "documentationUrl": f"{base_url}/llms.txt",

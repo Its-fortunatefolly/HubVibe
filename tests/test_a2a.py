@@ -106,6 +106,18 @@ def test_the_agent_card_has_every_required_field_and_every_tool(app_module, clie
     assert card["capabilities"]["streaming"] is False
 
 
+def test_the_card_is_also_readable_by_a2a_0_3_clients(client):
+    """The official 0.3 SDK requires a top-level url (it rejected the 1.0-only
+    card outright, 2026-09-27); 1.x clients ignore these fields."""
+    card = client.get("/.well-known/agent-card.json").json()
+    assert card["url"] == "https://audit.example.test/a2a"
+    assert card["protocolVersion"] == "0.3.0" and card["preferredTransport"] == "JSONRPC"
+    required_by_0_3 = ("name", "description", "url", "version", "capabilities", "defaultInputModes",
+                       "defaultOutputModes", "skills")
+    assert all(card.get(field) for field in required_by_0_3)
+    assert {i["url"] for i in card["supportedInterfaces"]} == {card["url"]}
+
+
 def test_an_unpaid_send_is_input_required_with_the_x402_challenge(client):
     body = _send(client, TOOL, POINTS).json()
     task = body["result"]["task"]

@@ -1,0 +1,23 @@
+{
+  "name": "hubvibe",
+  "version": "1.18.0",
+  "description": "HubVibe: pay-per-call tools for agents over MCP. Live web and news search in any language, official economic numbers, government open data from 16 portals (Korea, Japan, EU, UK and more) as rows, shopping availability and shipping, market data, research and site audits. The tool list is free; each call is priced.",
+  "mcpServers": {
+    "hubvibe": {
+      "httpUrl": "https://hubvibe-io.com/mcp",
+      "headers": {
+        "X-API-Key": "${HUBVIBE_API_KEY:-}"
+      },
+      "timeout": 180000
+    }
+  },
+  "settings": [
+    {
+      "name": "HubVibe prepaid key (optional)",
+      "description": "A prepaid HubVibe key, spent per call. Leave empty to browse the tools: each paid call then answers with its price and how to pay.",
+      "envVar": "HUBVIBE_API_KEY",
+      "sensitive": true
+    }
+  ],
+  "contextFileName": "GEMINI.md"
+}
