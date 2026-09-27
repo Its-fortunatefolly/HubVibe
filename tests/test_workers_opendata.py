@@ -106,9 +106,13 @@ def test_a_ckan_package_becomes_one_dataset_record_with_usable_resources():
 
 def test_the_portal_table_is_the_verified_keyless_set():
     portals = W.providers.opendata.PORTALS
-    assert set(portals) == {"data.gov.au", "data.e-gov.go.jp", "catalog.data.metro.tokyo.lg.jp", "data.gov.hk"}
-    assert W.providers.opendata.REGIONS == ["au", "hk", "jp"]
-    assert W.providers.opendata.portals_for("jp") == ["data.e-gov.go.jp", "catalog.data.metro.tokyo.lg.jp"]
+    assert len(portals) == 16 and {"data.gov.au", "data.e-gov.go.jp", "catalog.data.metro.tokyo.lg.jp", "data.gov.hk",
+                                    "data.bodik.jp", "data.go.kr", "ckan.publishing.service.gov.uk", "open.canada.ca",
+                                    "data.europa.eu", "govdata.de", "dati.gov.it", "data.gov.ie", "opendata.swiss",
+                                    "data.overheid.nl", "data.gov.il", "datos.gob.cl"} == set(portals)
+    assert W.providers.opendata.REGIONS == ["au", "ca", "ch", "cl", "de", "eu", "gb", "hk", "ie", "il", "it", "jp", "kr", "nl"]
+    assert W.providers.opendata.portals_for("jp") == ["data.e-gov.go.jp", "catalog.data.metro.tokyo.lg.jp", "data.bodik.jp"]
+    assert W.providers.opendata.portals_for("kr") == ["data.go.kr"]
     assert W.providers.opendata.portals_for("all") == list(portals)
     assert all(p.available() for p in W.providers.opendata.PROVIDERS)
 
@@ -116,13 +120,15 @@ def test_the_portal_table_is_the_verified_keyless_set():
 def test_a_region_fans_out_and_a_failing_portal_is_disclosed_not_hidden():
     S = W.skills.opendata
     ctx = _Ctx({"data.e-gov.go.jp": _parsed("data.e-gov.go.jp"),
-                "catalog.data.metro.tokyo.lg.jp": W.runtime.TransientProviderError("catalog.data.metro.tokyo.lg.jp timed out")})
+                "catalog.data.metro.tokyo.lg.jp": W.runtime.TransientProviderError("catalog.data.metro.tokyo.lg.jp timed out"),
+                "data.bodik.jp": W.runtime.TransientProviderError("data.bodik.jp timed out")})
     r = asyncio.run(S.search(ctx, {"query": " 人口 ", "region": "jp", "limit": 5}))
-    assert sorted(ctx.steps) == ["search:catalog.data.metro.tokyo.lg.jp", "search:data.e-gov.go.jp"]
+    assert sorted(ctx.steps) == ["search:catalog.data.metro.tokyo.lg.jp", "search:data.bodik.jp", "search:data.e-gov.go.jp"]
     assert r["query"] == "人口" and r["region"] == "jp"
-    assert r["portals_searched"] == ["data.e-gov.go.jp", "catalog.data.metro.tokyo.lg.jp"]
+    assert r["portals_searched"] == ["data.e-gov.go.jp", "catalog.data.metro.tokyo.lg.jp", "data.bodik.jp"]
     assert r["portals_ok"] == ["data.e-gov.go.jp"]
-    assert r["portals_failed"] == [{"portal": "catalog.data.metro.tokyo.lg.jp", "reason": "catalog.data.metro.tokyo.lg.jp timed out"}]
+    assert r["portals_failed"] == [{"portal": "catalog.data.metro.tokyo.lg.jp", "reason": "catalog.data.metro.tokyo.lg.jp timed out"},
+                                   {"portal": "data.bodik.jp", "reason": "data.bodik.jp timed out"}]
     assert r["total_matches"] == {"data.e-gov.go.jp": 4699}
     assert r["result_count"] == 2 and [x["id"] for x in r["results"]] == ["5b2f1c7e-8a3d-4c1e-9f2a-1b2c3d4e5f60", "x2"]  # newest first
     assert r["limit_per_portal"] == 5 and r["checked_at"].endswith("Z")
@@ -222,7 +228,7 @@ def test_a_paid_call_over_http_and_mcp_delivers_the_envelope(client, monkeypatch
     envelope = response.json()
     assert envelope["worker"] == WORKER and envelope["price_usd"] == 0.10
     jsonschema.validate(envelope, W.catalog.response_schema(W.catalog.BY_NAME[WORKER]))
-    assert envelope["result"]["portals_ok"] == ["data.e-gov.go.jp", "catalog.data.metro.tokyo.lg.jp"]
+    assert envelope["result"]["portals_ok"] == ["data.e-gov.go.jp", "catalog.data.metro.tokyo.lg.jp", "data.bodik.jp"]
     receipt = client.get(envelope["receipt_url"]).json()
     assert receipt["request"]["worker"] == WORKER and receipt["execution"]["status"] == "ok"
     mcp = client.post("/mcp", headers={"X-API-Key": "test-key"}, json={

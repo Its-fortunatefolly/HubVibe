@@ -12035,8 +12035,8 @@
     },
     {
       "name": "hubvibe_opendata_search",
-      "title": "Search Asia-Pacific open-data portals for datasets",
-      "description": "Find structured government datasets across Asia-Pacific open-data portals in one call: data.gov.au (Australia), the e-Gov Data Portal and the Tokyo catalog (Japan), DATA.GOV.HK (Hong Kong). Query in any language, the portal's own included; every match comes back with its organization, licence, update time and the download URLs of its CSV/JSON/XLS resources, ready for fetch.raw. Portals that did not answer are listed, never hidden. Input: query; optional region (au, jp, hk, all), limit, portals. $0.10 per call. Returns: query, region, portals_searched[], portals_ok[], portals_failed[], total_matches{}, results[{portal, title, description, organization, resources[{url, format}]...}], result_count, checked_at.",
+      "title": "Search 16 government open-data portals for datasets",
+      "description": "Find government datasets across 16 open-data portals in one call: Korea (data.go.kr), Japan (e-Gov, Tokyo, BODIK), Hong Kong, Australia, UK, Canada, the EU catalog (139,000+ datasets), Germany, Italy, Ireland, Switzerland, Netherlands, Israel, Chile. Query in any language, the portal's own included; every match comes back with organization, update time and download URLs, ready for opendata.table. Portals that did not answer are listed, never hidden. Input: query; optional region, limit, portals. $0.10 per call. Returns: query, region, portals_searched[], portals_ok[], portals_failed[], total_matches{}, results[{portal, title, description, organization, landing_url, resources[{url, format}]...}], result_count, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -12045,17 +12045,28 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 300,
-            "description": "Words to search for, in any language (e.g. 人口, rainfall, 交通)."
+            "description": "Words to search for, in any language (인구, 人口, rainfall, Bevölkerung)."
           },
           "region": {
             "type": "string",
             "enum": [
               "all",
               "au",
+              "ca",
+              "ch",
+              "cl",
+              "de",
+              "eu",
+              "gb",
               "hk",
-              "jp"
+              "ie",
+              "il",
+              "it",
+              "jp",
+              "kr",
+              "nl"
             ],
-            "description": "Which portals to search. Default all."
+            "description": "Which portals to search. Default all (16 portals, concurrently)."
           },
           "limit": {
             "type": "integer",
@@ -12069,7 +12080,7 @@
               "type": "string"
             },
             "minItems": 1,
-            "description": "Specific portal ids instead of a region, e.g. [\"data.gov.au\"]."
+            "description": "Specific portal ids instead of a region, e.g. [\"data.go.kr\", \"data.bodik.jp\"]."
           }
         },
         "required": [
@@ -12563,11 +12574,437 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
-        "title": "Search Asia-Pacific open-data portals for datasets"
+        "title": "Search 16 government open-data portals for datasets"
       },
       "httpEndpoint": {
         "method": "POST",
         "path": "/work/opendata/search",
+        "price_usd": 0.1
+      }
+    },
+    {
+      "name": "hubvibe_opendata_table",
+      "title": "Read a government dataset file as JSON rows",
+      "description": "Turn one dataset file into JSON rows: a CSV, TSV, XLSX or JSON link from any portal, an e-Stat (Japan) file-download link, or a data.go.kr (Korea) dataset page, which is resolved to its keyless file first. Encoding is detected (Korean CP949, Japanese Shift_JIS, Chinese Big5/GB18030, UTF-8/16, Western code pages), the header row found, numbers typed, XLSX sheets selectable, large files capped and disclosed. Input: url; optional max_rows, sheet, encoding, delimiter. $0.10 per call. Returns: source_url, resolved_from, file_url, final_url, filename, content_type, bytes, format, encoding, sheet, sheets[], columns[], column_count, rows[{...}], row_count, total_rows, truncated, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "File link, e-Stat file-download link, or a data.go.kr dataset page."
+          },
+          "max_rows": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "description": "Rows to return, default 200."
+          },
+          "sheet": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "XLSX sheet name or 0-based index. Default: first sheet."
+          },
+          "encoding": {
+            "type": "string",
+            "maxLength": 30,
+            "description": "Force a codec (cp949, shift_jis, big5). Default: detected."
+          },
+          "delimiter": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1,
+            "description": "Force a CSV delimiter. Default: sniffed."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "source_url": {
+                "type": "string",
+                "description": "The URL as given.",
+                "examples": [
+                  "https://www.data.go.kr/data/15005995/fileData.do"
+                ]
+              },
+              "resolved_from": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The dataset page that was resolved to a file link; null when a file link was given.",
+                "examples": [
+                  "https://www.data.go.kr/data/15005995/fileData.do"
+                ]
+              },
+              "file_url": {
+                "type": "string",
+                "description": "The file actually fetched.",
+                "examples": [
+                  "https://www.data.go.kr/cmm/cmm/fileDownload.do?atchFileId=FILE_000000003522968&fileDetailSn=1&insertDataPrcus=N"
+                ]
+              },
+              "final_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "After redirects.",
+                "examples": [
+                  "https://www.data.go.kr/cmm/cmm/fileDownload.do?atchFileId=FILE_000000003522968&fileDetailSn=1&insertDataPrcus=N"
+                ]
+              },
+              "filename": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "File name from the server or the URL.",
+                "examples": [
+                  "울산광역시_인구 현황(20251112).csv"
+                ]
+              },
+              "content_type": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Server content type.",
+                "examples": [
+                  "application/octet-stream"
+                ]
+              },
+              "bytes": {
+                "type": "integer",
+                "description": "File size in bytes.",
+                "examples": [
+                  12331
+                ]
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "csv",
+                  "tsv",
+                  "xlsx",
+                  "json"
+                ],
+                "description": "Parsed format.",
+                "examples": [
+                  "csv"
+                ]
+              },
+              "encoding": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Text encoding used; null for XLSX.",
+                "examples": [
+                  "cp949"
+                ]
+              },
+              "sheet": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "XLSX sheet read; null otherwise.",
+                "examples": [
+                  "Sheet1"
+                ]
+              },
+              "sheets": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Sheet name.",
+                  "examples": [
+                    "Sheet1"
+                  ]
+                },
+                "description": "All sheet names for an XLSX; empty otherwise.",
+                "examples": [
+                  []
+                ]
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Column name from the header row.",
+                  "examples": [
+                    "행정구역명"
+                  ]
+                },
+                "description": "Columns in file order.",
+                "examples": [
+                  [
+                    "행정구역코드",
+                    "행정구역명",
+                    "성별",
+                    "내국인"
+                  ]
+                ]
+              },
+              "column_count": {
+                "type": "integer",
+                "description": "Number of columns.",
+                "examples": [
+                  14
+                ]
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "description": "One row keyed by column; numbers typed, blanks null.",
+                  "additionalProperties": true,
+                  "examples": [
+                    {
+                      "행정구역코드": 31,
+                      "행정구역명": "울산광역시",
+                      "성별": "남자",
+                      "내국인": 564888
+                    }
+                  ]
+                },
+                "description": "Rows in file order, up to max_rows."
+              },
+              "row_count": {
+                "type": "integer",
+                "description": "Rows returned.",
+                "examples": [
+                  5
+                ]
+              },
+              "total_rows": {
+                "type": "integer",
+                "description": "Data rows in the file (excluding the header).",
+                "examples": [
+                  45
+                ]
+              },
+              "truncated": {
+                "type": "boolean",
+                "description": "True when total_rows exceeds max_rows.",
+                "examples": [
+                  true
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "45 data rows in the file; the first 5 are returned (max_rows)."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "source_url",
+              "resolved_from",
+              "file_url",
+              "final_url",
+              "filename",
+              "content_type",
+              "bytes",
+              "format",
+              "encoding",
+              "sheet",
+              "sheets",
+              "columns",
+              "column_count",
+              "rows",
+              "row_count",
+              "total_rows",
+              "truncated",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "opendata.table response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Read a government dataset file as JSON rows"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/opendata/table",
         "price_usd": 0.1
       }
     },
