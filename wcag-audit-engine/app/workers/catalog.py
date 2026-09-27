@@ -964,6 +964,37 @@ CATALOG = [
         skill="data.macro", max_seconds=40,
         pricing_basis="Provisional. Provider cost zero (public statistical APIs); one request per call.",
         requires=("macro",)),
+    Worker(
+        name="commerce.shipping", price_usd=0.50, tier="standard",
+        title="Shipping options, eligibility and cart total for a product",
+        description=(
+            "Can this product ship to me, for how much, and what is the cart total? Any "
+            "Shopify storefront, keyless: the variant goes into a real cart session, the "
+            "store's totals are read, and the store quotes its shipping options to the "
+            "destination. Returns options with prices and days, eligibility (true, false "
+            "with the store's reason, or the address fields still needed), subtotal and "
+            "total before tax. No order placed. Input: url, ship_to{country, province, "
+            "postal_code}; optional variant, quantity."),
+        tags=["commerce", "shipping", "eligibility", "checkout", "cart", "availability", "shopify", "live"],
+        input_schema=_obj({
+            "url": {"type": "string", "description": "Product page on the store (…/products/<handle>)."},
+            "variant": {"type": "string", "minLength": 1, "maxLength": 200,
+                        "description": "Free-text option to buy (size 10 natural black). Default: first available."},
+            "quantity": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Default 1."},
+            "ship_to": _obj({
+                "country": {"type": "string", "minLength": 2, "maxLength": 60, "description": "ISO 3166-1 alpha-2 (US, JP) or the country name."},
+                "province": {"type": "string", "minLength": 1, "maxLength": 80, "description": "State / province / prefecture, code or name, when the country needs one."},
+                "postal_code": {"type": "string", "minLength": 1, "maxLength": 20},
+            }, ["country"]),
+        }, ["url", "ship_to"]),
+        returns=("url, store{platform, domain, currency}, product{id, title, handle}, variant{id, name, sku, price, available, "
+                 "requires_shipping}, quantity, ship_to{}, cart{subtotal, total, currency, item_count, requires_shipping}, eligible, "
+                 "eligibility_reasons[], missing_fields[], shipping_options[{name, price, currency, delivery_days_min, "
+                 "delivery_days_max, description, carrier}], cheapest_shipping{}, estimated_total{}, taxes_note, source, notes[], checked_at."),
+        skill="commerce.shipping", max_seconds=60,
+        pricing_basis="Provisional. Provider cost zero (the store's own storefront endpoints); three requests in one session.",
+        composes=["commerce.availability"],
+        requires=("shopify_cart",)),
     # --- travel: live flight offers (Duffel) --------------------------------
     Worker(
         name="travel.flights", price_usd=0.50, tier="standard",
@@ -1488,6 +1519,8 @@ _EXAMPLE_OVERRIDES = {
     # example runs and returns per-size availability.
     "commerce.availability": {"url": "https://www.allbirds.com/products/mens-wool-runners",
                               "variant": "size 10"},
+    "commerce.shipping": {"url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10",
+                          "ship_to": {"country": "US", "province": "NY", "postal_code": "10001"}},
     # Either source is valid, so nothing is `required`; the example shows the
     # inline form with a prediction and a probability query.
     "stats.probability": {"points": [[1, 2.1], [2, 3.9], [3, 6.2], [4, 7.8], [5, 10.1]],

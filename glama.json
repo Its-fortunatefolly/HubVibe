@@ -14116,6 +14116,767 @@
       }
     },
     {
+      "name": "hubvibe_commerce_shipping",
+      "title": "Shipping options, eligibility and cart total for a product",
+      "description": "Can this product ship to me, for how much, and what is the cart total? Any Shopify storefront, keyless: the variant goes into a real cart session, the store's totals are read, and the store quotes its shipping options to the destination. Returns options with prices and days, eligibility (true, false with the store's reason, or the address fields still needed), subtotal and total before tax. No order placed. Input: url, ship_to{country, province, postal_code}; optional variant, quantity. $0.50 per call. Returns: url, store{platform, domain, currency}, product{id, title, handle}, variant{id, name, sku, price, available, requires_shipping}, quantity, ship_to{}, cart{subtotal, total, currency, item_count, requires_shipping}, eligible, eligibility_reasons[], missing_fields[], shipping_options[{name, price, currency, delivery_days_min, delivery_days_max, description, carrier}], cheapest_shipping{}, estimated_total{}, taxes_note, source, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Product page on the store (…/products/<handle>)."
+          },
+          "variant": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Free-text option to buy (size 10 natural black). Default: first available."
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Default 1."
+          },
+          "ship_to": {
+            "type": "object",
+            "properties": {
+              "country": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 60,
+                "description": "ISO 3166-1 alpha-2 (US, JP) or the country name."
+              },
+              "province": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "description": "State / province / prefecture, code or name, when the country needs one."
+              },
+              "postal_code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20
+              }
+            },
+            "required": [
+              "country"
+            ],
+            "additionalProperties": false
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [
+          "url",
+          "ship_to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "Product page as given.",
+                "examples": [
+                  "https://www.allbirds.com/products/mens-wool-runners"
+                ]
+              },
+              "store": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "const": "shopify",
+                    "description": "Storefront platform."
+                  },
+                  "domain": {
+                    "type": "string",
+                    "description": "Store host.",
+                    "examples": [
+                      "www.allbirds.com"
+                    ]
+                  },
+                  "currency": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Cart currency.",
+                    "examples": [
+                      "USD"
+                    ]
+                  }
+                },
+                "required": [
+                  "platform",
+                  "domain",
+                  "currency"
+                ],
+                "description": "The store."
+              },
+              "product": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Store product id.",
+                    "examples": [
+                      1234567890
+                    ]
+                  },
+                  "title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Product title.",
+                    "examples": [
+                      "Men's Wool Runners"
+                    ]
+                  },
+                  "handle": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Product handle.",
+                    "examples": [
+                      "mens-wool-runners"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "handle"
+                ],
+                "description": "The product."
+              },
+              "variant": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Variant id placed in the cart.",
+                    "examples": [
+                      31330825109584
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Variant name.",
+                    "examples": [
+                      "9"
+                    ]
+                  },
+                  "sku": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "SKU.",
+                    "examples": [
+                      "WR3MNCW090"
+                    ]
+                  },
+                  "price": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Unit price.",
+                    "examples": [
+                      110.0
+                    ]
+                  },
+                  "available": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Store availability flag.",
+                    "examples": [
+                      true
+                    ]
+                  },
+                  "requires_shipping": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Physical item.",
+                    "examples": [
+                      true
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "sku",
+                  "price",
+                  "available",
+                  "requires_shipping"
+                ],
+                "description": "The variant quoted."
+              },
+              "quantity": {
+                "type": "integer",
+                "description": "Units in the cart.",
+                "examples": [
+                  1
+                ]
+              },
+              "ship_to": {
+                "type": "object",
+                "properties": {
+                  "country": {
+                    "type": "string",
+                    "description": "Destination country as given.",
+                    "examples": [
+                      "US"
+                    ]
+                  },
+                  "province": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "State/province.",
+                    "examples": [
+                      "NY"
+                    ]
+                  },
+                  "postal_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Postal code.",
+                    "examples": [
+                      "10001"
+                    ]
+                  }
+                },
+                "required": [
+                  "country",
+                  "province",
+                  "postal_code"
+                ],
+                "description": "Destination."
+              },
+              "cart": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "subtotal": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Items subtotal.",
+                    "examples": [
+                      110.0
+                    ]
+                  },
+                  "total": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Cart total before shipping and tax.",
+                    "examples": [
+                      110.0
+                    ]
+                  },
+                  "currency": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Currency.",
+                    "examples": [
+                      "USD"
+                    ]
+                  },
+                  "item_count": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Units.",
+                    "examples": [
+                      1
+                    ]
+                  },
+                  "requires_shipping": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Cart needs shipping.",
+                    "examples": [
+                      true
+                    ]
+                  }
+                },
+                "required": [
+                  "subtotal",
+                  "total",
+                  "currency",
+                  "item_count",
+                  "requires_shipping"
+                ],
+                "description": "The store's own cart totals; null when the item could not be added."
+              },
+              "eligible": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "True: the store offers shipping there. False: it will not (see reasons). Null: the store needs more address fields first.",
+                "examples": [
+                  true
+                ]
+              },
+              "eligibility_reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "The store's own words.",
+                  "examples": [
+                    "country: Country/region not supported"
+                  ]
+                },
+                "description": "Why not eligible, or what is missing; empty when eligible.",
+                "examples": [
+                  []
+                ]
+              },
+              "missing_fields": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A ship_to field the store requires.",
+                  "examples": [
+                    "province"
+                  ]
+                },
+                "description": "Address fields to add and retry.",
+                "examples": [
+                  []
+                ]
+              },
+              "shipping_options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Option name.",
+                      "examples": [
+                        "Ground Shipping"
+                      ]
+                    },
+                    "price": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Price.",
+                      "examples": [
+                        0.0
+                      ]
+                    },
+                    "currency": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Currency.",
+                      "examples": [
+                        "USD"
+                      ]
+                    },
+                    "delivery_days_min": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Earliest delivery, days.",
+                      "examples": [
+                        3
+                      ]
+                    },
+                    "delivery_days_max": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Latest delivery, days.",
+                      "examples": [
+                        7
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Store's description.",
+                      "examples": [
+                        "Arrives in 3-7 business days"
+                      ]
+                    },
+                    "carrier": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Carrier when named.",
+                      "examples": [
+                        "ups"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "price",
+                    "currency",
+                    "delivery_days_min",
+                    "delivery_days_max",
+                    "description",
+                    "carrier"
+                  ],
+                  "description": "One shipping option."
+                },
+                "description": "Options the store would show at checkout, cheapest first.",
+                "examples": [
+                  []
+                ]
+              },
+              "cheapest_shipping": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Option.",
+                    "examples": [
+                      "Ground Shipping"
+                    ]
+                  },
+                  "price": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Price.",
+                    "examples": [
+                      0.0
+                    ]
+                  },
+                  "currency": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Currency.",
+                    "examples": [
+                      "USD"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "price",
+                  "currency"
+                ],
+                "description": "Cheapest option; null when none."
+              },
+              "estimated_total": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "description": "Subtotal plus cheapest shipping.",
+                    "examples": [
+                      110.0
+                    ]
+                  },
+                  "currency": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Currency.",
+                    "examples": [
+                      "USD"
+                    ]
+                  },
+                  "includes_tax": {
+                    "type": "boolean",
+                    "description": "Always false: tax is computed at checkout.",
+                    "examples": [
+                      false
+                    ]
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency",
+                  "includes_tax"
+                ],
+                "description": "Estimated total before tax; null when not quotable."
+              },
+              "taxes_note": {
+                "type": "string",
+                "description": "Where tax comes from.",
+                "examples": [
+                  "Sales tax or VAT is computed by the store at checkout and is not included here."
+                ]
+              },
+              "source": {
+                "type": "string",
+                "const": "shopify-cart-api",
+                "description": "Data source."
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "No variant named; the first available option was quoted."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "url",
+              "store",
+              "product",
+              "variant",
+              "quantity",
+              "ship_to",
+              "cart",
+              "eligible",
+              "eligibility_reasons",
+              "missing_fields",
+              "shipping_options",
+              "cheapest_shipping",
+              "estimated_total",
+              "taxes_note",
+              "source",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "commerce.shipping response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Shipping options, eligibility and cart total for a product"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/commerce/shipping",
+        "price_usd": 0.5
+      }
+    },
+    {
       "name": "hubvibe_travel_flights",
       "title": "Live flight offers between two places",
       "description": "Live flight offers from the airlines for a route and date: every offer with price, tax, currency, each segment (carrier, flight number, times, aircraft), stops, refund and change conditions, emissions and the exact time the offer expires. Places are IATA codes or names in any language (Tokyo, 東京, Séoul), resolved before the search. One-way or return, up to 9 adults plus children by age, any cabin class, sorted by price or duration. Input: origin, destination, departure_date or days_ahead. $0.50 per call. Returns: origin{}, destination{}, departure_date, return_date, passengers{}, cabin_class, sort, offers[{id, airline{}, total_amount, base_amount, tax_amount, currency, expires_at, slices[{segments[]}], stops, total_duration_seconds, refund_before_departure{}, change_before_departure{}, emissions_kg, instant_payment_required, ...}], offer_count, offers_available, cheapest_total{}, fastest_duration_seconds, live_mode, source, notes[], checked_at.",
