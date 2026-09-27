@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -15295,6 +15295,655 @@
         "method": "POST",
         "path": "/work/social/mastodon",
         "price_usd": 0.05
+      }
+    },
+    {
+      "name": "hubvibe_social_x_pulse",
+      "title": "X (Twitter) topic pulse: volume and engagement as aggregates",
+      "description": "What X (Twitter) is saying about a topic, as numbers only, live: post volume per hour or day over the last 1-7 days, and over a sample of recent posts the engagement totals, averages and rate (likes, reposts, replies, quotes, impressions), language mix, top hashtags and link/media share. Aggregates only: no post text, ids, authors or profiles are returned. Input: query (X operators allowed); optional days, granularity, sample (0-100 posts read), lang, include_retweets. $0.50 per call. Returns: query, effective_query, window{}, granularity, volume{total, buckets[]}, sample{requested, read, pages, x_cost_usd}, engagement{likes_total, ..., languages{}, top_hashtags[]}, source, as_of, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400,
+            "description": "Words or X search operators (\"machine learning\" from:nasa has:links)."
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7,
+            "description": "Window ending now, default 7 (X's recent limit)."
+          },
+          "granularity": {
+            "type": "string",
+            "enum": [
+              "hour",
+              "day"
+            ],
+            "description": "Volume buckets, default day."
+          },
+          "sample": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Recent posts read for the engagement aggregates, default 40; 0 = volume only."
+          },
+          "lang": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "description": "Restrict to a language (en, ja...)."
+          },
+          "include_retweets": {
+            "type": "boolean",
+            "description": "Default false: reposts are excluded from volume and sample."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "The query as given.",
+                "examples": [
+                  "open source"
+                ]
+              },
+              "effective_query": {
+                "type": "string",
+                "description": "The query sent to X (lang: and -is:retweet added unless given).",
+                "examples": [
+                  "open source lang:en -is:retweet"
+                ]
+              },
+              "window": {
+                "type": "object",
+                "properties": {
+                  "start": {
+                    "type": "string",
+                    "description": "Window start (RFC 3339).",
+                    "examples": [
+                      "2026-09-24T09:00:00Z"
+                    ]
+                  },
+                  "end": {
+                    "type": "string",
+                    "description": "Window end (RFC 3339), a few seconds before the call.",
+                    "examples": [
+                      "2026-09-27T08:59:45Z"
+                    ]
+                  },
+                  "days": {
+                    "type": "integer",
+                    "description": "Days covered.",
+                    "examples": [
+                      3
+                    ]
+                  }
+                },
+                "required": [
+                  "start",
+                  "end",
+                  "days"
+                ],
+                "description": "The window analysed."
+              },
+              "granularity": {
+                "type": "string",
+                "enum": [
+                  "hour",
+                  "day"
+                ],
+                "description": "Volume bucket size.",
+                "examples": [
+                  "day"
+                ]
+              },
+              "volume": {
+                "type": "object",
+                "properties": {
+                  "total": {
+                    "type": "integer",
+                    "description": "Posts matching the query in the window.",
+                    "examples": [
+                      21636
+                    ]
+                  },
+                  "buckets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Bucket start.",
+                          "examples": [
+                            "2026-09-26T00:00:00.000Z"
+                          ]
+                        },
+                        "end": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Bucket end.",
+                          "examples": [
+                            "2026-09-27T00:00:00.000Z"
+                          ]
+                        },
+                        "count": {
+                          "type": "integer",
+                          "description": "Posts in the bucket.",
+                          "examples": [
+                            7200
+                          ]
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "count"
+                      ],
+                      "description": "One bucket."
+                    },
+                    "description": "Counts per bucket, oldest first."
+                  },
+                  "bucket_count": {
+                    "type": "integer",
+                    "description": "Buckets returned.",
+                    "examples": [
+                      4
+                    ]
+                  }
+                },
+                "required": [
+                  "total",
+                  "buckets",
+                  "bucket_count"
+                ],
+                "description": "Post volume from X's recent-counts endpoint."
+              },
+              "sample": {
+                "type": "object",
+                "properties": {
+                  "requested": {
+                    "type": "integer",
+                    "description": "Posts asked to read.",
+                    "examples": [
+                      20
+                    ]
+                  },
+                  "read": {
+                    "type": "integer",
+                    "description": "Posts actually read.",
+                    "examples": [
+                      20
+                    ]
+                  },
+                  "pages": {
+                    "type": "integer",
+                    "description": "Search pages fetched.",
+                    "examples": [
+                      1
+                    ]
+                  },
+                  "x_cost_usd": {
+                    "type": "number",
+                    "description": "What X bills for the posts read, at $0.005 each.",
+                    "examples": [
+                      0.1
+                    ]
+                  }
+                },
+                "required": [
+                  "requested",
+                  "read",
+                  "pages",
+                  "x_cost_usd"
+                ],
+                "description": "The sample the engagement figures rest on."
+              },
+              "engagement": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "posts_read": {
+                    "type": "integer",
+                    "description": "Posts in the sample.",
+                    "examples": [
+                      20
+                    ]
+                  },
+                  "likes_total": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Likes summed.",
+                    "examples": [
+                      340
+                    ]
+                  },
+                  "reposts_total": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Reposts summed.",
+                    "examples": [
+                      41
+                    ]
+                  },
+                  "replies_total": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Replies summed.",
+                    "examples": [
+                      27
+                    ]
+                  },
+                  "quotes_total": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Quotes summed.",
+                    "examples": [
+                      5
+                    ]
+                  },
+                  "impressions_total": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Impressions summed.",
+                    "examples": [
+                      51200
+                    ]
+                  },
+                  "bookmarks_total": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Bookmarks summed.",
+                    "examples": [
+                      12
+                    ]
+                  },
+                  "mean_likes": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Mean likes per post.",
+                    "examples": [
+                      17.0
+                    ]
+                  },
+                  "mean_impressions": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Mean impressions per post.",
+                    "examples": [
+                      2560.0
+                    ]
+                  },
+                  "max_likes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Most-liked post's likes.",
+                    "examples": [
+                      120
+                    ]
+                  },
+                  "max_impressions": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Most-seen post's impressions.",
+                    "examples": [
+                      18000
+                    ]
+                  },
+                  "engagement_rate_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "(likes+reposts+replies+quotes)/impressions, percent.",
+                    "examples": [
+                      0.807
+                    ]
+                  },
+                  "languages": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "description": "Posts per language code.",
+                    "additionalProperties": {
+                      "type": "integer"
+                    },
+                    "examples": [
+                      {
+                        "en": 20
+                      }
+                    ]
+                  },
+                  "top_hashtags": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "tag": {
+                          "type": "string",
+                          "description": "Hashtag, lower-cased.",
+                          "examples": [
+                            "opensource"
+                          ]
+                        },
+                        "posts": {
+                          "type": "integer",
+                          "description": "Posts using it.",
+                          "examples": [
+                            4
+                          ]
+                        }
+                      },
+                      "required": [
+                        "tag",
+                        "posts"
+                      ],
+                      "description": "One hashtag."
+                    },
+                    "description": "Up to 10 most-used hashtags.",
+                    "examples": [
+                      [
+                        {
+                          "tag": "opensource",
+                          "posts": 4
+                        }
+                      ]
+                    ]
+                  },
+                  "with_hashtags_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Share of posts with a hashtag.",
+                    "examples": [
+                      35.0
+                    ]
+                  },
+                  "with_links_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Share of posts linking outside X.",
+                    "examples": [
+                      40.0
+                    ]
+                  },
+                  "with_media_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Share of posts with photos or video.",
+                    "examples": [
+                      15.0
+                    ]
+                  },
+                  "possibly_sensitive_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Share X flags as possibly sensitive.",
+                    "examples": [
+                      0.0
+                    ]
+                  }
+                },
+                "required": [
+                  "posts_read",
+                  "likes_total",
+                  "reposts_total",
+                  "replies_total",
+                  "quotes_total",
+                  "impressions_total",
+                  "bookmarks_total",
+                  "mean_likes",
+                  "mean_impressions",
+                  "max_likes",
+                  "max_impressions",
+                  "engagement_rate_pct",
+                  "languages",
+                  "top_hashtags",
+                  "with_hashtags_pct",
+                  "with_links_pct",
+                  "with_media_pct",
+                  "possibly_sensitive_pct"
+                ],
+                "description": "Engagement aggregates over the sample; null when sample is 0."
+              },
+              "source": {
+                "type": "string",
+                "const": "x-api-v2",
+                "description": "Data source."
+              },
+              "as_of": {
+                "type": "string",
+                "description": "End of the window analysed.",
+                "examples": [
+                  "2026-09-27T08:59:45Z"
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "effective_query",
+              "window",
+              "granularity",
+              "volume",
+              "sample",
+              "engagement",
+              "source",
+              "as_of",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "social.x_pulse response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "X (Twitter) topic pulse: volume and engagement as aggregates"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/social/x_pulse",
+        "price_usd": 0.5
       }
     },
     {

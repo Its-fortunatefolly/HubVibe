@@ -97,6 +97,7 @@ ROUTES = [
     ("utility", "/work/video/youtube", {"query": "x402 payments", "max_results": 3}),
     ("utility", "/work/social/bluesky", {"mode": "profile", "actor": "bsky.app", "posts": 3}),
     ("utility", "/work/social/mastodon", {"mode": "hashtag", "tag": "opensource", "limit": 3}),
+    ("standard", "/work/social/x_pulse", {"query": "open source", "days": 3, "sample": 20, "lang": "en"}),
     ("utility", "/work/market/stock", {"symbol": "AAPL", "range": "1mo"}),
     ("utility", "/work/market/fundamentals", {"symbol": "AAPL", "periods": 4}),
     ("standard", "/work/finance/analytics", {"symbol": "AAPL", "range": "6mo", "benchmark_symbol": "SPY",
