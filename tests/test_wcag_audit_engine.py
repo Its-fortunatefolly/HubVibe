@@ -2927,6 +2927,10 @@ def test_one_version_number_across_every_surface_that_publishes_one(monkeypatch)
     # said 1.2.0. Read as text: the `mcp` package is not a root dependency.
     import re
 
+    # The Gemini CLI extension manifest: the gallery shows this version.
+    extension = json.loads((REPO_ROOT / "gemini-extension.json").read_text(encoding="utf-8"))
+    assert extension["version"] == registry, "gemini-extension.json names another version"
+    assert extension["mcpServers"]["hubvibe"]["httpUrl"].endswith("/mcp")
     stdio = (REPO_ROOT / "wcag-audit-engine" / "integrations" / "mcp_server.py").read_text()
     literal = re.search(r'^VERSION = "([^"]+)"', stdio, re.M)
     assert literal and literal.group(1) == registry, "integrations/mcp_server.py names another version"
