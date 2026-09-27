@@ -878,6 +878,136 @@ CATALOG = [
         skill="opendata.search", max_seconds=60,
         pricing_basis="Provisional. Provider cost zero (public CKAN APIs); one request per portal.",
         requires=("opendata",)),
+    # --- traffic-aware routing (Google Routes API) ---------------------------
+    Worker(
+        name="traffic.route", price_usd=0.10, tier="utility",
+        title="Traffic-aware travel time and distance between two places",
+        description=(
+            'Travel time and distance between two places with live traffic, from the '
+            'Google Routes API at call time: duration with traffic, duration without, '
+            "the delay between them, distance, Google's localized texts, route "
+            'description, warnings and advisory. Places are addresses, place names or '
+            '"lat,lng". Input: origin, destination; optional travel_mode (DRIVE, '
+            'TWO_WHEELER, WALK, BICYCLE, TRANSIT), departure_time (RFC 3339, future; '
+            'omit to leave now), traffic (aware, optimal, none).'),
+        tags=["traffic", "routes", "directions", "eta", "google-maps", "travel-time", "live"],
+        input_schema={
+            "type": "object",
+            "properties": {
+                "origin": {"type": "string", "minLength": 1, "maxLength": 300,
+                           "description": "Where the trip starts: an address, a place name, or \"lat,lng\"."},
+                "destination": {"type": "string", "minLength": 1, "maxLength": 300,
+                                "description": "Where the trip ends: an address, a place name, or \"lat,lng\"."},
+                "travel_mode": {"type": "string", "enum": ["DRIVE", "TWO_WHEELER", "WALK", "BICYCLE", "TRANSIT"],
+                                "description": "Default DRIVE. Traffic applies to DRIVE and TWO_WHEELER only."},
+                "departure_time": {"type": "string", "format": "date-time",
+                                   "description": "RFC 3339 departure time in the future (2026-09-27T16:30:00Z); omit to leave now."},
+                "traffic": {"type": "string", "enum": ["aware", "optimal", "none"],
+                            "description": "aware (default): live traffic; optimal: live traffic with the best route quality, slower; none: no traffic."},
+            },
+            "required": ["origin", "destination"],
+            "additionalProperties": False,
+        },
+        returns=("origin, destination, travel_mode, traffic, departure_time, distance_meters, "
+                 "duration_seconds, static_duration_seconds, delay_seconds, duration_text, "
+                 "static_duration_text, distance_text, description, warnings[], advisory, "
+                 "source, as_of, checked_at."),
+        skill="traffic.route", max_seconds=60,
+        pricing_basis=("Provisional. One Google Routes computeRoutes request per call, billed by "
+                       "Google per request; the per-call cost is not yet measured here."),
+        requires=("google_routes",)),
+    Worker(
+        name="video.youtube", price_usd=0.05, tier="utility",
+        title="YouTube search and video statistics, live",
+        description=(
+            'Search YouTube or look up videos by id, each with live statistics read at call '
+            'time from the YouTube Data API v3: title, channel, upload time, duration, '
+            "views, likes, comments, live flag and thumbnail. A query runs YouTube's own "
+            'video search (sort by relevance, date, views, rating or title; filter by '
+            'upload date, country, language) plus one details call; video_ids skips it. '
+            'Input: query or video_ids; optional max_results, order, published_after, '
+            'region_code, language.'),
+        tags=["youtube", "video", "search", "social", "live", "statistics"],
+        input_schema=dict(_obj({
+            "query": {"type": "string", "minLength": 1, "maxLength": 300,
+                      "description": "Words to search YouTube for, in any language. Use this OR `video_ids`."},
+            "video_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]{11}$"},
+                          "minItems": 1, "maxItems": 25,
+                          "description": "YouTube video ids (11 characters) to look up directly; skips the search."},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 25,
+                            "description": "With query: videos to return, default 10."},
+            "order": {"type": "string", "enum": ["relevance", "date", "viewCount", "rating", "title"],
+                      "description": "With query: YouTube's sort, default relevance."},
+            "published_after": {"type": "string", "format": "date-time",
+                                "description": "With query: only videos uploaded at or after this RFC 3339 time, e.g. 2026-01-01T00:00:00Z."},
+            "region_code": {"type": "string", "minLength": 2, "maxLength": 2,
+                            "description": "With query: ISO 3166-1 alpha-2 country whose results to prefer, e.g. US, JP."},
+            "language": {"type": "string", "pattern": "^[A-Za-z]{2,3}$",
+                         "description": "With query: ISO 639 language code of the results to prefer, e.g. en, ja."},
+        }, []), oneOf=[{"required": ["query"]}, {"required": ["video_ids"]}]),
+        returns=("query, video_ids, total_results, items[{video_id, url, title, description, channel_id, "
+                 "channel_title, published_at, duration_seconds, view_count, like_count, comment_count, live, "
+                 "thumbnail_url}], item_count, source, as_of, checked_at."),
+        skill="video.youtube", max_seconds=60,
+        pricing_basis=("Provisional. No monetary provider cost: the YouTube Data API is quota-metered "
+                       "(100 units per search, 1 per details call, of a 10,000-unit daily default); two "
+                       "requests at most."),
+        requires=("youtube",)),
+    # --- social platforms, keyless -------------------------------------------
+    Worker(
+        name="social.bluesky", price_usd=0.05, tier="utility",
+        title="Bluesky profile, posts, account search or thread, live",
+        description=(
+            'Bluesky, live and keyless from the public AppView: a profile with its '
+            'latest posts (likes, reposts, replies, quotes, repost and reply flags, '
+            'embed type), an account search, or a post thread with its replies. '
+            'Input: mode (profile, search_actors, thread) with actor, query or uri; '
+            'optional posts, limit, depth. Post search is not offered: Bluesky '
+            'refuses it to unauthenticated callers.'),
+        tags=["bluesky", "social", "posts", "profile", "atproto", "keyless", "live"],
+        input_schema=_obj({
+            "mode": {"type": "string", "enum": ["profile", "search_actors", "thread"],
+                     "description": "profile: an account and its latest posts; search_actors: accounts matching a query; thread: a post and its replies."},
+            "actor": {"type": "string", "maxLength": 253, "description": "Handle (bsky.app) or DID (did:plc:...); profile mode."},
+            "posts": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Latest posts to return in profile mode, default 10."},
+            "query": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Words to match accounts on; search_actors mode."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 25, "description": "Accounts to return in search_actors mode, default 10."},
+            "uri": {"type": "string", "description": "Post AT-URI, at://did:plc:.../app.bsky.feed.post/<rkey>; thread mode."},
+            "depth": {"type": "integer", "minimum": 1, "maximum": 6, "description": "Reply depth to flatten in thread mode, default 2."},
+        }, ["mode"]),
+        returns=("mode, actor, query, uri, profile{}, posts[], actors[], thread{}, post_count, "
+                 "actor_count, source, as_of, checked_at."),
+        skill="social.bluesky", max_seconds=45,
+        pricing_basis="Provisional. Provider cost zero (public AppView); two requests at most.",
+        requires=("bluesky",)),
+    Worker(
+        name="social.mastodon", price_usd=0.05, tier="utility",
+        title="Mastodon hashtag timeline, account, search or trends, live",
+        description=(
+            'Mastodon (any public instance, default mastodon.social), live and keyless: '
+            'a hashtag timeline, an account with its latest statuses, an account or '
+            'hashtag search, or the trending hashtags, each status as plain text plus '
+            'its HTML, counts, media, tags and reblog flag. Input: mode (hashtag, '
+            'account, search, trends) with tag, acct or query; optional instance, '
+            'limit, statuses, kind. Status search and the public firehose need a '
+            'token and are not offered.'),
+        tags=["mastodon", "fediverse", "social", "hashtag", "posts", "keyless", "live"],
+        input_schema=_obj({
+            "mode": {"type": "string", "enum": ["hashtag", "account", "search", "trends"],
+                     "description": "hashtag: latest statuses under a tag; account: an account and its statuses; search: accounts or hashtags matching a query; trends: trending hashtags."},
+            "instance": {"type": "string", "maxLength": 253, "description": "Mastodon server hostname, default mastodon.social."},
+            "tag": {"type": "string", "minLength": 1, "maxLength": 100, "description": "Hashtag without #; hashtag mode."},
+            "acct": {"type": "string", "minLength": 1, "maxLength": 320, "description": "Username, optionally @domain (Gargron or Gargron@mastodon.social); account mode."},
+            "statuses": {"type": "integer", "minimum": 1, "maximum": 40, "description": "Latest statuses to return in account mode, default 10."},
+            "query": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Search words; search mode."},
+            "kind": {"type": "string", "enum": ["accounts", "hashtags"], "description": "What to search for, default accounts."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 40, "description": "Items to return (hashtag up to 40, search up to 25, trends up to 20), default 10."},
+        }, ["mode"]),
+        returns=("mode, instance, tag, acct, query, kind, account{}, statuses[], accounts[], hashtags[], "
+                 "status_count, source, as_of, checked_at."),
+        skill="social.mastodon", max_seconds=45,
+        pricing_basis="Provisional. Provider cost zero (public instance API); two requests at most.",
+        requires=("mastodon",)),
     Worker(
         name="security.mcp_inspect", price_usd=5.00, tier="advanced",
         title="Inspect an MCP endpoint",
@@ -1111,6 +1241,10 @@ _EXAMPLE_VALUES = {
 _DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 
 _EXAMPLE_OVERRIDES = {
+    "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
+    "video.youtube": {"query": "x402 payments", "max_results": 3},
+    "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},
+    "social.mastodon": {"mode": "hashtag", "tag": "opensource", "limit": 3},
     "opendata.search": {"query": "人口", "region": "jp", "limit": 5},
     "market.stock": {"symbol": "AAPL", "range": "1mo"},
     # Either symbol or cik is valid, so nothing is `required`.
