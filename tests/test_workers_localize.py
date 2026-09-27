@@ -52,6 +52,10 @@ class _Ctx:
 
     async def run(self, step, providers, call, **kwargs):
         outer = self
+        if step == "translate":
+            # Cloud Translation is exercised in test_audit_language.py; here it is
+            # absent, so the model engine runs.
+            raise W.runtime.ProviderUnavailable("no Google credential in this test")
 
         class _P:
             id = "fake-gemini"

@@ -100,7 +100,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.17.0"
+SERVICE_VERSION = "1.18.0"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -579,11 +579,18 @@ def _client_ip(request: Request) -> str:
 MAX_HTML_BYTES = int(os.environ.get("MAX_HTML_BYTES", str(2 * 1024 * 1024)))
 
 
+_AUDIT_LANGUAGE_DESCRIPTION = (
+    "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable text of the "
+    "findings is returned in this language; rule ids, severities, URLs and numbers are "
+    "untouched. Default: English.")
+
+
 class AuditRequest(BaseModel):
     html: Optional[str] = Field(
         None, description="Raw HTML source to audit", max_length=MAX_HTML_BYTES
     )
     url: Optional[str] = Field(None, description="Live URL to audit instead of raw HTML")
+    language: Optional[str] = Field(None, description=_AUDIT_LANGUAGE_DESCRIPTION, max_length=35)
 
 
 class UrlAuditRequest(BaseModel):
@@ -592,6 +599,7 @@ class UrlAuditRequest(BaseModel):
     behavior, so raw HTML alone (no server to talk to) isn't enough."""
 
     url: str
+    language: Optional[str] = Field(None, description=_AUDIT_LANGUAGE_DESCRIPTION, max_length=35)
 
 
 class CheckoutRequest(BaseModel):
@@ -1509,6 +1517,48 @@ def _reject_unfetchable_target(url: Optional[str]) -> Optional[JSONResponse]:
     )
 
 
+_AUDIT_PROSE_KEYS = ("help",)
+
+
+def _reject_bad_language(language) -> Optional[JSONResponse]:
+    """A free 400 for a malformed `language` tag, before any payment is read."""
+    if language is None or workers is None:
+        return None
+    try:
+        workers.skills.llm.validate_language({"language": language})
+    except workers.runtime.WorkerError as exc:
+        return JSONResponse(status_code=400, content={
+            "status": "error", "detail": f"{exc.detail} Nothing was charged for this request.",
+            "billed": False})
+    return None
+
+
+def _localize_audit(result: dict, language: Optional[str]) -> dict:
+    """The audit result with its human-readable text (findings' `detail`,
+    violations' `help`) in `language`, through the same translation layer
+    the /work bees use (Cloud Translation, Gemini fallback). Ids, severities,
+    URLs and numbers are untouched. Raises when translation is impossible, so
+    the caller fails the job unbilled instead of charging for the wrong
+    language."""
+    if not language or workers is None:
+        return result
+    import asyncio
+    import uuid
+    from concurrent.futures import ThreadPoolExecutor
+
+    ctx = workers.router.JobContext(uuid.uuid4().hex, "audit.localize", 90)
+
+    def run():
+        return asyncio.run(workers.skills.localize.apply(ctx, result, language, extra_keys=_AUDIT_PROSE_KEYS))
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return run()
+    with ThreadPoolExecutor(max_workers=1) as pool:  # called from inside an event loop
+        return pool.submit(run).result()
+
+
 def _reject_missing_input(payload) -> Optional[JSONResponse]:
     """A 400 for a body with neither `html` nor `url`, or None.
 
@@ -1670,7 +1720,7 @@ def _run_axe_and_performance(url: str):
     return axe_raw, performance
 
 
-def _remediation_notes(violations: list) -> Optional[dict]:
+def _remediation_notes(violations: list, language: Optional[str] = None) -> Optional[dict]:
     """Best-effort, clearly-labeled AI remediation suggestions.
 
     This never influences pass/fail -- axe-core's findings are the sole
@@ -1690,6 +1740,7 @@ def _remediation_notes(violations: list) -> Optional[dict]:
             contents=(
                 "Given these axe-core WCAG violations, write a short, "
                 f"actionable remediation note for each:\n{summary}"
+                + (f"\n\nWrite the notes in the language with BCP-47 tag {language}." if language else "")
             ),
             config={"temperature": 0.2},
         )
@@ -2590,7 +2641,14 @@ _MCP_URL_SCHEMA = {
             "format": "uri",
             "description": "Live, fetchable http(s) URL to audit.",
             "examples": ["https://example.com"],
-        }
+        },
+        "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": _AUDIT_LANGUAGE_DESCRIPTION,
+            "examples": ["ja"],
+        },
     },
     "required": ["url"],
 }
@@ -2612,6 +2670,13 @@ _MCP_HTML_OR_URL_SCHEMA = {
         "html": {
             "type": "string",
             "description": "Raw HTML source to audit instead of fetching a URL.",
+        },
+        "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": _AUDIT_LANGUAGE_DESCRIPTION,
+            "examples": ["ja"],
         },
     },
     "anyOf": [{"required": ["url"]}, {"required": ["html"]}],
@@ -3470,6 +3535,12 @@ def _mcp_tools_call(
                 request_id, -32602, f"Invalid params: `{field}` must be a string"
             )
 
+    if args.get("language") is not None:
+        if workers is not None:
+            try:
+                workers.skills.llm.validate_language({"language": args.get("language")})
+            except workers.runtime.WorkerError as exc:
+                return _jsonrpc_error(request_id, -32602, f"Invalid params: {exc.detail}")
     price = _MCP_TOOL_PRICES.get(name)
     if price is None:
         return _mcp_tool_error(request_id, f"Unknown tool: {name}")
@@ -3531,6 +3602,17 @@ def _mcp_tools_call(
         return _mcp_tool_error(
             request_id, f"Audit could not complete: {exc}. Nothing was charged.", details
         )
+
+    if args.get("language"):
+        try:
+            result = _localize_audit(result, args.get("language"))
+        except Exception as exc:
+            _unbill_failed_audit(auth)
+            details = {"billed": False}
+            _attach_issued_key(details, auth)
+            return _mcp_tool_error(
+                request_id, f"The audit ran but its findings could not be delivered in "
+                f"{args.get('language')}: {exc}. Nothing was charged.", details)
 
     problem = _output_contract_problem("/audit/" + name[len("audit_"):], result)
     if problem is not None:
@@ -4008,6 +4090,9 @@ def audit(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    bad_language = _reject_bad_language(payload.language)
+    if bad_language is not None:
+        return bad_language
     # Before any payment is read: a body with nothing to audit is refused for
     # free. Checked after the facilitator, this 400 burned a verify round
     # trip and the signature's nonce, so the payer's corrected retry with the
@@ -4045,13 +4130,19 @@ def audit(
         ],
     }
 
+    if payload.language:
+        try:
+            result = _localize_audit(result, payload.language)
+        except Exception as exc:
+            return _failed_audit_response(
+                auth, f"The audit ran but its findings could not be delivered in {payload.language}: {exc}")
     problem = _output_contract_problem("/audit/wcag", result)
     if problem is not None:
         return _contract_failure(auth, "/audit/wcag", problem)
     warning = _bill(auth, price_usd=_price_of("/audit"))
     if warning:
         result["billing_warning"] = warning
-    remediation = _remediation_notes(violations)
+    remediation = _remediation_notes(violations, payload.language)
     if remediation is not None:
         result["remediation"] = remediation
     return _deliver(result, auth)
@@ -4071,6 +4162,9 @@ def audit_wcag(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    bad_language = _reject_bad_language(payload.language)
+    if bad_language is not None:
+        return bad_language
     # Before any payment is read: a body with nothing to audit is refused for
     # free. Checked after the facilitator, this 400 burned a verify round
     # trip and the signature's nonce, so the payer's corrected retry with the
@@ -4104,6 +4198,12 @@ def audit_wcag(
             for v in violations
         ],
     }
+    if payload.language:
+        try:
+            result = _localize_audit(result, payload.language)
+        except Exception as exc:
+            return _failed_audit_response(
+                auth, f"The audit ran but its findings could not be delivered in {payload.language}: {exc}")
     problem = _output_contract_problem("/audit/wcag", result)
     if problem is not None:
         return _contract_failure(auth, "/audit/wcag", problem)
@@ -4124,6 +4224,9 @@ def audit_seo(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    bad_language = _reject_bad_language(payload.language)
+    if bad_language is not None:
+        return bad_language
     # Before any payment is read: a body with nothing to audit is refused for
     # free. Checked after the facilitator, this 400 burned a verify round
     # trip and the signature's nonce, so the payer's corrected retry with the
@@ -4140,6 +4243,12 @@ def audit_seo(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
+    if payload.language:
+        try:
+            result = _localize_audit(result, payload.language)
+        except Exception as exc:
+            return _failed_audit_response(
+                auth, f"The audit ran but its findings could not be delivered in {payload.language}: {exc}")
     problem = _output_contract_problem("/audit/seo", result)
     if problem is not None:
         return _contract_failure(auth, "/audit/seo", problem)
@@ -4160,6 +4269,9 @@ def audit_security(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    bad_language = _reject_bad_language(payload.language)
+    if bad_language is not None:
+        return bad_language
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/security"))
     if err:
         return err
@@ -4169,6 +4281,12 @@ def audit_security(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
+    if payload.language:
+        try:
+            result = _localize_audit(result, payload.language)
+        except Exception as exc:
+            return _failed_audit_response(
+                auth, f"The audit ran but its findings could not be delivered in {payload.language}: {exc}")
     problem = _output_contract_problem("/audit/security", result)
     if problem is not None:
         return _contract_failure(auth, "/audit/security", problem)
@@ -4189,6 +4307,9 @@ def audit_performance(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    bad_language = _reject_bad_language(payload.language)
+    if bad_language is not None:
+        return bad_language
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/performance"))
     if err:
         return err
@@ -4198,6 +4319,12 @@ def audit_performance(
     except Exception as exc:
         return _failed_audit_response(auth, f"Audit could not complete: {exc}")
 
+    if payload.language:
+        try:
+            result = _localize_audit(result, payload.language)
+        except Exception as exc:
+            return _failed_audit_response(
+                auth, f"The audit ran but its findings could not be delivered in {payload.language}: {exc}")
     problem = _output_contract_problem("/audit/performance", result)
     if problem is not None:
         return _contract_failure(auth, "/audit/performance", problem)
@@ -4222,6 +4349,9 @@ def audit_bundle(
     refused = _reject_unfetchable_target(payload.url)
     if refused is not None:
         return refused
+    bad_language = _reject_bad_language(payload.language)
+    if bad_language is not None:
+        return bad_language
     auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/bundle"))
     if err:
         return err
@@ -4263,6 +4393,12 @@ def audit_bundle(
         "security": security_result,
         "performance": performance_result,
     }
+    if payload.language:
+        try:
+            result = _localize_audit(result, payload.language)
+        except Exception as exc:
+            return _failed_audit_response(
+                auth, f"The audit ran but its findings could not be delivered in {payload.language}: {exc}")
     problem = _output_contract_problem("/audit/bundle", result)
     if problem is not None:
         return _contract_failure(auth, "/audit/bundle", problem)

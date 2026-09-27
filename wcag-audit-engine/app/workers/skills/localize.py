@@ -8,6 +8,11 @@ those are translated here, after the skill has run and before the delivery
 contract is checked, in one batched model call whose cost is measured on
 the same job. Data is never touched: only strings under the prose keys,
 and never URLs, ids, dates or numbers.
+
+Engine: Google Cloud Translation's LLM model first (purpose-built, same
+count out as in); Gemini in JSON mode when Translation is unavailable or
+refuses the target language. The standard NMT model is not used: on the
+node's own finding strings it changed meaning (see providers/translate.py).
 """
 
 import copy
@@ -17,6 +22,7 @@ from typing import Optional
 
 from .. import runtime
 from ..providers import gemini
+from ..providers import translate as cloud_translate
 
 # Keys whose string values (or lists of strings) are prose for a human.
 PROSE_KEYS = frozenset({"notes", "note", "detail", "details", "summary", "message", "reason", "reasons",
@@ -35,13 +41,13 @@ def _is_prose(value) -> bool:
     return isinstance(value, str) and len(value.strip()) > 3 and not _SKIP.match(value.strip())
 
 
-def collect(result, path=()):
+def collect(result, path=(), keys=PROSE_KEYS):
     """(path, string) pairs for every prose string under a prose key."""
     found = []
     if isinstance(result, dict):
         for key, value in result.items():
             here = path + (key,)
-            if key in PROSE_KEYS:
+            if key in keys:
                 if _is_prose(value):
                     found.append((here, value))
                 elif isinstance(value, list):
@@ -49,11 +55,11 @@ def collect(result, path=()):
                         if _is_prose(item):
                             found.append((here + (i,), item))
             elif isinstance(value, (dict, list)):
-                found.extend(collect(value, here))
+                found.extend(collect(value, here, keys))
     elif isinstance(result, list):
         for i, item in enumerate(result):
             if isinstance(item, (dict, list)):
-                found.extend(collect(item, path + (i,)))
+                found.extend(collect(item, path + (i,), keys))
     return found
 
 
@@ -78,7 +84,22 @@ def chunks(strings: list, limit: int = MAX_CHARS_PER_CALL) -> list:
 
 
 async def translate_strings(ctx, strings: list, language: str) -> list:
-    """Translate `strings` in order, in as few model calls as their size allows."""
+    """Translate `strings` in order: Cloud Translation when it can, the model otherwise."""
+    out = []
+    for batch in chunks(strings):
+        try:
+            async def mt(provider):
+                return await provider.translate(batch, language)
+            out.extend(await ctx.run("translate", cloud_translate.PROVIDERS, mt, per_attempt_seconds=30, max_attempts=2))
+            continue
+        except runtime.WorkerError:
+            pass
+        out.extend(await _model_translate(ctx, batch, language))
+    return out
+
+
+async def _model_translate(ctx, strings: list, language: str) -> list:
+    """Translate with the model in JSON mode (the fallback engine)."""
     out = []
     for batch in chunks(strings):
         prompt = json.dumps({"strings": batch}, ensure_ascii=False)
@@ -96,12 +117,14 @@ async def translate_strings(ctx, strings: list, language: str) -> list:
     return out
 
 
-async def apply(ctx, result: dict, language: Optional[str]) -> dict:
+async def apply(ctx, result: dict, language: Optional[str], extra_keys=()) -> dict:
     """The result with its prose strings translated; unchanged when there is
-    nothing to translate or no language was asked for."""
+    nothing to translate or no language was asked for. `extra_keys` adds
+    prose keys for a caller whose results name them differently (the audits'
+    `help`)."""
     if not language or not isinstance(result, dict):
         return result
-    found = collect(result)
+    found = collect(result, keys=PROSE_KEYS | frozenset(extra_keys))
     if not found:
         return result
     total = 0
