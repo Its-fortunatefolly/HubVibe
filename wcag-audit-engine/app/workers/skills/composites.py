@@ -14,13 +14,51 @@ All steps share the caller's one deadline through `ctx`, so a composite can
 never run past the payment window by doing its work in pieces.
 """
 
+import logging
 from urllib.parse import urlparse
 
 from .. import runtime
 from . import extract as extract_skill
 from . import llm as llm_skill
 from . import market as market_skill
+from . import news as news_skill
 from . import search as search_skill
+
+
+_log = logging.getLogger("hubvibe.workers.composites")
+
+# Product ids the spot market quotes -> the name the press uses.
+_ASSET_NAMES = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "XRP": "XRP Ripple", "DOGE": "Dogecoin",
+                "ADA": "Cardano", "AVAX": "Avalanche", "LINK": "Chainlink", "DOT": "Polkadot", "LTC": "Litecoin",
+                "BCH": "Bitcoin Cash", "USDC": "USDC stablecoin", "USDT": "Tether"}
+NEWS_LIMIT = 8
+
+
+async def recent_headlines(ctx, query: str, language=None, since_hours: int = 72) -> tuple:
+    """Current headlines on `query` for a composite's evidence: (articles,
+    note). Headlines are supplementary evidence, so a feed that fails does
+    not fail the job -- it is disclosed in the note instead of hidden."""
+    try:
+        found = await news_skill.search(ctx, {"query": query, "language": language or "en",
+                                              "limit": NEWS_LIMIT, "since_hours": since_hours})
+    except runtime.WorkerError as exc:
+        return [], f"Headlines unavailable for this call: {exc.detail}"
+    except Exception as exc:  # supplementary evidence must never sink the job; say why it is missing
+        _log.warning("headlines step failed for %r: %s", query, exc)
+        return [], f"Headlines unavailable for this call: {type(exc).__name__}"
+    articles = [{"title": a["title"], "url": a["url"], "source_name": a.get("source_name"),
+                 "published_at": a.get("published_at")} for a in found["articles"]]
+    note = None
+    if not articles:
+        note = f"No headlines matched {query!r} in the last {since_hours} hours."
+    elif found.get("notes"):
+        note = " ".join(found["notes"])
+    return articles, note
+
+
+def _headline_lines(articles: list) -> str:
+    return "\n".join(f"  - [{a.get('published_at') or 'undated'}] {a['title']} ({a.get('source_name') or 'unknown source'})"
+                     for a in articles) or "  (none)"
 
 
 async def research_brief(ctx, payload: dict) -> dict:
@@ -100,6 +138,9 @@ async def market_intel(ctx, payload: dict) -> dict:
     quote = await market_skill.quote(ctx, {"product_id": product_id})
     markets = await market_skill.prediction_markets(ctx, {
         "query": query, "limit": int(payload.get("limit", 10))})
+    base = product_id.split("-")[0]
+    news, news_note = await recent_headlines(
+        ctx, query or _ASSET_NAMES.get(base, base), payload.get("language"))
 
     material = (
         f"Spot market (Coinbase, live):\n"
@@ -115,12 +156,14 @@ async def market_intel(ctx, payload: dict) -> dict:
             for o in entry.get("implied_probabilities", [])
             if o.get("probability_pct") is not None)
         material += f"  - {entry.get('question')} -> {odds or 'no priced outcomes'}\n"
+    material += (f"\nRecent headlines (Google News, fetched now; {news_note or 'newest first'}):\n"
+                 f"{_headline_lines(news)}\n")
 
     analysis = await llm_skill.analyze(ctx, {
         "text": material,
         "question": (
-            f"{question} Be explicit about what the numbers do and do not support. "
-            "This is market data, not investment advice."),
+            f"{question} Be explicit about what the numbers do and do not support, and "
+            "say what the headlines add or contradict. This is market data, not investment advice."),
         "language": payload.get("language"),
     })
 
@@ -128,6 +171,8 @@ async def market_intel(ctx, payload: dict) -> dict:
         "product_id": product_id,
         "spot": quote,
         "prediction_markets": markets["markets"],
+        "news": news,
+        "news_note": news_note,
         "analysis": analysis["answer"],
         "model": analysis["model"],
         "disclaimer": (
@@ -235,9 +280,13 @@ async def research_company(ctx, payload: dict) -> dict:
     if not read:
         raise runtime.TransientProviderError(
             "No source about this company could be read.", reason="no_sources")
+    news, news_note = await recent_headlines(ctx, company, payload.get("language"), since_hours=24 * 30)
 
     analysis = await llm_skill.analyze(ctx, {
-        "text": _numbered_material(read),
+        "text": (_numbered_material(read)
+                 + f"\n\nRecent headlines about {company} (Google News, last 30 days, fetched now; "
+                 f"{news_note or 'newest first'}; not numbered sources, cite them as 'headlines'):\n"
+                 f"{_headline_lines(news)}\n"),
         "question": (
             f"Write a research brief on {company}: what it does, its main products or "
             "services, and anything notable from these sources (funding, reputation, "
@@ -251,6 +300,8 @@ async def research_company(ctx, payload: dict) -> dict:
         "sources": [{"n": i + 1, "url": r["url"], "title": r["title"]}
                    for i, r in enumerate(read)],
         "partial": partial,
+        "news": news,
+        "news_note": news_note,
         "model": analysis["model"],
     }
 

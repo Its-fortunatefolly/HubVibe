@@ -5044,7 +5044,7 @@
     {
       "name": "hubvibe_market_intel",
       "title": "Market intelligence read",
-      "description": "Crypto market read in one call: a live Coinbase spot quote and live Polymarket probabilities on the same subject, analysed together in a written summary. Input: optional product_id, query, question and limit. Market data and implied probabilities only, not investment advice. $5.00 per call. Returns: spot{}, prediction_markets[], analysis, disclaimer.",
+      "description": "Crypto market read in one call: a live Coinbase spot quote and live Polymarket probabilities on the same subject, analysed together in a written summary. Input: optional product_id, query, question and limit. Market data and implied probabilities only, not investment advice. $5.00 per call. Returns: spot{}, prediction_markets[], news[], news_note, analysis, disclaimer.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -5319,6 +5319,69 @@
                 },
                 "description": "Matching prediction markets, highest volume first."
               },
+              "news": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "description": "Headline.",
+                      "examples": [
+                        "Bitcoin steadies as ETF inflows resume"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Article link.",
+                      "examples": [
+                        "https://news.google.com/rss/articles/CBMi..."
+                      ]
+                    },
+                    "source_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publisher.",
+                      "examples": [
+                        "Reuters"
+                      ]
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publication time (UTC).",
+                      "examples": [
+                        "2026-09-27T09:00:00Z"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "url",
+                    "source_name",
+                    "published_at"
+                  ],
+                  "description": "One recent headline."
+                },
+                "description": "Recent headlines read for this call (Google News), newest first; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "news_note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why headlines are missing or partial; null when they were read cleanly.",
+                "examples": [
+                  "Headlines unavailable for this call: Google News (US:en) timed out"
+                ]
+              },
               "analysis": {
                 "type": "string",
                 "description": "What the two sources together do and do not support.",
@@ -5345,6 +5408,8 @@
               "product_id",
               "spot",
               "prediction_markets",
+              "news",
+              "news_note",
               "analysis",
               "model",
               "disclaimer"
@@ -8200,7 +8265,7 @@
     {
       "name": "hubvibe_research_company",
       "title": "Research and verify a company",
-      "description": "Company research brief from live web sources: what the company does, its products and anything notable, every claim cited to a numbered source, with thin or conflicting evidence disclosed rather than papered over. Input: company name, optional max_sources. $10.00 per call. Returns: company, report, sources[{n,url,title}], partial[], model.",
+      "description": "Company research brief from live web sources: what the company does, its products and anything notable, every claim cited to a numbered source, with thin or conflicting evidence disclosed rather than papered over. Input: company name, optional max_sources. $10.00 per call. Returns: company, report, sources[{n,url,title}], partial[], news[], news_note, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -8343,6 +8408,69 @@
                   []
                 ]
               },
+              "news": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "description": "Headline.",
+                      "examples": [
+                        "Bitcoin steadies as ETF inflows resume"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Article link.",
+                      "examples": [
+                        "https://news.google.com/rss/articles/CBMi..."
+                      ]
+                    },
+                    "source_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publisher.",
+                      "examples": [
+                        "Reuters"
+                      ]
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publication time (UTC).",
+                      "examples": [
+                        "2026-09-27T09:00:00Z"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "url",
+                    "source_name",
+                    "published_at"
+                  ],
+                  "description": "One recent headline."
+                },
+                "description": "Recent headlines read for this call (Google News), newest first; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "news_note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why headlines are missing or partial; null when they were read cleanly.",
+                "examples": [
+                  "Headlines unavailable for this call: Google News (US:en) timed out"
+                ]
+              },
               "model": {
                 "type": "string",
                 "description": "The model that produced the answer.",
@@ -8356,6 +8484,8 @@
               "report",
               "sources",
               "partial",
+              "news",
+              "news_note",
               "model"
             ]
           },

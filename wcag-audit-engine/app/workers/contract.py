@@ -378,6 +378,16 @@ _CONDITION = _obj({"allowed": _b("Whether the airline allows it; null when unsta
 _CONDITION["properties"]["allowed"] = {"type": ["boolean", "null"], "description": "Whether the airline allows it; null when unstated.", "examples": [True]}
 
 
+_HEADLINE = _obj({"title": _s("Headline.", "Bitcoin steadies as ETF inflows resume"),
+                  "url": _s("Article link.", "https://news.google.com/rss/articles/CBMi..."),
+                  "source_name": _s("Publisher.", "Reuters", nullable=True),
+                  "published_at": _s("Publication time (UTC).", "2026-09-27T09:00:00Z", nullable=True)},
+                 ["title", "url", "source_name", "published_at"], "One recent headline.")
+_NEWS = _arr(_HEADLINE, "Recent headlines read for this call (Google News), newest first; empty when none.", [])
+_NEWS_NOTE = _s("Why headlines are missing or partial; null when they were read cleanly.",
+                "Headlines unavailable for this call: Google News (US:en) timed out", nullable=True)
+
+
 OUTPUT_SCHEMAS = {
     "chain.network": _obj({
         "network": _const("base-mainnet", "Chain read."),
@@ -1307,12 +1317,14 @@ OUTPUT_SCHEMAS = {
         "product_id": _s("Spot product read.", "BTC-USD"),
         "spot": _SPOT_QUOTE,
         "prediction_markets": _arr(_MARKET, "Matching prediction markets, highest volume first."),
+        "news": _NEWS,
+        "news_note": _NEWS_NOTE,
         "analysis": _s("What the two sources together do and do not support.",
                        "Spot is up 1.8% on the day while the top market prices a year-end close above $100k at 62%..."),
         "model": _MODEL,
         "disclaimer": _s("Not investment advice.",
                          "Market data and implied probabilities only. Not investment advice and not a forecast by HubVibe."),
-    }, ["product_id", "spot", "prediction_markets", "analysis", "model", "disclaimer"]),
+    }, ["product_id", "spot", "prediction_markets", "news", "news_note", "analysis", "model", "disclaimer"]),
 
     "research.web": _obj({
         "question": _s("The question researched.", "What is the HTTP 402 status code for?"),
@@ -1329,8 +1341,10 @@ OUTPUT_SCHEMAS = {
                      "Anthropic is an AI safety company that builds the Claude model family [1]..."),
         "sources": _arr(_CITED_SOURCE, "Sources read, numbered as cited."),
         "partial": _arr(_UNREAD_SOURCE, "Sources found but not read, with the reason.", []),
+        "news": _NEWS,
+        "news_note": _NEWS_NOTE,
         "model": _MODEL,
-    }, ["company", "report", "sources", "partial", "model"]),
+    }, ["company", "report", "sources", "partial", "news", "news_note", "model"]),
 
     "verify.claims": _obj({
         "claims": _arr(_s("A claim, as given.", "HubVibe sells machine-payable site audits."),
