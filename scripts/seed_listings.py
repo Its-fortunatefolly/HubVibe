@@ -96,6 +96,7 @@ ROUTES = [
     ("utility", "/work/opendata/table", {"url": "https://www.data.go.kr/data/15005995/fileData.do", "max_rows": 5}),
     ("standard", "/work/news/search", {"query": "半導体", "language": "ja", "limit": 5}),
     ("utility", "/work/data/macro", {"indicator": "inflation", "country": "JP", "last": 5}),
+    ("standard", "/work/travel/hotels", {"place": "hotel near Shibuya station Tokyo", "days_ahead": 30, "nights": 2, "max_hotels": 3}),
     ("standard", "/work/travel/flights", {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3}),
     ("utility", "/work/traffic/route", {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA"}),
     ("utility", "/work/video/youtube", {"query": "x402 payments", "max_results": 3}),
