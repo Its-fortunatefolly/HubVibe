@@ -846,6 +846,35 @@ CATALOG = [
         pricing_basis=("Provisional, standard tier. Inline prices cost nothing to serve; a symbol "
                        "adds one or two public market reads."),
         requires=()),
+    # --- regional structured data -----------------------------------------
+    Worker(
+        name="opendata.search", price_usd=0.10, tier="utility",
+        title="Search Asia-Pacific open-data portals for datasets",
+        description=(
+            'Find structured government datasets across Asia-Pacific open-data portals '
+            'in one call: data.gov.au (Australia), the e-Gov Data Portal and the Tokyo '
+            'catalog (Japan), DATA.GOV.HK (Hong Kong). Query in any language, the '
+            "portal's own included; every match comes back with its organization, "
+            'licence, update time and the download URLs of its CSV/JSON/XLS resources, '
+            'ready for fetch.raw. Portals that did not answer are listed, never hidden. '
+            'Input: query; optional region (au, jp, hk, all), limit, portals.'),
+        tags=["open-data", "datasets", "apac", "australia", "japan", "hong-kong", "ckan", "government"],
+        input_schema=_obj({
+            "query": {"type": "string", "minLength": 1, "maxLength": 300,
+                      "description": "Words to search for, in any language (e.g. 人口, rainfall, 交通)."},
+            "region": {"type": "string", "enum": ["all", "au", "hk", "jp"],
+                       "description": "Which portals to search. Default all."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50,
+                      "description": "Results per portal, default 10."},
+            "portals": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                        "description": "Specific portal ids instead of a region, e.g. [\"data.gov.au\"]."},
+        }, ["query"]),
+        returns=("query, region, portals_searched[], portals_ok[], portals_failed[], total_matches{}, "
+                 "results[{portal, title, description, organization, resources[{url, format}]...}], "
+                 "result_count, checked_at."),
+        skill="opendata.search", max_seconds=60,
+        pricing_basis="Provisional. Provider cost zero (public CKAN APIs); one request per portal.",
+        requires=("opendata",)),
     Worker(
         name="security.mcp_inspect", price_usd=5.00, tier="advanced",
         title="Inspect an MCP endpoint",
@@ -1079,6 +1108,7 @@ _EXAMPLE_VALUES = {
 _DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 
 _EXAMPLE_OVERRIDES = {
+    "opendata.search": {"query": "人口", "region": "jp", "limit": 5},
     "market.stock": {"symbol": "AAPL", "range": "1mo"},
     # Either symbol or cik is valid, so nothing is `required`.
     "market.fundamentals": {"symbol": "AAPL", "periods": 4, "forms": ["10-K", "10-Q"]},
