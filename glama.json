@@ -12442,6 +12442,986 @@
       }
     },
     {
+      "name": "hubvibe_news_search",
+      "title": "Current news on any topic, in any language",
+      "description": "Current headlines on any topic from the publishers of the reader's own country and language: the query goes to the Google News edition for the language and region asked (71 editions verified: en, ja, ko, zh, de, fr, es, pt, ar, hi, id, th, vi and more), and a ticker adds Yahoo Finance's own feed for that stock, including non-US listings. Merged, de-duplicated, newest first, with publisher, time and summary; a window in hours optional. Input: query and/or symbol; optional language, region, limit. $0.25 per call. Returns: query, symbol, language, edition{}, sources_searched[], sources_ok[], sources_failed[], articles[{title, url, source_name, source_url, published_at, summary, feed}], article_count, limit, since_hours, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Topic words in any language (半導体, 반도체, tarifs douaniers)."
+          },
+          "symbol": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9.\\-=^]{1,12}$",
+            "description": "Optional ticker (AAPL, 7203.T, 005930.KS) for that stock's own news feed."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+          },
+          "region": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2}$",
+            "description": "ISO 3166-1 alpha-2 country whose publishers to search (JP, KR, GB). Default: the language's home edition."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Default 20."
+          },
+          "since_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 720,
+            "description": "Only articles published within this many hours."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Topic searched, as given; null when only a symbol was asked.",
+                "examples": [
+                  "半導体"
+                ]
+              },
+              "symbol": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Ticker whose own feed was read; null when none.",
+                "examples": [
+                  "7203.T"
+                ]
+              },
+              "language": {
+                "type": "string",
+                "description": "BCP-47 language the edition was chosen for.",
+                "examples": [
+                  "ja"
+                ]
+              },
+              "edition": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "hl": {
+                    "type": "string",
+                    "description": "Google News language code.",
+                    "examples": [
+                      "ja"
+                    ]
+                  },
+                  "gl": {
+                    "type": "string",
+                    "description": "Country edition.",
+                    "examples": [
+                      "JP"
+                    ]
+                  },
+                  "ceid": {
+                    "type": "string",
+                    "description": "Edition id.",
+                    "examples": [
+                      "JP:ja"
+                    ]
+                  },
+                  "verified": {
+                    "type": "boolean",
+                    "description": "True for the 71 editions verified to answer; false for a pair tried on request.",
+                    "examples": [
+                      true
+                    ]
+                  }
+                },
+                "required": [
+                  "hl",
+                  "gl",
+                  "ceid",
+                  "verified"
+                ],
+                "description": "The Google News edition used; null when no query was given."
+              },
+              "sources_searched": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Feed id.",
+                  "examples": [
+                    "google_news:JP:ja"
+                  ]
+                },
+                "description": "Feeds this call asked.",
+                "examples": [
+                  [
+                    "google_news:JP:ja"
+                  ]
+                ]
+              },
+              "sources_ok": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Feed id.",
+                  "examples": [
+                    "google_news:JP:ja"
+                  ]
+                },
+                "description": "Feeds that answered.",
+                "examples": [
+                  [
+                    "google_news:JP:ja"
+                  ]
+                ]
+              },
+              "sources_failed": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "description": "Feed id.",
+                      "examples": [
+                        "yahoo_finance:7203.T"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Why it did not answer this call.",
+                      "examples": [
+                        "Yahoo Finance RSS (7203.T) timed out"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "reason"
+                  ],
+                  "description": "A feed that failed for this call."
+                },
+                "description": "Feeds that did not answer, with the reason; never silently dropped.",
+                "examples": [
+                  []
+                ]
+              },
+              "articles": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "description": "Headline, publisher suffix removed.",
+                      "examples": [
+                        "半導体株が反発、関税協議の進展で"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Article link (Google News links resolve to the publisher).",
+                      "examples": [
+                        "https://news.google.com/rss/articles/CBMi..."
+                      ]
+                    },
+                    "source_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publisher.",
+                      "examples": [
+                        "日本経済新聞"
+                      ]
+                    },
+                    "source_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publisher site.",
+                      "examples": [
+                        "https://www.nikkei.com"
+                      ]
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publication time (UTC).",
+                      "examples": [
+                        "2026-09-27T02:32:00Z"
+                      ]
+                    },
+                    "summary": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Plain-text summary when the feed carries one.",
+                      "examples": [
+                        "半導体関連株が..."
+                      ]
+                    },
+                    "feed": {
+                      "type": "string",
+                      "enum": [
+                        "google_news",
+                        "yahoo_finance"
+                      ],
+                      "description": "Which feed it came from.",
+                      "examples": [
+                        "google_news"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "url",
+                    "source_name",
+                    "source_url",
+                    "published_at",
+                    "summary",
+                    "feed"
+                  ],
+                  "description": "One article."
+                },
+                "description": "Articles, newest first, duplicates by title removed."
+              },
+              "article_count": {
+                "type": "integer",
+                "description": "Articles returned.",
+                "examples": [
+                  20
+                ]
+              },
+              "limit": {
+                "type": "integer",
+                "description": "Most articles asked for.",
+                "examples": [
+                  20
+                ]
+              },
+              "since_hours": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Window applied, in hours; null when none.",
+                "examples": [
+                  24
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "Edition XX:yy returned nothing for this query; results are from the en/US edition."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "symbol",
+              "language",
+              "edition",
+              "sources_searched",
+              "sources_ok",
+              "sources_failed",
+              "articles",
+              "article_count",
+              "limit",
+              "since_hours",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "news.search response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Current news on any topic, in any language"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/news/search",
+        "price_usd": 0.25
+      }
+    },
+    {
+      "name": "hubvibe_data_macro",
+      "title": "Official economic statistics for a country",
+      "description": "One official economic series for one country, now: GDP, growth, GDP per capita, inflation, unemployment, population, current account, reserves, debt, exports, imports, FDI, exchange rate, interest rates, or any World Bank indicator code. Annual from the World Bank for 200+ economies; monthly from Eurostat for EU inflation and unemployment. Returns the series, latest and previous values, the change between them and the source's update stamp. Input: indicator, country; optional last, frequency. $0.10 per call. Returns: indicator{alias, code, name, unit}, country{code, name}, frequency, source, observations[{period, value}], observation_count, latest{}, previous{}, change{absolute, pct}, as_of, source_url, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "indicator": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 40,
+            "description": "Alias (gdp_usd, gdp_growth, gdp_per_capita_usd, inflation, unemployment, population, population_growth, current_account_gdp, reserves_usd, government_debt_gdp, exports_gdp, imports_gdp, fdi_inflows_usd, exchange_rate_per_usd, real_interest_rate, lending_rate, trade_gdp, internet_users_pct, life_expectancy, co2_per_capita) or a World Bank code (NY.GDP.MKTP.CD)."
+          },
+          "country": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 9,
+            "description": "ISO 3166 alpha-2 or alpha-3 (JP, KOR, DE), or an EU aggregate (EA20, EU27_2020) for monthly series."
+          },
+          "last": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Observations to return, newest last. Default 10."
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "annual",
+              "monthly"
+            ],
+            "description": "auto picks monthly where Eurostat publishes it, else annual."
+          }
+        },
+        "required": [
+          "indicator",
+          "country"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "indicator": {
+                "type": "object",
+                "properties": {
+                  "alias": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Alias used; null for a raw code.",
+                    "examples": [
+                      "inflation"
+                    ]
+                  },
+                  "code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "World Bank indicator code; null for Eurostat monthly series.",
+                    "examples": [
+                      "FP.CPI.TOTL.ZG"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The source's name for the series.",
+                    "examples": [
+                      "Inflation, consumer prices (annual %)"
+                    ]
+                  },
+                  "unit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Unit when the source states it.",
+                    "examples": [
+                      "% change on a year earlier (HICP)"
+                    ]
+                  }
+                },
+                "required": [
+                  "alias",
+                  "code",
+                  "name",
+                  "unit"
+                ],
+                "description": "What was measured."
+              },
+              "country": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "Country code as the source spells it.",
+                    "examples": [
+                      "JP"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Country name from the source.",
+                    "examples": [
+                      "Japan"
+                    ]
+                  }
+                },
+                "required": [
+                  "code",
+                  "name"
+                ],
+                "description": "Where."
+              },
+              "frequency": {
+                "type": "string",
+                "enum": [
+                  "annual",
+                  "monthly"
+                ],
+                "description": "Period of the observations.",
+                "examples": [
+                  "annual"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "world-bank",
+                  "eurostat"
+                ],
+                "description": "Which official source answered.",
+                "examples": [
+                  "world-bank"
+                ]
+              },
+              "observations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "period": {
+                      "type": "string",
+                      "description": "Year (2025) or month (2026-08).",
+                      "examples": [
+                        "2025"
+                      ]
+                    },
+                    "value": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Value; null when not yet published.",
+                      "examples": [
+                        3.17
+                      ]
+                    }
+                  },
+                  "required": [
+                    "period",
+                    "value"
+                  ],
+                  "description": "One observation."
+                },
+                "description": "Oldest first."
+              },
+              "observation_count": {
+                "type": "integer",
+                "description": "Observations returned.",
+                "examples": [
+                  5
+                ]
+              },
+              "latest": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "period": {
+                    "type": "string",
+                    "description": "Period.",
+                    "examples": [
+                      "2025"
+                    ]
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "Value.",
+                    "examples": [
+                      3.17
+                    ]
+                  }
+                },
+                "required": [
+                  "period",
+                  "value"
+                ],
+                "description": "Most recent published value; null when none in the window."
+              },
+              "previous": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "period": {
+                    "type": "string",
+                    "description": "Period.",
+                    "examples": [
+                      "2024"
+                    ]
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "Value.",
+                    "examples": [
+                      2.74
+                    ]
+                  }
+                },
+                "required": [
+                  "period",
+                  "value"
+                ],
+                "description": "The published value before it; null when none."
+              },
+              "change": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "absolute": {
+                    "type": "number",
+                    "description": "latest minus previous.",
+                    "examples": [
+                      0.43
+                    ]
+                  },
+                  "pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Change as a percentage of previous; null when previous is zero.",
+                    "examples": [
+                      15.69
+                    ]
+                  }
+                },
+                "required": [
+                  "absolute",
+                  "pct"
+                ],
+                "description": "Latest versus previous; null when either is missing."
+              },
+              "as_of": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The source's own update stamp.",
+                "examples": [
+                  "2026-07-13"
+                ]
+              },
+              "source_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Where the numbers came from.",
+                "examples": [
+                  "https://api.worldbank.org/v2/country/JP/indicator/FP.CPI.TOTL.ZG?format=json"
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "1 of 5 periods have no published value yet."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "indicator",
+              "country",
+              "frequency",
+              "source",
+              "observations",
+              "observation_count",
+              "latest",
+              "previous",
+              "change",
+              "as_of",
+              "source_url",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "data.macro response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Official economic statistics for a country"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/data/macro",
+        "price_usd": 0.1
+      }
+    },
+    {
       "name": "hubvibe_travel_flights",
       "title": "Live flight offers between two places",
       "description": "Live flight offers from the airlines for a route and date: every offer with price, tax, currency, each segment (carrier, flight number, times, aircraft), stops, refund and change conditions, emissions and the exact time the offer expires. Places are IATA codes or names in any language (Tokyo, 東京, Séoul), resolved before the search. One-way or return, up to 9 adults plus children by age, any cabin class, sorted by price or duration. Input: origin, destination, departure_date or days_ahead. $0.50 per call. Returns: origin{}, destination{}, departure_date, return_date, passengers{}, cabin_class, sort, offers[{id, airline{}, total_amount, base_amount, tax_amount, currency, expires_at, slices[{segments[]}], stops, total_duration_seconds, refund_before_departure{}, change_before_departure{}, emissions_kg, instant_payment_required, ...}], offer_count, offers_available, cheapest_total{}, fastest_duration_seconds, live_mode, source, notes[], checked_at.",

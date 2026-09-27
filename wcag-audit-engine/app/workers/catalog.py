@@ -878,6 +878,67 @@ CATALOG = [
         skill="opendata.search", max_seconds=60,
         pricing_basis="Provisional. Provider cost zero (public CKAN APIs); one request per portal.",
         requires=("opendata",)),
+    # --- news and official numbers, keyless ----------------------------------
+    Worker(
+        name="news.search", price_usd=0.25, tier="standard",
+        title="Current news on any topic, in any language",
+        description=(
+            "Current headlines on any topic from the publishers of the reader's own "
+            "country and language: the query goes to the Google News edition for the "
+            "language and region asked (71 editions verified: en, ja, ko, zh, de, fr, "
+            "es, pt, ar, hi, id, th, vi and more), and a ticker adds Yahoo Finance's "
+            "own feed for that stock, including non-US listings. Merged, de-duplicated, "
+            "newest first, with publisher, time and summary; a window in hours "
+            "optional. Input: query and/or symbol; optional language, region, limit."),
+        tags=["news", "headlines", "current", "multilingual", "press", "finance", "google-news", "live"],
+        input_schema=_obj({
+            "query": {"type": "string", "minLength": 1, "maxLength": 300,
+                      "description": "Topic words in any language (半導体, 반도체, tarifs douaniers)."},
+            "symbol": {"type": "string", "pattern": "^[A-Za-z0-9.\\-=^]{1,12}$",
+                       "description": "Optional ticker (AAPL, 7203.T, 005930.KS) for that stock's own news feed."},
+            "language": _LANGUAGE,
+            "region": {"type": "string", "pattern": "^[A-Za-z]{2}$",
+                       "description": "ISO 3166-1 alpha-2 country whose publishers to search (JP, KR, GB). Default: the language's home edition."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Default 20."},
+            "since_hours": {"type": "integer", "minimum": 1, "maximum": 720,
+                            "description": "Only articles published within this many hours."},
+        }, []),
+        returns=("query, symbol, language, edition{}, sources_searched[], sources_ok[], sources_failed[], "
+                 "articles[{title, url, source_name, source_url, published_at, summary, feed}], article_count, "
+                 "limit, since_hours, notes[], checked_at."),
+        skill="news.search", max_seconds=45,
+        pricing_basis="Provisional. Provider cost zero (public feeds); one request per feed searched.",
+        requires=("news",)),
+    Worker(
+        name="data.macro", price_usd=0.10, tier="utility",
+        title="Official economic statistics for a country",
+        description=(
+            "One official economic series for one country, now: GDP, growth, GDP "
+            "per capita, inflation, unemployment, population, current account, "
+            "reserves, debt, exports, imports, FDI, exchange rate, interest rates, or "
+            "any World Bank indicator code. Annual from the World Bank for 200+ "
+            "economies; monthly from Eurostat for EU inflation and unemployment. "
+            "Returns the series, latest and previous values, the change between them "
+            "and the source's update stamp. Input: indicator, country; optional last, "
+            "frequency."),
+        tags=["macro", "economics", "statistics", "gdp", "inflation", "unemployment", "world-bank", "eurostat", "official"],
+        input_schema=_obj({
+            "indicator": {"type": "string", "minLength": 3, "maxLength": 40,
+                          "description": ("Alias (gdp_usd, gdp_growth, gdp_per_capita_usd, inflation, unemployment, population, "
+                                          "population_growth, current_account_gdp, reserves_usd, government_debt_gdp, exports_gdp, "
+                                          "imports_gdp, fdi_inflows_usd, exchange_rate_per_usd, real_interest_rate, lending_rate, "
+                                          "trade_gdp, internet_users_pct, life_expectancy, co2_per_capita) or a World Bank code (NY.GDP.MKTP.CD).")},
+            "country": {"type": "string", "minLength": 2, "maxLength": 9,
+                        "description": "ISO 3166 alpha-2 or alpha-3 (JP, KOR, DE), or an EU aggregate (EA20, EU27_2020) for monthly series."},
+            "last": {"type": "integer", "minimum": 1, "maximum": 60, "description": "Observations to return, newest last. Default 10."},
+            "frequency": {"type": "string", "enum": ["auto", "annual", "monthly"],
+                          "description": "auto picks monthly where Eurostat publishes it, else annual."},
+        }, ["indicator", "country"]),
+        returns=("indicator{alias, code, name, unit}, country{code, name}, frequency, source, observations[{period, value}], "
+                 "observation_count, latest{}, previous{}, change{absolute, pct}, as_of, source_url, notes[], checked_at."),
+        skill="data.macro", max_seconds=40,
+        pricing_basis="Provisional. Provider cost zero (public statistical APIs); one request per call.",
+        requires=("macro",)),
     # --- travel: live flight offers (Duffel) --------------------------------
     Worker(
         name="travel.flights", price_usd=0.50, tier="standard",
@@ -1313,6 +1374,8 @@ _DAILY_SERIES = "bigquery-public-data.covid19_nyt.us_states"
 
 _EXAMPLE_OVERRIDES = {
     "travel.flights": {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3},
+    "news.search": {"query": "半導体", "language": "ja", "limit": 5},
+    "data.macro": {"indicator": "inflation", "country": "JP", "last": 5},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},
