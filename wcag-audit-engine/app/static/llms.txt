@@ -136,6 +136,10 @@ Utility (one live read, $0.02-$0.10):
   code (unlike extract/page, a 404/500 from the target is a result)
 - POST /work/search/web -- live web search, grounded via Gemini's Google
   Search tool
+- POST /work/opendata/search -- Asia-Pacific open-data portals (data.gov.au,
+  Japan's e-Gov Data Portal and Tokyo catalog, DATA.GOV.HK) searched in one
+  call, in any language, with each dataset's download URLs; portals that
+  did not answer are listed (Singapore's data.gov.sg has no keyless search)
 - POST /work/maps/places -- places search by free-text query (Google Maps
   Grounding Lite)
 - POST /work/maps/route -- directions and travel time between two places

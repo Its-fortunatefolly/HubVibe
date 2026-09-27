@@ -92,6 +92,7 @@ ROUTES = [
     ("standard", "/work/monitor/check", {"url": "https://example.com"}),
     ("standard", "/work/commerce/availability", {
         "url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10"}),
+    ("utility", "/work/opendata/search", {"query": "人口", "region": "jp", "limit": 3}),
     ("utility", "/work/market/stock", {"symbol": "AAPL", "range": "1mo"}),
     ("utility", "/work/market/fundamentals", {"symbol": "AAPL", "periods": 4}),
     ("standard", "/work/finance/analytics", {"symbol": "AAPL", "range": "6mo", "benchmark_symbol": "SPY",

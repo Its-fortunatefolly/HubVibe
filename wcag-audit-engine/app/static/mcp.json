@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -11926,6 +11926,544 @@
         "method": "POST",
         "path": "/work/finance/analytics",
         "price_usd": 0.5
+      }
+    },
+    {
+      "name": "hubvibe_opendata_search",
+      "title": "Search Asia-Pacific open-data portals for datasets",
+      "description": "Find structured government datasets across Asia-Pacific open-data portals in one call: data.gov.au (Australia), the e-Gov Data Portal and the Tokyo catalog (Japan), DATA.GOV.HK (Hong Kong). Query in any language, the portal's own included; every match comes back with its organization, licence, update time and the download URLs of its CSV/JSON/XLS resources, ready for fetch.raw. Portals that did not answer are listed, never hidden. Input: query; optional region (au, jp, hk, all), limit, portals. $0.10 per call. Returns: query, region, portals_searched[], portals_ok[], portals_failed[], total_matches{}, results[{portal, title, description, organization, resources[{url, format}]...}], result_count, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Words to search for, in any language (e.g. \u4eba\u53e3, rainfall, \u4ea4\u901a)."
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "all",
+              "au",
+              "hk",
+              "jp"
+            ],
+            "description": "Which portals to search. Default all."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Results per portal, default 10."
+          },
+          "portals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Specific portal ids instead of a region, e.g. [\"data.gov.au\"]."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "The query as given.",
+                "examples": [
+                  "\u4eba\u53e3"
+                ]
+              },
+              "region": {
+                "type": "string",
+                "description": "Region searched.",
+                "examples": [
+                  "jp"
+                ]
+              },
+              "portals_searched": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Portal id.",
+                  "examples": [
+                    "data.e-gov.go.jp"
+                  ]
+                },
+                "description": "Portals the query was sent to.",
+                "examples": [
+                  [
+                    "data.e-gov.go.jp",
+                    "catalog.data.metro.tokyo.lg.jp"
+                  ]
+                ]
+              },
+              "portals_ok": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Portal id.",
+                  "examples": [
+                    "data.e-gov.go.jp"
+                  ]
+                },
+                "description": "Portals that answered.",
+                "examples": [
+                  [
+                    "data.e-gov.go.jp",
+                    "catalog.data.metro.tokyo.lg.jp"
+                  ]
+                ]
+              },
+              "portals_failed": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "portal": {
+                      "type": "string",
+                      "description": "Portal id.",
+                      "examples": [
+                        "data.gov.hk"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Why it did not answer this call.",
+                      "examples": [
+                        "data.gov.hk timed out"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "portal",
+                    "reason"
+                  ],
+                  "description": "A portal that failed for this call."
+                },
+                "description": "Portals that did not answer, with the reason; never silently dropped.",
+                "examples": [
+                  []
+                ]
+              },
+              "total_matches": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "description": "Total matches per portal that answered, keyed by portal id.",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "examples": [
+                  {
+                    "data.e-gov.go.jp": 4699,
+                    "catalog.data.metro.tokyo.lg.jp": 1523
+                  }
+                ]
+              },
+              "results": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "portal": {
+                      "type": "string",
+                      "description": "Portal id.",
+                      "examples": [
+                        "data.e-gov.go.jp"
+                      ]
+                    },
+                    "region": {
+                      "type": "string",
+                      "description": "Region code.",
+                      "examples": [
+                        "jp"
+                      ]
+                    },
+                    "country": {
+                      "type": "string",
+                      "description": "ISO 3166-1 alpha-2.",
+                      "examples": [
+                        "JP"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "description": "Dataset id on the portal.",
+                      "examples": [
+                        "5b2f1c7e-8a3d-4c1e-9f2a-1b2c3d4e5f60"
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Dataset slug.",
+                      "examples": [
+                        "population-census-2020"
+                      ]
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Dataset title, in the portal's language.",
+                      "examples": [
+                        "\u4ee4\u548c2\u5e74\u56fd\u52e2\u8abf\u67fb \u4eba\u53e3\u7b49\u57fa\u672c\u96c6\u8a08"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Description, up to 1000 characters.",
+                      "examples": [
+                        "\u56fd\u52e2\u8abf\u67fb\u306e\u4eba\u53e3\u7b49\u57fa\u672c\u96c6\u8a08..."
+                      ]
+                    },
+                    "organization": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Publishing organization.",
+                      "examples": [
+                        "\u7dcf\u52d9\u7701"
+                      ]
+                    },
+                    "license": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Licence title or id.",
+                      "examples": [
+                        "CC-BY-4.0"
+                      ]
+                    },
+                    "updated_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Portal metadata modification time.",
+                      "examples": [
+                        "2026-03-01T09:12:44.512345"
+                      ]
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A tag.",
+                        "examples": [
+                          "\u4eba\u53e3"
+                        ]
+                      },
+                      "description": "Portal tags.",
+                      "examples": [
+                        [
+                          "\u4eba\u53e3",
+                          "\u56fd\u52e2\u8abf\u67fb"
+                        ]
+                      ]
+                    },
+                    "landing_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Dataset page or source URL when the portal gives one.",
+                      "examples": [
+                        "https://www.e-stat.go.jp/stat-search/files?toukei=00200521"
+                      ]
+                    },
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string",
+                            "description": "Download URL.",
+                            "examples": [
+                              "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000032143614"
+                            ]
+                          },
+                          "format": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "CSV, JSON, XLS, HTML...",
+                            "examples": [
+                              "CSV"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "Resource name.",
+                            "examples": [
+                              "\u4eba\u53e3\u7b49\u57fa\u672c\u96c6\u8a08 \u5168\u56fd\u7d50\u679c"
+                            ]
+                          },
+                          "last_modified": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "Resource modification time.",
+                            "examples": [
+                              "2026-02-20T00:00:00"
+                            ]
+                          },
+                          "size_bytes": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "Size when the portal states it.",
+                            "examples": [
+                              1048576
+                            ]
+                          }
+                        },
+                        "required": [
+                          "url"
+                        ],
+                        "description": "One downloadable resource."
+                      },
+                      "description": "Up to 25 resources, ready for fetch.raw."
+                    },
+                    "resource_count": {
+                      "type": "integer",
+                      "description": "Resources the dataset has in total.",
+                      "examples": [
+                        3
+                      ]
+                    }
+                  },
+                  "required": [
+                    "portal",
+                    "region",
+                    "country",
+                    "id",
+                    "title",
+                    "tags",
+                    "resources",
+                    "resource_count"
+                  ],
+                  "description": "One dataset."
+                },
+                "description": "Datasets found, most recently updated first."
+              },
+              "result_count": {
+                "type": "integer",
+                "description": "Datasets returned.",
+                "examples": [
+                  10
+                ]
+              },
+              "limit_per_portal": {
+                "type": "integer",
+                "description": "Results requested per portal.",
+                "examples": [
+                  5
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "region",
+              "portals_searched",
+              "portals_ok",
+              "portals_failed",
+              "total_matches",
+              "results",
+              "result_count",
+              "limit_per_portal",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "opendata.search response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Search Asia-Pacific open-data portals for datasets"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/opendata/search",
+        "price_usd": 0.1
       }
     },
     {
