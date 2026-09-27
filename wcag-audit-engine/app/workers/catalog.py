@@ -484,10 +484,10 @@ CATALOG = [
             "limit": {"type": "integer"},
             "language": _LANGUAGE,
         }, []),
-        returns="spot{}, prediction_markets[], analysis, disclaimer.",
+        returns="spot{}, prediction_markets[], news[], news_note, analysis, disclaimer.",
         skill="market.intel", max_seconds=200,
         pricing_basis="Provisional, completed-work tier. Three provider calls; usage measured per call.",
-        composes=["market.quote", "market.prediction", "llm.analyze"],
+        composes=["market.quote", "market.prediction", "news.search", "llm.analyze"],
         requires=("coinbase_market", "polymarket", "gemini")),
     # --- wave 1: bees on live Google credentials -----------------------------
     Worker(
@@ -712,10 +712,10 @@ CATALOG = [
             "max_sources": {"type": "integer", "description": "1-4, default 4."},
             "language": _LANGUAGE,
         }, ["company"]),
-        returns="company, report, sources[{n,url,title}], partial[], model.",
+        returns="company, report, sources[{n,url,title}], partial[], news[], news_note, model.",
         skill="research.company", max_seconds=220,
         pricing_basis="Provisional, completed-work tier. Up to six provider calls; usage measured per call.",
-        composes=["search.web", "extract.page", "llm.analyze"],
+        composes=["search.web", "extract.page", "news.search", "llm.analyze"],
         requires=("search_grounding", "web", "gemini")),
     Worker(
         name="monitor.snapshot", price_usd=0.50, tier="standard",
