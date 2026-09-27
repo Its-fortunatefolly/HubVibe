@@ -43,7 +43,8 @@ from fastapi.responses import JSONResponse
 from . import catalog, ledger, runtime
 from .context import JobContext
 from .providers import health as provider_health
-from .skills import PRECHECKS, REGISTRY
+from .skills import PRECHECKS, REGISTRY, localize
+from .skills.llm import validate_language
 
 log = logging.getLogger("hubvibe.workers.router")
 
@@ -246,6 +247,12 @@ async def _run_job(worker, payload: dict, call_id: str):
             reason="not_implemented")
     ctx = JobContext(call_id, worker.name, worker.max_seconds)
     result = await skill(ctx, payload)
+    # No language barrier: a bee that does not write its prose in `language`
+    # natively has its human-readable strings translated on the same job,
+    # before the delivery contract is checked (see skills/localize.py).
+    language = payload.get("language") if isinstance(payload, dict) else None
+    if language and worker.name in catalog.LOCALIZED_WORKERS:
+        result = await localize.apply(ctx, result, language)
     return result, ctx
 
 
@@ -340,13 +347,15 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
     # refuses here -- before the gate, so no nonce is burned and nothing is
     # verified for a request that was always going to fail.
     precheck = PRECHECKS.get(worker.skill)
-    if precheck is not None:
-        try:
+    try:
+        # `language` is accepted by every worker; a malformed tag is refused free.
+        validate_language(payload)
+        if precheck is not None:
             precheck(payload)
-        except runtime.WorkerError as exc:
-            return JSONResponse(status_code=_error_status(exc.reason), content={
-                "status": "error", "reason": exc.reason, "detail": exc.detail,
-                "input_schema": worker.input_schema, "billed": False})
+    except runtime.WorkerError as exc:
+        return JSONResponse(status_code=_error_status(exc.reason), content={
+            "status": "error", "reason": exc.reason, "detail": exc.detail,
+            "input_schema": worker.input_schema, "billed": False})
 
     auth, err = await asyncio.get_running_loop().run_in_executor(
         _executor, lambda: _authorize(
