@@ -112,6 +112,7 @@ ROUTES = [
     ("standard", "/work/social/x_pulse", {"query": "open source", "days": 3, "sample": 20, "lang": "en"}),
     ("utility", "/work/market/stock", {"symbol": "AAPL", "range": "1mo"}),
     ("utility", "/work/market/fundamentals", {"symbol": "AAPL", "periods": 4}),
+    ("utility", "/work/market/insiders", {"symbol": "NVDA", "days": 90, "codes": ["P", "S"]}),
     ("standard", "/work/finance/analytics", {"symbol": "AAPL", "range": "6mo", "benchmark_symbol": "SPY",
                                              "option": {"type": "put", "strike": 300, "time_to_expiry_years": 0.25}}),
     ("advanced", "/work/security/mcp_inspect", {"url": "https://hubvibe-io.com/mcp"}),

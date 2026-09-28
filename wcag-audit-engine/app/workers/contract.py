@@ -374,6 +374,8 @@ def _nobj(properties: dict, required: list, description: str) -> dict:
 
 # --- one schema per worker, keyed by catalog name -------------------------------
 
+_SIDE_REQUIRED = ["transactions", "shares", "value_usd", "insiders"]
+
 _AIRPORT = _obj({"iata_code": _s("IATA code.", "LHR", nullable=True), "name": _s("Airport name.", "Heathrow Airport", nullable=True),
                  "city_name": _s("City served.", "London", nullable=True)}, ["iata_code", "name", "city_name"], "An airport.")
 _CARRIER = _obj({"iata_code": _s("Airline IATA code.", "BA", nullable=True), "name": _s("Airline name.", "British Airways", nullable=True)},
@@ -862,6 +864,64 @@ OUTPUT_SCHEMAS = {
         "source": _const("sec-edgar-xbrl-companyfacts", "Data source."),
         "checked_at": _CHECKED_AT,
     }, ["cik", "concepts", "concepts_missing", "periods", "as_of", "source", "checked_at"]),
+
+    "market.insiders": _obj({
+        "symbol": _s("Ticker as given.", "NVDA", nullable=True),
+        "cik": _i("Issuer's SEC Central Index Key.", 1045810),
+        "issuer_name": _s("Issuer name from EDGAR.", "NVIDIA CORP", nullable=True),
+        "window": _obj({
+            "days": _i("Look-back in days.", 90),
+            "from": _s("First filing date included.", "2026-06-30"),
+            "to": _s("Today, UTC.", "2026-09-28"),
+        }, ["days", "from", "to"], "Filing-date window searched."),
+        "codes": {"type": ["array", "null"], "items": {"type": "string"},
+                  "description": "Transaction-code filter applied, or null.", "examples": [["P", "S"]]},
+        "filings_read": _i("Form 4 documents read.", 12),
+        "transactions": _arr(_obj({
+            "insider": _s("Reporting person(s) as filed.", "STEVENS MARK A", nullable=True),
+            "insider_cik": _s("Reporting person's CIK.", "0001182994", nullable=True),
+            "role": _s("Officer title, director, 10% owner.", "director"),
+            "security": _s("Security title.", "Common Stock", nullable=True),
+            "date": _s("Transaction date.", "2026-09-04", nullable=True),
+            "code": _s("Form 4 transaction code.", "S", nullable=True),
+            "code_meaning": _s("What the code means.", "open-market or private sale"),
+            "acquired_disposed": _s("A acquired, D disposed.", "D", nullable=True),
+            "shares": _n("Shares in this line.", 197180, nullable=True),
+            "price": _n("Price per share, USD.", 230.4039, nullable=True),
+            "value": _n("shares x price, USD.", 45431041.0, nullable=True),
+            "shares_after": _n("Holdings after the trade.", 2761590, nullable=True),
+            "ownership": _s("D direct, I indirect.", "D", nullable=True),
+            "derivative": _b("An option or other derivative line.", False),
+            "exercise_price": _n("Derivative exercise price.", None, nullable=True),
+            "underlying_security": _s("Derivative's underlying.", None, nullable=True),
+            "rule_10b5_1": _b("Filed as a Rule 10b5-1 plan trade.", False),
+            "footnotes": _arr(_s("A footnote on this line.", "Weighted average price."), "Footnotes.", []),
+            "filed": _s("Filing date.", "2026-09-08"),
+            "form": _s("4 or 4/A.", "4"),
+            "filing_url": _s("The filing on sec.gov.", "https://www.sec.gov/Archives/edgar/data/1045810/000158867026000014/xslF345X06/wk-form4_1789765959.xml"),
+        }, ["insider", "role", "date", "code", "code_meaning", "shares", "price", "value", "derivative",
+            "rule_10b5_1", "filed", "form", "filing_url"]), "Trades, newest filing first.", []),
+        "transaction_count": _i("Trades returned.", 33),
+        "summary": _obj({
+            "open_market_purchases": _obj({
+                "transactions": _i("Lines.", 0), "shares": _n("Shares.", 0),
+                "value_usd": _n("Dollar value.", None, nullable=True), "insiders": _i("Distinct insiders.", 0),
+            }, _SIDE_REQUIRED, "Code P lines, non-derivative."),
+            "open_market_sales": _obj({
+                "transactions": _i("Lines.", 17), "shares": _n("Shares.", 2900740),
+                "value_usd": _n("Dollar value.", 653017053.02, nullable=True), "insiders": _i("Distinct insiders.", 2),
+            }, _SIDE_REQUIRED, "Code S lines, non-derivative."),
+            "net_shares": _n("Purchased minus sold.", -2900740),
+            "net_value_usd": _n("Purchased minus sold, USD.", -653017053.02, nullable=True),
+            "planned_sales_10b5_1": _i("Sales made under a 10b5-1 plan.", 3),
+        }, ["open_market_purchases", "open_market_sales", "net_shares", "net_value_usd", "planned_sales_10b5_1"],
+            "Open-market buying against selling."),
+        "as_of": _s("Most recent filing date read.", "2026-09-24", nullable=True),
+        "notes": _arr(_s("Anything left out, and why.", "Stopped at max_filings=20."), "Notes.", []),
+        "source": _const("sec-edgar-form4", "Data source."),
+        "checked_at": _CHECKED_AT,
+    }, ["cik", "window", "filings_read", "transactions", "transaction_count", "summary", "as_of", "notes",
+        "source", "checked_at"]),
 
     "finance.analytics": _obj({
         "source": _obj({
@@ -2299,6 +2359,11 @@ REPRESENTATIVE_QUERIES = {
         "live stock price and daily history for a ticker",
         "what is AAPL trading at right now and how has it moved this month",
         "OHLCV bars for a US stock over the last year",
+    ],
+    "market.insiders": [
+        "insider buying and selling in a stock from SEC Form 4 filings",
+        "which executives and directors sold shares this quarter",
+        "open-market insider purchases for a ticker",
     ],
     "market.fundamentals": [
         "revenue, net income and EPS a company reported to the SEC by quarter",

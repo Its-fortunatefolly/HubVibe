@@ -320,10 +320,9 @@ def test_detect_anomalies_rejects_threshold_out_of_range():
 def test_gather_sources_reports_unreadable_sources_as_partial(monkeypatch):
     import asyncio
 
-    async def fake_search(ctx, payload):
-        return {"answer": "n/a", "sources": [
-            {"url": "https://good.example/a", "title": "Good"},
-            {"url": "https://bad.example/b", "title": "Bad"}]}
+    async def fake_search(ctx, query):
+        return [{"url": "https://good.example/a", "title": "Good"},
+                {"url": "https://bad.example/b", "title": "Bad"}]
 
     async def fake_extract(ctx, payload):
         if "bad.example" in payload["url"]:
@@ -332,7 +331,7 @@ def test_gather_sources_reports_unreadable_sources_as_partial(monkeypatch):
                "text_chars": 7, "truncated": False, "links": [],
                "rendered": False}
 
-    monkeypatch.setattr(W.skills.search, "web_search", fake_search)
+    monkeypatch.setattr(W.skills.search, "web_sources", fake_search)
     monkeypatch.setattr(W.skills.extract, "extract_page", fake_extract)
 
     read, partial = asyncio.run(
@@ -344,11 +343,11 @@ def test_gather_sources_reports_unreadable_sources_as_partial(monkeypatch):
 def test_gather_sources_dedupes_by_host():
     import asyncio
 
-    async def fake_search(ctx, payload):
-        return {"answer": "n/a", "sources": [
+    async def fake_search(ctx, query):
+        return [
             {"url": "https://example.com/a", "title": "A"},
             {"url": "https://example.com/b", "title": "B"},
-            {"url": "https://other.example/c", "title": "C"}]}
+            {"url": "https://other.example/c", "title": "C"}]
 
     async def fake_extract(ctx, payload):
         return {"final_url": payload["url"], "title": "T", "text": "x",
@@ -356,7 +355,7 @@ def test_gather_sources_dedupes_by_host():
 
     import pytest as _pytest
     from unittest import mock
-    with mock.patch.object(W.skills.search, "web_search", fake_search), \
+    with mock.patch.object(W.skills.search, "web_sources", fake_search), \
          mock.patch.object(W.skills.extract, "extract_page", fake_extract):
         read, partial = asyncio.run(
             W.skills.composites._gather_sources(_FakeCtx(), "query", max_sources=3))
@@ -369,6 +368,7 @@ def test_gather_sources_dedupes_by_host():
 
 def test_search_web_unpaid_call_prices_and_lists_in_bazaar(client, monkeypatch):
     _fake_google_credentials(monkeypatch)
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key-value")
     response = client.post("/work/search/web", json={"query": "x"})
     assert response.status_code == 402
     body = response.json()

@@ -1,9 +1,12 @@
-"""Markets and trading mathematics: three workers.
+"""Markets and trading mathematics: four workers.
 
   market.stock        -- a live equity quote and daily history (keyless
                          Nasdaq data API, Yahoo chart fallback)
   market.fundamentals -- the filer's own reported numbers from SEC EDGAR
                          XBRL company facts (official, keyless)
+  market.insiders     -- officers', directors' and 10% owners' trades in a
+                         company's stock, parsed from the Form 4s they filed
+                         with the SEC (official, keyless)
   finance.analytics   -- deterministic trading mathematics over a price
                          series: returns, volatility, Sharpe and Sortino,
                          drawdown, VaR/CVaR, beta/alpha/correlation, moving
@@ -20,7 +23,7 @@ contract.
 """
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import NormalDist
 from typing import Optional
 
@@ -216,6 +219,167 @@ async def fundamentals(ctx, payload: dict) -> dict:
         "forms": req["forms"],
         "as_of": latest_filed,
         "source": "sec-edgar-xbrl-companyfacts",
+        "checked_at": _now(),
+    }
+
+
+# --- market.insiders ------------------------------------------------------------
+
+# Form 4 transaction codes, as the SEC's General Instructions define them.
+TRANSACTION_CODES = {
+    "P": "open-market or private purchase", "S": "open-market or private sale",
+    "A": "grant or award from the company", "D": "disposition to the company",
+    "F": "shares withheld or delivered to pay exercise price or tax", "I": "discretionary transaction",
+    "M": "exercise or conversion of an exempt derivative", "C": "conversion of a derivative",
+    "E": "expiration of a short derivative position", "H": "expiration of a long derivative position",
+    "O": "exercise of an out-of-the-money derivative", "X": "exercise of an in- or at-the-money derivative",
+    "G": "gift", "L": "small acquisition", "W": "acquired or disposed of by will or inheritance",
+    "Z": "deposit into or withdrawal from a voting trust", "J": "other acquisition or disposition",
+    "K": "equity swap or similar", "U": "tender of shares in a change of control",
+    "V": "transaction voluntarily reported earlier",
+}
+MAX_INSIDER_FILINGS = 40
+MAX_INSIDER_DAYS = 365
+
+
+def _parse_insiders(payload: dict) -> dict:
+    base = _parse_fundamentals({k: payload.get(k) for k in ("symbol", "cik") if payload.get(k) is not None})
+    days = payload.get("days", 90)
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= MAX_INSIDER_DAYS:
+        raise runtime.InvalidRequest(f"`days` must be a whole number from 1 to {MAX_INSIDER_DAYS}.")
+    limit = payload.get("max_filings", 20)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_INSIDER_FILINGS:
+        raise runtime.InvalidRequest(f"`max_filings` must be a whole number from 1 to {MAX_INSIDER_FILINGS}.")
+    codes = payload.get("codes")
+    if codes is not None:
+        if (not isinstance(codes, list) or not codes
+                or not all(isinstance(c, str) and c.strip().upper() in TRANSACTION_CODES for c in codes)):
+            raise runtime.InvalidRequest("`codes` must be Form 4 transaction codes, e.g. [\"P\", \"S\"] for "
+                                         "open-market buys and sells. Known codes: " + ", ".join(TRANSACTION_CODES))
+        codes = sorted({c.strip().upper() for c in codes})
+    derivatives = payload.get("include_derivatives", True)
+    if not isinstance(derivatives, bool):
+        raise runtime.InvalidRequest("`include_derivatives` must be true or false.")
+    return {"symbol": base["symbol"], "cik": base["cik"], "days": days, "max_filings": limit,
+            "codes": codes, "derivatives": derivatives}
+
+
+def precheck_insiders(payload: dict) -> None:
+    _parse_insiders(payload)
+
+
+def recent_form4s(data: dict, cik: int, since: str, limit: int) -> list:
+    """Form 4 and 4/A filings on or after `since`, newest first, from the
+    submissions document's column-wise `recent` table."""
+    recent = data["filings"]["recent"]
+    forms = recent.get("form") or []
+    out = []
+    for i, form in enumerate(forms):
+        if form not in ("4", "4/A"):
+            continue
+        filed = recent["filingDate"][i]
+        if filed < since:
+            continue
+        accession = recent["accessionNumber"][i]
+        doc = recent["primaryDocument"][i] or ""
+        folder = f"{sec_edgar.ARCHIVES_BASE}/{int(cik)}/{accession.replace('-', '')}"
+        if not doc.lower().endswith(".xml"):
+            continue
+        out.append({"form": form, "filed": filed, "accession": accession,
+                    "url": f"{folder}/{doc}", "xml_url": f"{folder}/{doc.rsplit('/', 1)[-1]}"})
+    out.sort(key=lambda f: (f["filed"], f["accession"]), reverse=True)
+    return out[:limit]
+
+
+def _role(owner: dict) -> str:
+    parts = []
+    if owner.get("officer"):
+        parts.append(owner.get("officer_title") or "officer")
+    if owner.get("director"):
+        parts.append("director")
+    if owner.get("ten_percent_owner"):
+        parts.append("10% owner")
+    if owner.get("other") and not owner.get("officer"):
+        parts.append(owner.get("officer_title") or "other")
+    return ", ".join(parts) or "reporting person"
+
+
+def _side(rows: list) -> dict:
+    shares = math.fsum(r["shares"] for r in rows if isinstance(r["shares"], (int, float)))
+    priced = [r for r in rows if isinstance(r["value"], (int, float))]
+    return {"transactions": len(rows), "shares": round(shares, 4),
+            "value_usd": round(math.fsum(r["value"] for r in priced), 2) if priced else None,
+            "insiders": len({r["insider"] for r in rows})}
+
+
+def insider_summary(rows: list) -> dict:
+    buys = [r for r in rows if r["code"] == "P" and not r["derivative"]]
+    sells = [r for r in rows if r["code"] == "S" and not r["derivative"]]
+    b, s = _side(buys), _side(sells)
+    return {"open_market_purchases": b, "open_market_sales": s,
+            "net_shares": round(b["shares"] - s["shares"], 4),
+            "net_value_usd": (round((b["value_usd"] or 0) - (s["value_usd"] or 0), 2)
+                              if b["value_usd"] is not None or s["value_usd"] is not None else None),
+            "planned_sales_10b5_1": sum(1 for r in sells if r["rule_10b5_1"])}
+
+
+async def insiders(ctx, payload: dict) -> dict:
+    req = _parse_insiders(payload)
+    provider = sec_edgar.PROVIDERS[0]
+    cik, title = req["cik"], None
+    if cik is None:
+        listing = await provider.cik_for(req["symbol"])
+        if listing is None:
+            raise runtime.InvalidRequest(
+                f"`symbol` {req['symbol']} is not in the SEC's ticker table; give `cik` instead.")
+        cik, title = listing["cik"], listing.get("title")
+
+    data = await ctx.run("filings", sec_edgar.PROVIDERS, lambda p: p.insider_filings(cik), per_attempt_seconds=30)
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(days=req["days"])).date().isoformat()
+    filings = recent_form4s(data, cik, since, req["max_filings"])
+    docs = (await ctx.run("form4", sec_edgar.PROVIDERS, lambda p: p.form4_documents(filings),
+                          per_attempt_seconds=45, max_attempts=2)) if filings else []
+
+    rows, notes, unread = [], [], 0
+    for filing, doc in zip(filings, docs):
+        if "error" in doc:
+            unread += 1
+            continue
+        owner = doc["owners"][0] if doc["owners"] else {}
+        insider = "; ".join(o["name"] for o in doc["owners"] if o.get("name")) or None
+        for t in doc["transactions"]:
+            if t["derivative"] and not req["derivatives"]:
+                continue
+            if req["codes"] and t["code"] not in req["codes"]:
+                continue
+            value = (round(t["shares"] * t["price"], 2)
+                     if isinstance(t["shares"], (int, float)) and isinstance(t["price"], (int, float)) else None)
+            rows.append(dict(t, insider=insider, insider_cik=owner.get("cik"), role=_role(owner),
+                             code_meaning=TRANSACTION_CODES.get(t["code"] or "", "unknown code"),
+                             value=value, rule_10b5_1=doc["rule_10b5_1"] or any(
+                                 "10b5-1" in n for n in t["footnotes"]),
+                             filed=filing["filed"], form=filing["form"], filing_url=filing["url"]))
+    if unread:
+        notes.append(f"{unread} of {len(filings)} Form 4 documents could not be read; their trades are not included.")
+    if len(filings) == req["max_filings"]:
+        notes.append(f"Stopped at max_filings={req['max_filings']}; older filings in the window were not read.")
+    if not filings:
+        notes.append(f"No Form 4 filed for this issuer in the last {req['days']} days.")
+    rows.sort(key=lambda r: (r["filed"], r["date"] or ""), reverse=True)
+    return {
+        "symbol": req["symbol"],
+        "cik": int(cik),
+        "issuer_name": data.get("name") or title,
+        "window": {"days": req["days"], "from": since, "to": now.date().isoformat()},
+        "codes": req["codes"],
+        "filings_read": len(filings) - unread,
+        "transactions": rows,
+        "transaction_count": len(rows),
+        "summary": insider_summary(rows),
+        "as_of": filings[0]["filed"] if filings else None,
+        "notes": notes,
+        "source": "sec-edgar-form4",
         "checked_at": _now(),
     }
 
@@ -698,6 +862,8 @@ async def analytics(ctx, payload: dict) -> dict:
     }
 
 
-SKILLS = {"market.stock": stock, "market.fundamentals": fundamentals, "finance.analytics": analytics}
+SKILLS = {"market.stock": stock, "market.fundamentals": fundamentals, "market.insiders": insiders,
+          "finance.analytics": analytics}
 PRECHECKS = {"market.stock": precheck_stock, "market.fundamentals": precheck_fundamentals,
+             "market.insiders": precheck_insiders,
              "finance.analytics": precheck_analytics}

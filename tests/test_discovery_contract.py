@@ -111,7 +111,7 @@ def test_every_worker_publishes_an_explicit_output_schema_not_a_placeholder():
             if w.output_schema.get("type") != "object"
             or not (w.output_schema.get("properties") or {})]
     assert not thin, f"workers still advertising a placeholder output: {thin}"
-    assert len(W.catalog.CATALOG) == 60
+    assert len(W.catalog.CATALOG) == 61
     assert set(W.catalog.contract.OUTPUT_SCHEMAS) == {w.name for w in W.catalog.CATALOG}
 
 

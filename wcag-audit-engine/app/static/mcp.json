@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.26.0",
+  "version": "1.28.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -6033,7 +6033,7 @@
     {
       "name": "hubvibe_search_web",
       "title": "Web search",
-      "description": "Web search for agents: a live Google Search query answered from current results, returning a grounded answer plus the source URLs and titles it used, never the model's own memory. Input: query. Use research.web when you need the sources read in full and a cited brief. $0.10 per call. Returns: query, answer, sources[{url,title}], search_queries_used[], model.",
+      "description": "Web search for agents: a live query on Brave's independent web index, answered from the current results alone, with the source URLs and titles it was given, never the model's own memory. Input: query; optional language. Use search.results for the raw result list, research.web for sources read in full. $0.10 per call. Returns: query, answer, sources[{url,title}], search_queries_used[], model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -11722,6 +11722,748 @@
         "method": "POST",
         "path": "/work/market/fundamentals",
         "price_usd": 0.05
+      }
+    },
+    {
+      "name": "hubvibe_market_insiders",
+      "title": "Insider trades from SEC Form 4 filings",
+      "description": "What a company's officers, directors and 10% owners bought and sold, parsed from the Form 4s they filed with the SEC, read at call time from EDGAR. Each trade: insider, role, date, code and meaning, shares, price, value, holdings after, 10b5-1 plan flag, filing link. Summary: open-market buys vs sells, net shares and dollars, distinct insiders. Input: symbol (US ticker) or cik; optional days (default 90), codes such as [\"P\",\"S\"], max_filings. $0.10 per call. Returns: symbol, cik, issuer_name, window, codes, filings_read, transactions[] (insider, role, date, code, code_meaning, shares, price, value, shares_after, rule_10b5_1, filing_url), transaction_count, summary, as_of, notes[], source, checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.\\-]{0,11}$",
+            "description": "US ticker in the SEC's table, e.g. NVDA. Use this OR `cik`."
+          },
+          "cik": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "SEC Central Index Key of the issuer, e.g. 1045810."
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "Look back this many days by filing date. Default 90."
+          },
+          "codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Keep only these Form 4 transaction codes, e.g. [\"P\"] for open-market buys, [\"P\", \"S\"] for buys and sells. Default: all."
+          },
+          "max_filings": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40,
+            "description": "Most recent Form 4 filings to read. Default 20."
+          },
+          "include_derivatives": {
+            "type": "boolean",
+            "description": "Include option and other derivative lines. Default true."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "symbol"
+            ]
+          },
+          {
+            "required": [
+              "cik"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "symbol": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Ticker as given.",
+                "examples": [
+                  "NVDA"
+                ]
+              },
+              "cik": {
+                "type": "integer",
+                "description": "Issuer's SEC Central Index Key.",
+                "examples": [
+                  1045810
+                ]
+              },
+              "issuer_name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Issuer name from EDGAR.",
+                "examples": [
+                  "NVIDIA CORP"
+                ]
+              },
+              "window": {
+                "type": "object",
+                "properties": {
+                  "days": {
+                    "type": "integer",
+                    "description": "Look-back in days.",
+                    "examples": [
+                      90
+                    ]
+                  },
+                  "from": {
+                    "type": "string",
+                    "description": "First filing date included.",
+                    "examples": [
+                      "2026-06-30"
+                    ]
+                  },
+                  "to": {
+                    "type": "string",
+                    "description": "Today, UTC.",
+                    "examples": [
+                      "2026-09-28"
+                    ]
+                  }
+                },
+                "required": [
+                  "days",
+                  "from",
+                  "to"
+                ],
+                "description": "Filing-date window searched."
+              },
+              "codes": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Transaction-code filter applied, or null.",
+                "examples": [
+                  [
+                    "P",
+                    "S"
+                  ]
+                ]
+              },
+              "filings_read": {
+                "type": "integer",
+                "description": "Form 4 documents read.",
+                "examples": [
+                  12
+                ]
+              },
+              "transactions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "insider": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Reporting person(s) as filed.",
+                      "examples": [
+                        "STEVENS MARK A"
+                      ]
+                    },
+                    "insider_cik": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Reporting person's CIK.",
+                      "examples": [
+                        "0001182994"
+                      ]
+                    },
+                    "role": {
+                      "type": "string",
+                      "description": "Officer title, director, 10% owner.",
+                      "examples": [
+                        "director"
+                      ]
+                    },
+                    "security": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Security title.",
+                      "examples": [
+                        "Common Stock"
+                      ]
+                    },
+                    "date": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Transaction date.",
+                      "examples": [
+                        "2026-09-04"
+                      ]
+                    },
+                    "code": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Form 4 transaction code.",
+                      "examples": [
+                        "S"
+                      ]
+                    },
+                    "code_meaning": {
+                      "type": "string",
+                      "description": "What the code means.",
+                      "examples": [
+                        "open-market or private sale"
+                      ]
+                    },
+                    "acquired_disposed": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "A acquired, D disposed.",
+                      "examples": [
+                        "D"
+                      ]
+                    },
+                    "shares": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Shares in this line.",
+                      "examples": [
+                        197180
+                      ]
+                    },
+                    "price": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Price per share, USD.",
+                      "examples": [
+                        230.4039
+                      ]
+                    },
+                    "value": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "shares x price, USD.",
+                      "examples": [
+                        45431041.0
+                      ]
+                    },
+                    "shares_after": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Holdings after the trade.",
+                      "examples": [
+                        2761590
+                      ]
+                    },
+                    "ownership": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "D direct, I indirect.",
+                      "examples": [
+                        "D"
+                      ]
+                    },
+                    "derivative": {
+                      "type": "boolean",
+                      "description": "An option or other derivative line.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "exercise_price": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Derivative exercise price.",
+                      "examples": [
+                        null
+                      ]
+                    },
+                    "underlying_security": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Derivative's underlying.",
+                      "examples": [
+                        null
+                      ]
+                    },
+                    "rule_10b5_1": {
+                      "type": "boolean",
+                      "description": "Filed as a Rule 10b5-1 plan trade.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "footnotes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A footnote on this line.",
+                        "examples": [
+                          "Weighted average price."
+                        ]
+                      },
+                      "description": "Footnotes.",
+                      "examples": [
+                        []
+                      ]
+                    },
+                    "filed": {
+                      "type": "string",
+                      "description": "Filing date.",
+                      "examples": [
+                        "2026-09-08"
+                      ]
+                    },
+                    "form": {
+                      "type": "string",
+                      "description": "4 or 4/A.",
+                      "examples": [
+                        "4"
+                      ]
+                    },
+                    "filing_url": {
+                      "type": "string",
+                      "description": "The filing on sec.gov.",
+                      "examples": [
+                        "https://www.sec.gov/Archives/edgar/data/1045810/000158867026000014/xslF345X06/wk-form4_1789765959.xml"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "insider",
+                    "role",
+                    "date",
+                    "code",
+                    "code_meaning",
+                    "shares",
+                    "price",
+                    "value",
+                    "derivative",
+                    "rule_10b5_1",
+                    "filed",
+                    "form",
+                    "filing_url"
+                  ]
+                },
+                "description": "Trades, newest filing first.",
+                "examples": [
+                  []
+                ]
+              },
+              "transaction_count": {
+                "type": "integer",
+                "description": "Trades returned.",
+                "examples": [
+                  33
+                ]
+              },
+              "summary": {
+                "type": "object",
+                "properties": {
+                  "open_market_purchases": {
+                    "type": "object",
+                    "properties": {
+                      "transactions": {
+                        "type": "integer",
+                        "description": "Lines.",
+                        "examples": [
+                          0
+                        ]
+                      },
+                      "shares": {
+                        "type": "number",
+                        "description": "Shares.",
+                        "examples": [
+                          0
+                        ]
+                      },
+                      "value_usd": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "description": "Dollar value.",
+                        "examples": [
+                          null
+                        ]
+                      },
+                      "insiders": {
+                        "type": "integer",
+                        "description": "Distinct insiders.",
+                        "examples": [
+                          0
+                        ]
+                      }
+                    },
+                    "required": [
+                      "transactions",
+                      "shares",
+                      "value_usd",
+                      "insiders"
+                    ],
+                    "description": "Code P lines, non-derivative."
+                  },
+                  "open_market_sales": {
+                    "type": "object",
+                    "properties": {
+                      "transactions": {
+                        "type": "integer",
+                        "description": "Lines.",
+                        "examples": [
+                          17
+                        ]
+                      },
+                      "shares": {
+                        "type": "number",
+                        "description": "Shares.",
+                        "examples": [
+                          2900740
+                        ]
+                      },
+                      "value_usd": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "description": "Dollar value.",
+                        "examples": [
+                          653017053.02
+                        ]
+                      },
+                      "insiders": {
+                        "type": "integer",
+                        "description": "Distinct insiders.",
+                        "examples": [
+                          2
+                        ]
+                      }
+                    },
+                    "required": [
+                      "transactions",
+                      "shares",
+                      "value_usd",
+                      "insiders"
+                    ],
+                    "description": "Code S lines, non-derivative."
+                  },
+                  "net_shares": {
+                    "type": "number",
+                    "description": "Purchased minus sold.",
+                    "examples": [
+                      -2900740
+                    ]
+                  },
+                  "net_value_usd": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Purchased minus sold, USD.",
+                    "examples": [
+                      -653017053.02
+                    ]
+                  },
+                  "planned_sales_10b5_1": {
+                    "type": "integer",
+                    "description": "Sales made under a 10b5-1 plan.",
+                    "examples": [
+                      3
+                    ]
+                  }
+                },
+                "required": [
+                  "open_market_purchases",
+                  "open_market_sales",
+                  "net_shares",
+                  "net_value_usd",
+                  "planned_sales_10b5_1"
+                ],
+                "description": "Open-market buying against selling."
+              },
+              "as_of": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Most recent filing date read.",
+                "examples": [
+                  "2026-09-24"
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Anything left out, and why.",
+                  "examples": [
+                    "Stopped at max_filings=20."
+                  ]
+                },
+                "description": "Notes.",
+                "examples": [
+                  []
+                ]
+              },
+              "source": {
+                "type": "string",
+                "const": "sec-edgar-form4",
+                "description": "Data source."
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "cik",
+              "window",
+              "filings_read",
+              "transactions",
+              "transaction_count",
+              "summary",
+              "as_of",
+              "notes",
+              "source",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
+          }
+        },
+        "title": "market.insiders response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Insider trades from SEC Form 4 filings"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/market/insiders",
+        "price_usd": 0.1
       }
     },
     {
