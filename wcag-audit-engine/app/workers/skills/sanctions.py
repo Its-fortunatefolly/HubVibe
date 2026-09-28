@@ -111,7 +111,8 @@ async def screen(ctx, payload: dict) -> dict:
                      "nationality and identifiers on the list's own record before acting.")
     return {
         "query": req,
-        "verdict": "potential_match" if matches else "no_match",
+        # A clean answer only counts when every list asked for was actually screened.
+        "verdict": "potential_match" if matches else ("incomplete" if missing else "no_match"),
         "match_count": len(matches),
         "matches": matches,
         "lists": value["lists"],

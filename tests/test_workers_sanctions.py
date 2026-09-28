@@ -202,6 +202,11 @@ def test_the_skill_filters_by_country_and_birth_year_and_says_so():
     assert _run(SK.screen(_Ctx(p), {"name": "Saddam Hussein", "birth_year": 1960}))["matches"] == []
     clean = _run(SK.screen(_Ctx(p), {"name": "Jane Doe"}))
     assert clean["verdict"] == "no_match" and clean["match_count"] == 0 and len(clean["lists"]) == 4
+    del p._index.lists["eu"]
+    p._refresh_in_background = lambda: None  # no download in a test
+    partial = _run(SK.screen(_Ctx(p), {"name": "Jane Doe"}))
+    assert partial["verdict"] == "incomplete" and any("Not screened" in n for n in partial["notes"])
+    jsonschema.validate(partial, W.catalog.contract.OUTPUT_SCHEMAS[WORKER])
     jsonschema.validate(out, W.catalog.contract.OUTPUT_SCHEMAS[WORKER])
     jsonschema.validate(clean, W.catalog.contract.OUTPUT_SCHEMAS[WORKER])
 

@@ -1155,8 +1155,9 @@ OUTPUT_SCHEMAS = {
             "country": _s("Country filter, as given.", "Russia", nullable=True),
             "birth_year": _i("Birth-year filter, as given.", 1952, nullable=True),
         }, ["name", "type", "threshold", "limit", "lists", "country", "birth_year"], "The screening request."),
-        "verdict": _enum(["potential_match", "no_match"],
-                         "potential_match: at least one listing scored at or above the threshold. no_match: none did.",
+        "verdict": _enum(["potential_match", "no_match", "incomplete"],
+                         ("potential_match: at least one listing scored at or above the threshold. no_match: none did, "
+                          "on every list asked for. incomplete: none did, but a list could not be screened (see notes)."),
                          "potential_match"),
         "match_count": _i("Number of matches returned.", 3),
         "matches": _arr(_obj({
