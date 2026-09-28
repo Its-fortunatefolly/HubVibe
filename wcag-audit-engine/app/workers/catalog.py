@@ -1077,6 +1077,29 @@ CATALOG = [
                        "(ODbL), shared per their own refresh pace."),
         requires=("aviation",)),
     Worker(
+        name="company.enrich", price_usd=0.05, tier="utility",
+        title="Company profile from a domain or a name",
+        description=(
+            "Who is this company? From a domain or a name: legal and common name, "
+            "founding date, headcount with its date, industries, headquarters, parent, "
+            "CEO and founders, stock listings, LEI, SEC CIK and registration number, "
+            "legal form and status, official social accounts and logo. Sources: "
+            "Wikidata (CC0), the global LEI register, SEC EDGAR and the company's own "
+            "site (marked self-declared); every field names its source. Input: domain "
+            "or name."),
+        tags=["company", "enrichment", "firmographics", "lei", "leads", "kyb", "wikidata", "sec", "live"],
+        input_schema=dict(_obj({
+            "domain": {"type": "string", "minLength": 4, "maxLength": 253, "description": "Company domain (stripe.com) or its URL."},
+            "name": {"type": "string", "minLength": 2, "maxLength": 120, "description": "Company name (Toyota), instead of a domain."},
+        }, []), anyOf=[{"required": ["domain"]}, {"required": ["name"]}]),
+        returns=("query{}, company{name, legal_name, description, website, domain, founded, employees{count, as_of, source}, "
+                 "industries[], headquarters{city, country, country_code, address}, parent, ceo, founders[], logo_url, status, "
+                 "legal_form, jurisdiction}, identifiers{wikidata, lei, cik, registration_number, listings[], sec_tickers[], sic...}, "
+                 "socials{x, linkedin, facebook, instagram, github, youtube}, sources[], field_sources{}, notes[], checked_at."),
+        skill="company.enrich", max_seconds=45,
+        pricing_basis="Provisional, utility tier. Provider cost zero: Wikidata, GLEIF and SEC public data, one homepage read.",
+        requires=("company_data",)),
+    Worker(
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
@@ -1620,6 +1643,7 @@ _EXAMPLE_OVERRIDES = {
     "property.context": {"address": "4600 Silver Hill Rd, Washington, DC 20233"},
     # Oslo: a live Avinor board, a METAR and aircraft overhead in one example.
     "travel.flight_status": {"airport": "OSL", "hours_ahead": 2},
+    "company.enrich": {"domain": "stripe.com"},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},

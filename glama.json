@@ -17716,6 +17716,790 @@
       }
     },
     {
+      "name": "hubvibe_company_enrich",
+      "title": "Company profile from a domain or a name",
+      "description": "Who is this company? From a domain or a name: legal and common name, founding date, headcount with its date, industries, headquarters, parent, CEO and founders, stock listings, LEI, SEC CIK and registration number, legal form and status, official social accounts and logo. Sources: Wikidata (CC0), the global LEI register, SEC EDGAR and the company's own site (marked self-declared); every field names its source. Input: domain or name. $0.05 per call. Returns: query{}, company{name, legal_name, description, website, domain, founded, employees{count, as_of, source}, industries[], headquarters{city, country, country_code, address}, parent, ceo, founders[], logo_url, status, legal_form, jurisdiction}, identifiers{wikidata, lei, cik, registration_number, listings[], sec_tickers[], sic...}, socials{x, linkedin, facebook, instagram, github, youtube}, sources[], field_sources{}, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 253,
+            "description": "Company domain (stripe.com) or its URL."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120,
+            "description": "Company name (Toyota), instead of a domain."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "domain"
+            ]
+          },
+          {
+            "required": [
+              "name"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "object",
+                "properties": {
+                  "domain": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Domain asked, normalised.",
+                    "examples": [
+                      "stripe.com"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Name asked.",
+                    "examples": [
+                      "Stripe"
+                    ]
+                  }
+                },
+                "required": [
+                  "domain",
+                  "name"
+                ],
+                "description": "What was asked."
+              },
+              "company": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Common name.",
+                    "examples": [
+                      "Stripe"
+                    ]
+                  },
+                  "legal_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Registered legal name.",
+                    "examples": [
+                      "STRIPE, LLC"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "One-line description.",
+                    "examples": [
+                      "Irish-American payment technology company"
+                    ]
+                  },
+                  "website": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Official website.",
+                    "examples": [
+                      "https://stripe.com/"
+                    ]
+                  },
+                  "domain": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Domain.",
+                    "examples": [
+                      "stripe.com"
+                    ]
+                  },
+                  "founded": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Founding date (year, month or day precision).",
+                    "examples": [
+                      "2010"
+                    ]
+                  },
+                  "employees": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "count": {
+                        "type": "integer",
+                        "description": "Headcount.",
+                        "examples": [
+                          8000
+                        ]
+                      },
+                      "as_of": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Date of the figure.",
+                        "examples": [
+                          "2022"
+                        ]
+                      },
+                      "source": {
+                        "type": "string",
+                        "description": "Source.",
+                        "examples": [
+                          "wikidata"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "count",
+                      "as_of",
+                      "source"
+                    ],
+                    "description": "Latest known headcount; null when unknown."
+                  },
+                  "industries": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "Industry.",
+                      "examples": [
+                        "financial services"
+                      ]
+                    },
+                    "description": "Industries.",
+                    "examples": [
+                      [
+                        "financial services"
+                      ]
+                    ]
+                  },
+                  "headquarters": {
+                    "type": "object",
+                    "properties": {
+                      "city": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "City.",
+                        "examples": [
+                          "San Francisco"
+                        ]
+                      },
+                      "country": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Country.",
+                        "examples": [
+                          "United States"
+                        ]
+                      },
+                      "country_code": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "ISO 3166 code.",
+                        "examples": [
+                          "US"
+                        ]
+                      },
+                      "address": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Registered headquarters address.",
+                        "examples": [
+                          "354 Oyster Point Boulevard, South San Francisco, 94080"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "city",
+                      "country",
+                      "country_code",
+                      "address"
+                    ],
+                    "description": "Headquarters."
+                  },
+                  "parent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Parent organisation.",
+                    "examples": [
+                      "Alphabet Inc."
+                    ]
+                  },
+                  "ceo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Chief executive.",
+                    "examples": [
+                      "Patrick Collison"
+                    ]
+                  },
+                  "founders": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "Founder.",
+                      "examples": [
+                        "Patrick Collison"
+                      ]
+                    },
+                    "description": "Founders.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "logo_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Logo file.",
+                    "examples": [
+                      "https://commons.wikimedia.org/wiki/Special:FilePath/Stripe_Logo.svg"
+                    ]
+                  },
+                  "status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Legal entity status (LEI register).",
+                    "examples": [
+                      "ACTIVE"
+                    ]
+                  },
+                  "legal_form": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Legal form.",
+                    "examples": [
+                      "Limited Liability Company"
+                    ]
+                  },
+                  "jurisdiction": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Jurisdiction.",
+                    "examples": [
+                      "US-DE"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "legal_name",
+                  "description",
+                  "website",
+                  "domain",
+                  "founded",
+                  "employees",
+                  "industries",
+                  "headquarters",
+                  "parent",
+                  "ceo",
+                  "founders",
+                  "logo_url",
+                  "status",
+                  "legal_form",
+                  "jurisdiction"
+                ],
+                "description": "The company."
+              },
+              "identifiers": {
+                "type": "object",
+                "properties": {
+                  "wikidata": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Wikidata item.",
+                    "examples": [
+                      "Q7624104"
+                    ]
+                  },
+                  "lei": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Legal Entity Identifier.",
+                    "examples": [
+                      "549300CLHGIPTCYHQ143"
+                    ]
+                  },
+                  "cik": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "SEC Central Index Key.",
+                    "examples": [
+                      "1691342"
+                    ]
+                  },
+                  "registration_number": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Company registration number.",
+                    "examples": [
+                      "4675506"
+                    ]
+                  },
+                  "registration_authority": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Registration authority id (GLEIF RA list).",
+                    "examples": [
+                      "RA000602"
+                    ]
+                  },
+                  "listings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "ticker": {
+                          "type": "string",
+                          "description": "Ticker.",
+                          "examples": [
+                            "AAPL"
+                          ]
+                        },
+                        "exchange": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Exchange.",
+                          "examples": [
+                            "Nasdaq"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "ticker",
+                        "exchange"
+                      ],
+                      "description": "A listing."
+                    },
+                    "description": "Stock listings.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "sec_tickers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "Ticker.",
+                      "examples": [
+                        "AAPL"
+                      ]
+                    },
+                    "description": "Tickers on SEC file.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "sic": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "SIC code.",
+                    "examples": [
+                      "3571"
+                    ]
+                  },
+                  "sic_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "SIC industry.",
+                    "examples": [
+                      "Electronic Computers"
+                    ]
+                  },
+                  "state_of_incorporation": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "State of incorporation (SEC).",
+                    "examples": [
+                      "CA"
+                    ]
+                  }
+                },
+                "required": [
+                  "wikidata",
+                  "lei",
+                  "cik",
+                  "registration_number",
+                  "registration_authority",
+                  "listings",
+                  "sec_tickers",
+                  "sic",
+                  "sic_description",
+                  "state_of_incorporation"
+                ],
+                "description": "Identifiers."
+              },
+              "socials": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "x account.",
+                    "examples": [
+                      "https://x.com/stripe"
+                    ]
+                  },
+                  "linkedin": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "linkedin account.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "facebook": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "facebook account.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "instagram": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "instagram account.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "github": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "github account.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "youtube": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "youtube account.",
+                    "examples": [
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "x",
+                  "linkedin",
+                  "facebook",
+                  "instagram",
+                  "github",
+                  "youtube"
+                ],
+                "description": "Official social accounts."
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A source used.",
+                  "examples": [
+                    "Wikidata (CC0)"
+                  ]
+                },
+                "description": "Sources that answered.",
+                "examples": [
+                  [
+                    "Wikidata (CC0)"
+                  ]
+                ]
+              },
+              "field_sources": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Which source gave each chosen field.",
+                "examples": [
+                  {
+                    "name": "wikidata",
+                    "legal_name": "lei_register"
+                  }
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "Homepage not read."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "company",
+              "identifiers",
+              "socials",
+              "sources",
+              "field_sources",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "company.enrich response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Company profile from a domain or a name"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/company/enrich",
+        "price_usd": 0.05
+      }
+    },
+    {
       "name": "hubvibe_commerce_shipping",
       "title": "Shipping options, eligibility and cart total for a product",
       "description": "Can this product ship to me, for how much, and what is the cart total? Any Shopify storefront, keyless: the variant goes into a real cart session, the store's totals are read, and the store quotes its shipping options to the destination. Returns options with prices and days, eligibility (true, false with the store's reason, or the address fields still needed), subtotal and total before tax. No order placed. Input: url, ship_to{country, province, postal_code}; optional variant, quantity. $0.50 per call. Returns: url, store{platform, domain, currency}, product{id, title, handle}, variant{id, name, sku, price, available, requires_shipping}, quantity, ship_to{}, cart{subtotal, total, currency, item_count, requires_shipping}, eligible, eligibility_reasons[], missing_fields[], shipping_options[{name, price, currency, delivery_days_min, delivery_days_max, description, carrier}], cheapest_shipping{}, estimated_total{}, taxes_note, source, notes[], checked_at.",
