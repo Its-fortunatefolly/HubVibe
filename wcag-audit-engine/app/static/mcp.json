@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.24.0",
+  "version": "1.25.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -28418,19 +28418,50 @@
     },
     {
       "name": "hubvibe_maps_places",
-      "title": "Search places",
-      "description": "Places search: find businesses, addresses and points of interest by free-text query through Google Maps Grounding Lite, for example 'coffee near the Ferry Building, San Francisco'. Input: query, optional region_code (ISO country code) to bias results. $0.10 per call. Returns: query, result (places found, per Maps Grounding Lite's own shape).",
+      "title": "Find places near a location",
+      "description": "Places near a location, anywhere: 'coffee near the Ferry Building, San Francisco', 'ramen near Shibuya Station', 'pharmacy' at coordinates. From Overture Maps' open places data (80M+ places, monthly releases): name, category, distance, address, website, phone, brand, operating status, confidence and source datasets, nearest first; the area widens when nothing is close. Input: query; optional near, lat and lng, radius_m, limit. $0.10 per call. Returns: query, what, near{name, lat, lon, source}, radius_m, places[{id, name, category, distance_m, lat, lon, address, country, website, phone, brand, operating_status, confidence, sources[]}], place_count, attribution[], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "What to find, e.g. 'coffee near the Ferry Building'."
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "What and where: 'coffee near the Ferry Building, San Francisco'."
+          },
+          "near": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Where, if not in the query: a place, US address or airport code."
+          },
+          "lat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90,
+            "description": "Latitude of the center."
+          },
+          "lng": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180,
+            "description": "Longitude of the center."
+          },
+          "radius_m": {
+            "type": "number",
+            "minimum": 50,
+            "maximum": 10000,
+            "description": "Search radius in metres. Default 1000."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Most places to return. Default 10."
           },
           "region_code": {
             "type": "string",
-            "description": "Optional ISO 3166-1 alpha-2 bias."
+            "description": "Accepted for compatibility; the location decides the area."
           },
           "language": {
             "type": "string",
@@ -28482,29 +28513,299 @@
             "properties": {
               "query": {
                 "type": "string",
-                "description": "The place query.",
+                "description": "The query as given.",
                 "examples": [
-                  "coffee near Union Square, San Francisco"
+                  "coffee near the Ferry Building, San Francisco"
                 ]
               },
-              "result": {
-                "description": "Places found, in Google Maps Grounding Lite's own response shape.",
-                "type": "object",
+              "what": {
+                "type": "string",
+                "description": "What was searched for.",
                 "examples": [
-                  {
-                    "places": [
-                      {
-                        "name": "Blue Bottle Coffee",
-                        "formattedAddress": "66 Mint St, San Francisco, CA"
-                      }
+                  "coffee"
+                ]
+              },
+              "near": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Where the search centred.",
+                    "examples": [
+                      "San Francisco Ferry Building (building in San Francisco)"
+                    ]
+                  },
+                  "lat": {
+                    "type": "number",
+                    "description": "Latitude.",
+                    "examples": [
+                      37.7955
+                    ]
+                  },
+                  "lon": {
+                    "type": "number",
+                    "description": "Longitude.",
+                    "examples": [
+                      -122.3937
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "How the center was found.",
+                    "examples": [
+                      "Wikidata Q1060289"
                     ]
                   }
+                },
+                "required": [
+                  "name",
+                  "lat",
+                  "lon",
+                  "source"
+                ],
+                "description": "The search center."
+              },
+              "radius_m": {
+                "type": "integer",
+                "description": "Radius searched (widened when nothing was close).",
+                "examples": [
+                  1000
+                ]
+              },
+              "places": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Overture place id (GERS).",
+                      "examples": [
+                        "8333e7a5-b1ca-4c61-969d-5543d8de977a"
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Name.",
+                      "examples": [
+                        "Red Bay Coffee Ferry Building"
+                      ]
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Category.",
+                      "examples": [
+                        "coffee_shop"
+                      ]
+                    },
+                    "distance_m": {
+                      "type": "integer",
+                      "description": "Distance from the center.",
+                      "examples": [
+                        54
+                      ]
+                    },
+                    "lat": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Latitude.",
+                      "examples": [
+                        37.7953
+                      ]
+                    },
+                    "lon": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Longitude.",
+                      "examples": [
+                        -122.3931
+                      ]
+                    },
+                    "address": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Address.",
+                      "examples": [
+                        "Ferry Building, 1, San Francisco, CA, 94111"
+                      ]
+                    },
+                    "country": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ISO country.",
+                      "examples": [
+                        "US"
+                      ]
+                    },
+                    "website": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Website.",
+                      "examples": [
+                        "http://redbaycoffee.com"
+                      ]
+                    },
+                    "phone": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Phone.",
+                      "examples": [
+                        "(415) 983-8000"
+                      ]
+                    },
+                    "brand": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Brand.",
+                      "examples": [
+                        "Red Bay Coffee"
+                      ]
+                    },
+                    "operating_status": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "open, temporarily_closed...",
+                      "examples": [
+                        "open"
+                      ]
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "description": "Overture's confidence the place exists (0-1).",
+                      "examples": [
+                        0.942
+                      ]
+                    },
+                    "sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "Source dataset.",
+                        "examples": [
+                          "meta"
+                        ]
+                      },
+                      "description": "Datasets behind this place.",
+                      "examples": [
+                        [
+                          "meta"
+                        ]
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "category",
+                    "distance_m",
+                    "lat",
+                    "lon",
+                    "address",
+                    "country",
+                    "website",
+                    "phone",
+                    "brand",
+                    "operating_status",
+                    "confidence",
+                    "sources"
+                  ],
+                  "description": "A place."
+                },
+                "description": "Places, category matches first, then nearest."
+              },
+              "place_count": {
+                "type": "integer",
+                "description": "Places returned.",
+                "examples": [
+                  10
+                ]
+              },
+              "attribution": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "description": "Credit.",
+                      "examples": [
+                        "Places data from Overture Maps Foundation ..."
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Link.",
+                      "examples": [
+                        "https://docs.overturemaps.org/attribution/"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "url"
+                  ],
+                  "description": "A credit."
+                },
+                "description": "Credits to show with the data."
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "Nothing matched within 1000 m; the search was widened to 4000 m."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
                 ]
               }
             },
             "required": [
               "query",
-              "result"
+              "what",
+              "near",
+              "radius_m",
+              "places",
+              "place_count",
+              "attribution",
+              "notes",
+              "checked_at"
             ]
           },
           "provenance": {
@@ -28656,7 +28957,7 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
-        "title": "Search places"
+        "title": "Find places near a location"
       },
       "httpEndpoint": {
         "method": "POST",
