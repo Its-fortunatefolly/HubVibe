@@ -97,6 +97,7 @@ ROUTES = [
     ("standard", "/work/search/results", {"query": "東京 天気予報", "country": "JP", "language": "ja", "count": 5}),
     ("standard", "/work/news/search", {"query": "半導体", "language": "ja", "limit": 5}),
     ("utility", "/work/data/macro", {"indicator": "inflation", "country": "JP", "last": 5}),
+    ("utility", "/work/email/verify", {"email": "support@github.com"}),
     ("standard", "/work/commerce/shipping", {"url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10", "ship_to": {"country": "US", "province": "NY", "postal_code": "10001"}}),
     ("standard", "/work/travel/hotels", {"place": "hotel near Shibuya station Tokyo", "days_ahead": 30, "nights": 2, "max_hotels": 3}),
     ("standard", "/work/travel/flights", {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3}),

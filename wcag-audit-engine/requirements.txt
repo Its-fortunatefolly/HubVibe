@@ -17,3 +17,5 @@ httpx==0.28.1
 # The delivery contract check (app/workers/contract.py): every result is
 # validated against the route's published output schema before it is billed.
 jsonschema>=4.17,<5
+# email.verify: MX lookups (app/workers/providers/mailcheck.py).
+dnspython==2.8.0

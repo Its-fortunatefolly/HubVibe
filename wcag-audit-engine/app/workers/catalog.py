@@ -992,6 +992,30 @@ CATALOG = [
         pricing_basis="Provisional. Provider cost zero (public statistical APIs); one request per call.",
         requires=("macro",)),
     Worker(
+        name="email.verify", price_usd=0.02, tier="utility",
+        title="Verify an email address before you send",
+        description=(
+            "Will mail to this address arrive? Checked now at the source: syntax, the "
+            "domain's own DNS (MX, null MX, no such domain) and its own mail server, "
+            "asked whether the mailbox exists and whether it accepts every address "
+            "(catch-all). No message is sent. Flags disposable domains, role accounts "
+            "(info@, sales@), free providers, likely typos (gmial.com) and the mail "
+            "provider. Verdict: deliverable, undeliverable, risky or unknown, with the "
+            "reason. Input: email."),
+        tags=["email", "verification", "validation", "deliverability", "mx", "smtp", "disposable", "leads", "live"],
+        input_schema=_obj({
+            "email": {"type": "string", "minLength": 3, "maxLength": 320,
+                      "description": "One email address, such as jane@example.com."},
+        }, ["email"]),
+        returns=("email, normalized, local_part, domain, domain_ascii, verdict, reason, syntax_valid, domain_exists, "
+                 "accepts_mail, mx[{host, priority}], mail_provider, mailbox{checked, exists, catch_all, smtp_code, "
+                 "smtp_message, mx_host}, disposable, role_account, free_provider, did_you_mean, disposable_list_as_of, "
+                 "notes[], checked_at."),
+        skill="email.verify", max_seconds=60,
+        pricing_basis=("Provisional, utility tier. Provider cost zero: DNS and one SMTP conversation from this node, "
+                       "no third-party verification service."),
+        requires=("mailcheck",)),
+    Worker(
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
@@ -1528,6 +1552,9 @@ _EXAMPLE_OVERRIDES = {
     "news.search": {"query": "半導体", "language": "ja", "limit": 5},
     "search.results": {"query": "東京 天気予報", "country": "JP", "language": "ja", "count": 5},
     "data.macro": {"indicator": "inflation", "country": "JP", "last": 5},
+    # A role address on a domain that publishes MX records, so the example
+    # exercises DNS, SMTP and the role flag without naming a person.
+    "email.verify": {"email": "support@github.com"},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},

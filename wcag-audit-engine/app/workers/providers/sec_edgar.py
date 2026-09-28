@@ -17,7 +17,7 @@ import httpx
 from .. import runtime
 
 _TIMEOUT = float(os.environ.get("WORKER_SEC_TIMEOUT_SECONDS", "45"))
-USER_AGENT = os.environ.get("WORKER_SEC_USER_AGENT", "HubVibe hubvibe-io.com (+https://hubvibe-io.com)")
+USER_AGENT = os.environ.get("WORKER_SEC_USER_AGENT", "HubVibe Hubvibe@hubvibe-io.com")
 TICKERS_URL = os.environ.get("WORKER_SEC_TICKERS_URL", "https://www.sec.gov/files/company_tickers.json")
 FACTS_BASE = os.environ.get("WORKER_SEC_FACTS_BASE", "https://data.sec.gov/api/xbrl/companyfacts")
 TICKER_MAP_TTL_SECONDS = float(os.environ.get("WORKER_SEC_TICKER_TTL_SECONDS", str(6 * 3600)))
