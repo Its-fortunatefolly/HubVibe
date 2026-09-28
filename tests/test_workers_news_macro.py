@@ -302,9 +302,14 @@ def _serve_from_fixtures(monkeypatch):
 
 @pytest.mark.parametrize("worker,path,price,tier", [("news.search", "/work/news/search", 0.25, "standard"),
                                                     ("data.macro", "/work/data/macro", 0.10, "utility")])
-def test_the_rows_are_keyless_priced_and_always_current(worker, path, price, tier):
+def test_the_rows_are_priced_and_always_current(worker, path, price, tier):
     w = W.catalog.BY_NAME[worker]
-    assert w.path == path and w.price_usd == price and w.tier == tier and w.available()
+    assert w.path == path and w.price_usd == price and w.tier == tier
+    # data.macro is keyless; news.search reads GDELT through BigQuery, so it is
+    # live exactly where Google credentials resolve (the box), which is its gate.
+    assert w.requires == (["news"] if worker == "news.search" else ["macro"])
+    if worker == "data.macro":
+        assert w.available()
     assert "checked_at" in W.catalog.contract.OUTPUT_SCHEMAS[worker]["required"]
     jsonschema.validate(W.catalog.example_for(w), w.input_schema)
     assert len(w.description) <= 500 and W.skills.PRECHECKS.get(w.skill) is not None
