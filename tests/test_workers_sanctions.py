@@ -102,7 +102,7 @@ class _Ctx:
         return 999
 
     async def run(self, step, providers, call, **kwargs):
-        assert providers == S.PROVIDERS
+        assert [p.id for p in providers] == ["sanctions-lists"]
         return (await call(self.provider)).value
 
 
