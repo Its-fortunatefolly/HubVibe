@@ -14,6 +14,7 @@ All steps share the caller's one deadline through `ctx`, so a composite can
 never run past the payment window by doing its work in pieces.
 """
 
+import asyncio
 import logging
 from urllib.parse import urlparse
 
@@ -189,9 +190,9 @@ async def _gather_sources(ctx, query: str, max_sources: int) -> tuple:
     buyer, not treated as a job failure. Only the caller decides whether zero
     readable sources makes the whole job unbillable.
     """
-    found = await search_skill.web_search(ctx, {"query": query})
-    seen_hosts, candidates = set(), []
-    for source in found["sources"]:
+    # Only the result URLs are needed here: no written answer to wait for.
+    seen_hosts, queue = set(), []
+    for source in await search_skill.web_sources(ctx, query):
         url = source.get("url")
         if not url:
             continue
@@ -199,21 +200,28 @@ async def _gather_sources(ctx, query: str, max_sources: int) -> tuple:
         if host in seen_hosts:
             continue
         seen_hosts.add(host)
-        candidates.append(url)
-        if len(candidates) >= max_sources:
-            break
+        queue.append(url)
 
-    read, partial = [], []
-    for url in candidates:
-        if ctx.remaining() < 30:
-            partial.append({"url": url, "reason": "ran out of time before this source"})
-            continue
+    async def read_one(url):
         try:
-            page = await extract_skill.extract_page(ctx, {"url": url})
-            read.append({"url": page.get("final_url") or url, "title": page.get("title"),
-                        "text": page["text"][:6000]})
+            return await extract_skill.extract_page(ctx, {"url": url})
         except runtime.WorkerError as exc:
-            partial.append({"url": url, "reason": exc.detail})
+            return exc
+
+    # Read the top results in parallel; a page that will not open is replaced
+    # by the next result, so a bot-walled site costs one slot, not the job.
+    read, partial = [], []
+    while queue and len(read) < max_sources:
+        batch, queue = queue[:max_sources - len(read)], queue[max_sources - len(read):]
+        if ctx.remaining() < 30:
+            partial.extend({"url": url, "reason": "ran out of time before this source"} for url in batch)
+            break
+        for url, page in zip(batch, await asyncio.gather(*(read_one(url) for url in batch))):
+            if isinstance(page, runtime.WorkerError):
+                partial.append({"url": url, "reason": page.detail})
+            else:
+                read.append({"url": page.get("final_url") or url, "title": page.get("title"),
+                             "text": page["text"][:6000]})
     return read, partial
 
 
@@ -276,7 +284,7 @@ async def research_company(ctx, payload: dict) -> dict:
         raise runtime.InvalidRequest("`max_sources` must be between 1 and 4.")
 
     read, partial = await _gather_sources(
-        ctx, f"{company} company overview products reviews", max_sources)
+        ctx, f"{company} company", max_sources)
     if not read:
         raise runtime.TransientProviderError(
             "No source about this company could be read.", reason="no_sources")

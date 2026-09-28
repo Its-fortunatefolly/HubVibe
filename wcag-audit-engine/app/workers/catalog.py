@@ -494,16 +494,16 @@ CATALOG = [
         name="search.web", price_usd=0.10, tier="utility",
         title="Web search",
         description=(
-            'Web search for agents: a live Google Search query answered from current '
-            'results, returning a grounded answer plus the source URLs and titles it '
-            "used, never the model's own memory. Input: query. Use research.web when "
-            'you need the sources read in full and a cited brief.'),
-        tags=["search", "web", "google", "grounding", "current"],
+            'Web search for agents: a live query on Brave\'s independent web index, answered '
+            'from the current results alone, with the source URLs and titles it was given, '
+            "never the model's own memory. Input: query; optional language. Use "
+            'search.results for the raw result list, research.web for sources read in full.'),
+        tags=["search", "web", "brave", "answer", "current"],
         input_schema=_obj({"query": {"type": "string"}, "language": _LANGUAGE}, ["query"]),
         returns="query, answer, sources[{url,title}], search_queries_used[], model.",
         skill="search.web", max_seconds=60,
-        pricing_basis="Provisional. Token usage measured; Google's own search-grounding surcharge is not yet measured here.",
-        requires=("search_grounding",)),
+        pricing_basis="Provisional. One Brave request ($0.005) plus one short model call, both measured.",
+        requires=("web_answer",)),
     Worker(
         name="llm.generate", price_usd=0.25, tier="standard",
         title="Raw text completion",
@@ -702,7 +702,7 @@ CATALOG = [
         skill="research.web", max_seconds=220,
         pricing_basis="Provisional, completed-work tier. Up to five provider calls; usage measured per call.",
         composes=["search.web", "extract.page", "llm.analyze"],
-        requires=("search_grounding", "web", "gemini")),
+        requires=("brave", "web", "gemini")),
     Worker(
         name="research.company", price_usd=10.00, tier="premium",
         title="Research and verify a company",
@@ -721,7 +721,7 @@ CATALOG = [
         skill="research.company", max_seconds=220,
         pricing_basis="Provisional, completed-work tier. Up to six provider calls; usage measured per call.",
         composes=["search.web", "extract.page", "news.search", "llm.analyze"],
-        requires=("search_grounding", "web", "gemini")),
+        requires=("brave", "web", "gemini")),
     Worker(
         name="monitor.snapshot", price_usd=0.50, tier="standard",
         title="Save a monitoring baseline",

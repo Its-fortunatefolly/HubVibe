@@ -97,9 +97,14 @@ class _Ctx:
                     cost_micros=0, cost_measured=True)
 
             async def search(self, query, language=None):
-                outer.prompts.append(W.providers.search_grounding.prompt_for(query, language))
+                outer.prompts.append(W.providers.web_answer.prompt_for(query, [], language))
                 return W.runtime.ProviderResult(
                     value={"answer": outer.text, "sources": [], "model": "fake", "queries": []},
+                    cost_micros=0, cost_measured=True)
+
+            async def web(self, query, count=10, **kwargs):
+                return W.runtime.ProviderResult(
+                    value={"web": [], "news": [], "more": False, "country": None, "altered": None},
                     cost_micros=0, cost_measured=True)
 
         result = await call(_Provider())
@@ -180,15 +185,15 @@ def test_the_composites_and_monitor_pass_the_language_to_the_inference_step(monk
     async def fake_markets(ctx, payload):
         return {"count": 0, "markets": []}
 
-    async def fake_search(ctx, payload):
-        return {"answer": "a", "sources": [{"url": "https://s.example/a", "title": "A"}]}
+    async def fake_search(ctx, query):
+        return [{"url": "https://s.example/a", "title": "A"}]
 
     monkeypatch.setattr(W.skills.llm, "analyze", fake_analyze)
     monkeypatch.setattr(W.skills.llm, "extract_structured", fake_extract_structured)
     monkeypatch.setattr(W.skills.extract, "extract_page", fake_page)
     monkeypatch.setattr(W.skills.market, "quote", fake_quote)
     monkeypatch.setattr(W.skills.market, "prediction_markets", fake_markets)
-    monkeypatch.setattr(W.skills.search, "web_search", fake_search)
+    monkeypatch.setattr(W.skills.search, "web_sources", fake_search)
 
     c = W.skills.composites
     asyncio.run(c.research_brief(_Ctx(), {"url": "https://example.com", "language": "ja"}))
@@ -219,7 +224,7 @@ def test_verify_claims_and_search_web_carry_the_language(monkeypatch):
     ctx = _Ctx()
     asyncio.run(W.skills.search.web_search(ctx, {"query": "x402", "language": "pt-BR"}))
     assert "'pt-BR'" in ctx.prompts[-1]
-    assert W.providers.search_grounding.prompt_for("x402", None).endswith("x402")
+    assert "Search query: x402" in W.providers.web_answer.prompt_for("x402", [], None)
 
 
 # --- the catalog and the gate ---------------------------------------------------------
@@ -268,6 +273,7 @@ def test_a_bad_language_is_a_free_400_before_the_payment_gate(app_module, monkey
     def refuse(*args, **kwargs):
         raise AssertionError("the payment gate ran for a request the precheck refuses")
     monkeypatch.setattr(W.router, "_authorize", refuse)
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key-value")
     client = TestClient(app_module.app)
     for path, body in (("/work/llm/analyze", {"text": "m", "language": "english"}),
                        ("/work/research/brief", {"url": "https://example.com", "language": "en_US"}),

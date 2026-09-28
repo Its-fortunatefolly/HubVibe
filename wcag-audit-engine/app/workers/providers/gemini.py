@@ -117,7 +117,9 @@ class _GeminiModel:
 
     async def generate(self, prompt: str, system: Optional[str] = None,
                        json_output: bool = False,
-                       temperature: float = 0.2) -> runtime.ProviderResult:
+                       temperature: float = 0.2,
+                       thinking: Optional[dict] = None,
+                       max_output_tokens: Optional[int] = None) -> runtime.ProviderResult:
         if not google_auth.configured():
             raise runtime.ProviderUnavailable(google_auth.unavailable_reason())
 
@@ -131,6 +133,10 @@ class _GeminiModel:
             body["systemInstruction"] = {"parts": [{"text": system}]}
         if json_output:
             body["generationConfig"]["responseMimeType"] = "application/json"
+        if thinking is not None:
+            body["generationConfig"]["thinkingConfig"] = thinking
+        if max_output_tokens:
+            body["generationConfig"]["maxOutputTokens"] = max_output_tokens
 
         try:
             headers = await google_auth.headers()
