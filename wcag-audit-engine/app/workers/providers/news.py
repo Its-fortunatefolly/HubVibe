@@ -1,180 +1,128 @@
-"""News feeds, keyless: Google News search editions in 71 verified
-language/region pairs, and Yahoo Finance per-ticker headlines.
+"""Current news from the GDELT Project, read through Google BigQuery.
 
-Google News RSS is a search over the world's publishers in the reader's own
-language and edition: `hl` (language), `gl` (country) and `ceid`
-(country:language) pick the edition, and a query in any script returns
-that edition's matches, newest first, up to 100 per page. Every pair in
-EDITIONS returned a full page on 2026-09-27; an unknown pair is still tried
-(Google serves many more) and falls back to en/US with a note when it comes
-back empty. Yahoo Finance's RSS gives the headlines tagged to one ticker,
-including non-US listings (7203.T, 005930.KS).
+GDELT monitors the world's news in 65 languages and publishes every article
+it sees, every 15 minutes, as open data: "available for unlimited and
+unrestricted use for any academic, commercial, or governmental use of any
+kind without fee", with a citation and a link to https://www.gdeltproject.org/
+on every use (gdeltproject.org/about.html). Every answer here carries both.
 
-Both are fetched at call time and never cached here.
+Why BigQuery and not GDELT's DOC API: the API allows one request per five
+seconds per address and refused this node outright on 2026-09-28, while the
+same data sits in BigQuery's public `gdelt-bq.gdeltv2.gkg_partitioned`
+table, where a one-day search scans about 100 MB (well under a tenth of a
+cent) and never rate-limits.
+
+Titles are kept in their original language. GDELT stores non-ASCII
+characters as HTML numeric entities (半 -> &#x534A;), so a search term is
+encoded the same way before matching and titles are decoded on the way out.
 """
 
 import html
-import os
 import re
-from datetime import timezone
-import xml.etree.ElementTree as ET
-from email.utils import parsedate_to_datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import httpx
-
 from .. import runtime
+from . import bigquery
 
-_TIMEOUT = float(os.environ.get("WORKER_NEWS_TIMEOUT_SECONDS", "20"))
-USER_AGENT = os.environ.get("WORKER_NEWS_USER_AGENT",
-                            "Mozilla/5.0 (X11; Linux x86_64) HubVibe-worker/1.0")
-GOOGLE_NEWS_BASE = os.environ.get("WORKER_GOOGLE_NEWS_BASE", "https://news.google.com/rss")
-YAHOO_RSS_BASE = os.environ.get("WORKER_YAHOO_RSS_BASE", "https://feeds.finance.yahoo.com/rss/2.0/headline")
-MAX_SUMMARY_CHARS = 500
-
-# language -> default country edition; every pair verified live 2026-09-27.
-DEFAULT_REGION = {
-    "en": "US", "ja": "JP", "ko": "KR", "zh-TW": "TW", "zh-HK": "HK", "zh-CN": "CN", "zh": "CN",
-    "de": "DE", "fr": "FR", "es": "ES", "es-419": "MX", "pt-BR": "BR", "pt-PT": "PT", "pt": "BR",
-    "it": "IT", "nl": "NL", "ru": "RU", "ar": "AE", "hi": "IN", "id": "ID", "th": "TH", "vi": "VN",
-    "tr": "TR", "pl": "PL", "sv": "SE", "uk": "UA", "he": "IL", "ms": "MY", "el": "GR", "cs": "CZ",
-    "hu": "HU", "ro": "RO", "da": "DK", "no": "NO", "fi": "FI", "bn": "BD", "ta": "IN", "te": "IN",
-    "mr": "IN", "sw": "KE", "fil": "PH", "ur": "PK", "fa": "IR", "sr": "RS", "bg": "BG", "hr": "HR",
-    "sk": "SK", "sl": "SI", "lt": "LT", "lv": "LV", "et": "EE",
+TABLE = "gdelt-bq.gdeltv2.gkg_partitioned"
+CITATION = {"text": "Source: The GDELT Project", "url": "https://www.gdeltproject.org/"}
+MAX_TERMS = 6
+MAX_GIB = 20.0
+# BCP-47 primary language -> the ISO 639-3 code in GKG's TranslationInfo
+# ("srclc:jpn;eng:GT-JPN 1.0"). English articles carry no TranslationInfo.
+SRCLC = {
+    "ar": "ara", "bg": "bul", "bn": "ben", "ca": "cat", "cs": "ces", "da": "dan", "de": "deu", "el": "ell",
+    "es": "spa", "et": "est", "fa": "fas", "fi": "fin", "fr": "fra", "he": "heb", "hi": "hin", "hr": "hrv",
+    "hu": "hun", "id": "ind", "it": "ita", "ja": "jpn", "ko": "kor", "lt": "lit", "lv": "lav", "ms": "msa",
+    "nl": "nld", "no": "nor", "nb": "nor", "pl": "pol", "pt": "por", "ro": "ron", "ru": "rus", "sk": "slk",
+    "sl": "slv", "sr": "srp", "sv": "swe", "sw": "swa", "ta": "tam", "th": "tha", "tl": "tgl", "tr": "tur",
+    "uk": "ukr", "ur": "urd", "vi": "vie", "zh": "zho",
 }
-EDITIONS = set(DEFAULT_REGION.items()) | {
-    ("en", "GB"), ("en", "IN"), ("en", "AU"), ("en", "SG"), ("ar", "EG"), ("en", "ZA"), ("en", "NG"),
-    ("fr", "CA"), ("en", "CA"), ("de", "AT"), ("de", "CH"), ("fr", "BE"), ("nl", "BE"), ("es", "AR"),
-    ("es", "CO"), ("es", "CL"), ("es", "PE"), ("en", "PH"), ("en", "NZ"), ("en", "IE"), ("en", "PK"),
-    ("ja", "US"),
-}
+LANG_OF_SRCLC = {v: k for k, v in SRCLC.items() if k != "nb"}
+_SRCLC = re.compile(r"srclc:([a-z]{3})")
 
 
-def edition_for(language: str, region: Optional[str]) -> tuple:
-    """(hl, gl, ceid) for a language tag and optional country."""
-    lang = language.strip()
-    base = lang.split("-")[0].lower()
-    key = lang if lang in DEFAULT_REGION else (base if base in DEFAULT_REGION else lang)
-    hl = key if key in DEFAULT_REGION else lang
-    gl = (region or DEFAULT_REGION.get(key) or "US").upper()
-    return hl, gl, f"{gl}:{hl}"
+def encode_term(term: str) -> str:
+    """A search term as it appears inside GKG's PAGE_TITLE: non-ASCII
+    characters as &#xHHHH; entities, then lower-cased (the SQL compares
+    LOWER(title), and lower-casing both sides keeps the hex digits aligned)."""
+    return "".join(ch if ord(ch) < 128 else f"&#x{ord(ch):X};" for ch in term).lower()
 
 
-def is_verified_edition(hl: str, gl: str) -> bool:
-    return (hl, gl) in EDITIONS
+def _like_literal(pattern: str) -> str:
+    """A LIKE pattern body inside a single-quoted SQL literal."""
+    escaped = pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("'", "\\'")
+    return f"'%{escaped}%'"
 
 
-_TAG = re.compile(r"<[^>]+>")
+def terms_of(query: str) -> list:
+    words = [w for w in re.split(r"[\s　]+", query.strip()) if w]
+    return words[:MAX_TERMS]
 
 
-def strip_html(text: Optional[str]) -> str:
-    if not text:
-        return ""
-    return html.unescape(_TAG.sub(" ", text)).replace("\xa0", " ").strip()
+def build_sql(terms: list, since: datetime, language: Optional[str], limit: int) -> str:
+    days = max(1, (datetime.now(timezone.utc) - since).days + 1)
+    stamp = since.strftime("%Y%m%d%H%M%S")
+    matches = " AND ".join(f"LOWER(title) LIKE {_like_literal(encode_term(t))}" for t in terms) or "TRUE"
+    if language is None:
+        lang = "TRUE"
+    elif language == "en":
+        lang = "TranslationInfo IS NULL"
+    else:
+        lang = f"TranslationInfo LIKE 'srclc:{SRCLC[language]}%'"
+    return (
+        "SELECT DATE, SourceCommonName, DocumentIdentifier, TranslationInfo, title FROM ("
+        "SELECT DATE, SourceCommonName, DocumentIdentifier, TranslationInfo, "
+        "REGEXP_EXTRACT(Extras, r'<PAGE_TITLE>(.*?)</PAGE_TITLE>') AS title "
+        f"FROM `{TABLE}` "
+        f"WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days} DAY) "
+        f"AND DATE >= {stamp} AND {lang}) "
+        f"WHERE title IS NOT NULL AND {matches} "
+        f"ORDER BY DATE DESC LIMIT {int(limit)}")
 
 
-def _iso(pubdate: Optional[str]) -> Optional[str]:
-    if not pubdate:
+def _iso(date_value) -> Optional[str]:
+    try:
+        return datetime.strptime(str(date_value)[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc) \
+            .isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError):
         return None
-    try:
-        dt = parsedate_to_datetime(pubdate)
-    except (TypeError, ValueError, IndexError):
-        return None
-    if dt.tzinfo is None:
-        return dt.isoformat() + "Z"
-    return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def parse_rss(body: bytes, feed: str) -> list:
-    """RSS 2.0 items -> article records. Google News writes 'Title - Source'
-    and carries a <source url=...> element; Yahoo carries neither."""
-    try:
-        root = ET.fromstring(body)
-    except ET.ParseError as exc:
-        raise runtime.InvalidProviderResponse(f"{feed} did not return RSS: {exc}") from None
-    out = []
-    for item in root.iter("item"):
-        title = (item.findtext("title") or "").strip()
-        link = (item.findtext("link") or "").strip()
-        if not title or not link:
-            continue
-        source = item.find("source")
-        source_name = (source.text or "").strip() if source is not None and source.text else None
-        source_url = source.get("url") if source is not None else None
-        if source_name and title.endswith(" - " + source_name):
-            title = title[: -len(source_name) - 3].strip()
-        summary = strip_html(item.findtext("description"))
-        if summary == title or (summary and summary.startswith(title) and len(summary) - len(title) < 12):
-            summary = ""
-        out.append({
-            "title": title,
-            "url": link,
-            "source_name": source_name,
-            "source_url": source_url,
-            "published_at": _iso(item.findtext("pubDate")),
-            "summary": summary[:MAX_SUMMARY_CHARS] or None,
-            "feed": feed,
-        })
-    return out
+def article(row: dict) -> dict:
+    src = _SRCLC.search(row.get("TranslationInfo") or "")
+    domain = row.get("SourceCommonName") or None
+    return {"title": html.unescape(row.get("title") or "").strip(),
+            "url": row.get("DocumentIdentifier"),
+            "source_name": domain,
+            "source_url": f"https://{domain}" if domain else None,
+            "published_at": _iso(row.get("DATE")),
+            "summary": None,
+            "language": LANG_OF_SRCLC.get(src.group(1), src.group(1)) if src else "en",
+            "feed": "gdelt"}
 
 
-async def _get(url: str, params: dict, what: str) -> bytes:
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
-            response = await client.get(url, params=params, headers={"User-Agent": USER_AGENT,
-                                                                     "Accept": "application/rss+xml, application/xml, text/xml"})
-    except httpx.TimeoutException as exc:
-        raise runtime.TransientProviderError(f"{what} timed out: {exc}") from exc
-    except httpx.HTTPError as exc:
-        raise runtime.TransientProviderError(f"{what} unreachable: {exc}") from exc
-    if response.status_code in (429, 500, 502, 503, 504):
-        raise runtime.TransientProviderError(f"{what} returned {response.status_code}",
-                                             reason="provider_overloaded" if response.status_code == 429 else "provider_transient")
-    if response.status_code >= 400:
-        raise runtime.PermanentProviderError(f"{what} returned {response.status_code}")
-    return response.content
-
-
-class _GoogleNews:
-    id = "google-news-rss"
+class _Gdelt:
+    id = "gdelt-bigquery"
 
     def available(self) -> bool:
-        return True
+        return bigquery.PROVIDERS[0].available()
 
     def unavailable_reason(self) -> str:
-        return ""
+        return bigquery.PROVIDERS[0].unavailable_reason()
 
-    async def search(self, query: str, language: str = "en", region: Optional[str] = None) -> runtime.ProviderResult:
-        hl, gl, ceid = edition_for(language, region)
-        body = await _get(f"{GOOGLE_NEWS_BASE}/search", {"q": query, "hl": hl, "gl": gl, "ceid": ceid},
-                          f"Google News ({ceid})")
-        articles = parse_rss(body, "google_news")
+    async def search(self, terms: list, since_hours: int, language: Optional[str], limit: int) -> runtime.ProviderResult:
+        since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        sql = build_sql(terms, since, language, limit)
+        result = await bigquery.PROVIDERS[0].query(sql, max_gib=MAX_GIB)
+        value = result.value
         return runtime.ProviderResult(
-            value={"edition": {"hl": hl, "gl": gl, "ceid": ceid, "verified": is_verified_edition(hl, gl)},
-                   "articles": articles},
-            cost_micros=0, cost_measured=True, usage=f"edition={ceid} items={len(articles)}")
+            value={"articles": [article(r) for r in value["rows"] if isinstance(r, dict)],
+                   "gib_processed": value.get("gib_processed")},
+            cost_micros=result.cost_micros, cost_measured=result.cost_measured,
+            usage=f"rows={value['row_count']} gib={value.get('gib_processed')}")
 
 
-class _YahooFinanceRss:
-    id = "yahoo-finance-rss"
-
-    def available(self) -> bool:
-        return True
-
-    def unavailable_reason(self) -> str:
-        return ""
-
-    async def headlines(self, symbol: str) -> runtime.ProviderResult:
-        body = await _get(YAHOO_RSS_BASE, {"s": symbol, "region": "US", "lang": "en-US"},
-                          f"Yahoo Finance RSS ({symbol})")
-        articles = parse_rss(body, "yahoo_finance")
-        for a in articles:
-            a["source_name"] = a["source_name"] or "Yahoo Finance"
-            a["source_url"] = a["source_url"] or "https://finance.yahoo.com"
-        return runtime.ProviderResult(value={"articles": articles}, cost_micros=0, cost_measured=True,
-                                      usage=f"symbol={symbol} items={len(articles)}")
-
-
-GOOGLE = _GoogleNews()
-YAHOO = _YahooFinanceRss()
-PROVIDERS = [GOOGLE, YAHOO]
+GDELT = _Gdelt()
+PROVIDERS = [GDELT]

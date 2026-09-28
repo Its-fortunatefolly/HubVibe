@@ -1,12 +1,12 @@
-"""news.search -- current headlines on any topic, in any language, from the
-publishers of the reader's own country, plus a ticker's own news feed.
+"""news.search -- current news on any topic, in any language, from the GDELT Project.
 
-A query in any script goes to the Google News edition for the language and
-region asked for (71 editions verified; others tried and disclosed), and a
-`symbol` adds Yahoo Finance's per-ticker headlines. Results are merged,
-de-duplicated, filtered to the asked window and ordered newest first. A
-feed that failed for this call is listed under `sources_failed`, never
-hidden. Nothing is cached; `checked_at` says when the feeds were read.
+A query in any script is matched against the original titles of the
+articles GDELT has seen worldwide in the window (it updates every 15
+minutes), optionally only those published in one language; a US `symbol`
+searches the company's own name from the SEC ticker table. Results are
+merged, de-duplicated, newest first, each with its publisher, language and
+link, and the GDELT citation GDELT's licence asks for. A search that failed
+for this call is listed under `sources_failed`, never hidden.
 """
 
 import asyncio
@@ -15,12 +15,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .. import runtime
-from ..providers import news
+from ..providers import news, sec_edgar
 from .llm import validate_language
 
 MAX_QUERY_CHARS = 300
 MAX_LIMIT = 50
 MAX_SINCE_HOURS = 720
+DEFAULT_SINCE_HOURS = 72
+_COMPANY_SUFFIX = re.compile(r"[,.]?\s+(inc|incorporated|corp|corporation|co|company|ltd|limited|plc|holdings?|group|"
+                             r"n\.?v|s\.?a|ag|se|lp|llc)\.?$|\s*/[a-z]{2}/?$", re.I)
 _SYMBOL = re.compile(r"^[A-Za-z0-9.\-=^]{1,12}$")
 _REGION = re.compile(r"^[A-Za-z]{2}$")
 _WS = re.compile(r"\s+")
@@ -51,7 +54,7 @@ def parse(payload: dict) -> dict:
         symbol = symbol.strip().upper()
     if query is None and symbol is None:
         raise runtime.InvalidRequest("Give `query` (a topic, any language) and/or `symbol` (a ticker).")
-    language = validate_language(payload) or "en"
+    language = validate_language(payload)
     region = payload.get("region")
     if region is not None:
         if not isinstance(region, str) or not _REGION.match(region.strip()):
@@ -60,9 +63,10 @@ def parse(payload: dict) -> dict:
     limit = payload.get("limit", 20)
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LIMIT:
         raise runtime.InvalidRequest(f"`limit` must be a whole number from 1 to {MAX_LIMIT}.")
-    since_hours = payload.get("since_hours")
-    if since_hours is not None and (isinstance(since_hours, bool) or not isinstance(since_hours, int)
-                                    or not 1 <= since_hours <= MAX_SINCE_HOURS):
+    since_hours = payload.get("since_hours", DEFAULT_SINCE_HOURS)
+    if since_hours is None:
+        since_hours = DEFAULT_SINCE_HOURS
+    if isinstance(since_hours, bool) or not isinstance(since_hours, int) or not 1 <= since_hours <= MAX_SINCE_HOURS:
         raise runtime.InvalidRequest(f"`since_hours`, when given, must be a whole number from 1 to {MAX_SINCE_HOURS}.")
     return {"query": query, "symbol": symbol, "language": language, "region": region, "limit": limit,
             "since_hours": since_hours}
@@ -101,68 +105,70 @@ def merge(batches: list, since_hours: Optional[int], limit: int, now: Optional[d
     return out[:limit]
 
 
+def company_terms(title: str) -> list:
+    name = (title or "").strip()
+    for _ in range(3):
+        name = _COMPANY_SUFFIX.sub("", name).strip()
+    return news.terms_of(name)
+
+
 async def search(ctx, payload: dict) -> dict:
     req = parse(payload)
     notes, searched, ok, failed, batches = [], [], [], [], []
-    edition = None
+    primary = (req["language"] or "").split("-")[0].lower() or None
+    language_filter = primary if primary in news.SRCLC or primary == "en" else None
+    if primary and language_filter is None:
+        notes.append(f"GDELT does not tag {req['language']!r} articles; the search covers every language.")
+    if req["region"]:
+        notes.append("GDELT does not record a publisher's country, so `region` is not a filter; `language` narrows "
+                     "the press instead.")
 
-    async def google():
-        nonlocal edition
-        hl, gl, ceid = news.edition_for(req["language"], req["region"])
-        searched.append(f"google_news:{ceid}")
-
-        async def call(provider):
-            return await provider.search(req["query"], req["language"], req["region"])
-        try:
-            value = await ctx.run("google_news", [news.GOOGLE], call, per_attempt_seconds=20, max_attempts=2)
-        except runtime.WorkerError as exc:
-            failed.append({"source": f"google_news:{ceid}", "reason": exc.detail})
-            return
-        edition = value["edition"]
-        if not value["articles"] and not edition["verified"]:
-            async def fallback(provider):
-                return await provider.search(req["query"], "en", "US")
-            try:
-                value = await ctx.run("google_news_fallback", [news.GOOGLE], fallback, per_attempt_seconds=20, max_attempts=1)
-                notes.append(f"Edition {ceid} returned nothing for this query; results are from the en/US edition.")
-                edition = value["edition"]
-            except runtime.WorkerError as exc:
-                failed.append({"source": "google_news:US:en", "reason": exc.detail})
-                return
-        ok.append(f"google_news:{edition['ceid']}")
-        batches.append(value["articles"])
-
-    async def yahoo():
-        searched.append(f"yahoo_finance:{req['symbol']}")
+    async def gdelt(label, terms):
+        searched.append(label)
 
         async def call(provider):
-            return await provider.headlines(req["symbol"])
+            return await provider.search(terms, req["since_hours"], language_filter, max(req["limit"] * 2, 10))
         try:
-            value = await ctx.run("yahoo_finance", [news.YAHOO], call, per_attempt_seconds=20, max_attempts=2)
+            value = await ctx.run(label.replace(":", "_"), [news.GDELT], call, per_attempt_seconds=30, max_attempts=2)
         except runtime.WorkerError as exc:
-            failed.append({"source": f"yahoo_finance:{req['symbol']}", "reason": exc.detail})
+            failed.append({"source": label, "reason": exc.detail})
             return
-        ok.append(f"yahoo_finance:{req['symbol']}")
+        ok.append(label)
         batches.append(value["articles"])
+
+    async def by_symbol():
+        try:
+            hit = await sec_edgar.PROVIDERS[0].cik_for(req["symbol"])
+        except runtime.WorkerError as exc:
+            failed.append({"source": f"gdelt:symbol:{req['symbol']}", "reason": exc.detail})
+            return
+        terms = company_terms(hit["title"]) if hit else []
+        if not terms:
+            failed.append({"source": f"gdelt:symbol:{req['symbol']}",
+                           "reason": "Symbol news covers US-listed tickers (SEC ticker table); send `query` with the "
+                                     "company's name for other listings."})
+            return
+        notes.append(f"{req['symbol']} searched as {' '.join(terms)!r} ({hit['title']}).")
+        await gdelt(f"gdelt:symbol:{req['symbol']}", terms)
 
     tasks = []
     if req["query"] is not None:
-        tasks.append(google())
+        tasks.append(gdelt("gdelt:query", news.terms_of(req["query"])))
     if req["symbol"] is not None:
-        tasks.append(yahoo())
+        tasks.append(by_symbol())
     await asyncio.gather(*tasks)
     if not ok:
         raise runtime.TransientProviderError(
-            "No news source answered: " + "; ".join(f"{f['source']}: {f['reason']}" for f in failed),
+            "No news search answered: " + "; ".join(f"{f['source']}: {f['reason']}" for f in failed),
             reason="no_sources")
     articles = merge(batches, req["since_hours"], req["limit"])
     if not articles:
-        notes.append("The sources answered but no article matched the query in the requested window.")
+        notes.append("GDELT answered but no article title matched in the requested window.")
     return {
         "query": req["query"],
         "symbol": req["symbol"],
         "language": req["language"],
-        "edition": edition,
+        "language_filter": language_filter,
         "sources_searched": searched,
         "sources_ok": ok,
         "sources_failed": failed,
@@ -170,6 +176,7 @@ async def search(ctx, payload: dict) -> dict:
         "article_count": len(articles),
         "limit": req["limit"],
         "since_hours": req["since_hours"],
+        "attribution": dict(news.CITATION),
         "notes": notes,
         "checked_at": _now(),
     }

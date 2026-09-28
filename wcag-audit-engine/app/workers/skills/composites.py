@@ -156,7 +156,7 @@ async def market_intel(ctx, payload: dict) -> dict:
             for o in entry.get("implied_probabilities", [])
             if o.get("probability_pct") is not None)
         material += f"  - {entry.get('question')} -> {odds or 'no priced outcomes'}\n"
-    material += (f"\nRecent headlines (Google News, fetched now; {news_note or 'newest first'}):\n"
+    material += (f"\nRecent headlines (GDELT, searched now; {news_note or 'newest first'}):\n"
                  f"{_headline_lines(news)}\n")
 
     analysis = await llm_skill.analyze(ctx, {
@@ -284,7 +284,7 @@ async def research_company(ctx, payload: dict) -> dict:
 
     analysis = await llm_skill.analyze(ctx, {
         "text": (_numbered_material(read)
-                 + f"\n\nRecent headlines about {company} (Google News, last 30 days, fetched now; "
+                 + f"\n\nRecent headlines about {company} (GDELT, last 30 days, searched now; "
                  f"{news_note or 'newest first'}; not numbered sources, cite them as 'headlines'):\n"
                  f"{_headline_lines(news)}\n"),
         "question": (
