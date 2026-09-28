@@ -1100,6 +1100,39 @@ CATALOG = [
         pricing_basis="Provisional, utility tier. Provider cost zero: Wikidata, GLEIF and SEC public data, one homepage read.",
         requires=("company_data",)),
     Worker(
+        name="sanctions.screen", price_usd=0.05, tier="utility",
+        title="Screen a name against US, UK and EU sanctions lists",
+        description=(
+            "Is this person, company, vessel or aircraft sanctioned? One name screened "
+            "against the OFAC SDN and consolidated lists, the UK Sanctions List and the EU "
+            "financial sanctions list, read from the governments' own files (each list's "
+            "date returned). Fuzzy, word-order-free: aliases and one-letter typos match, a "
+            "different surname does not. Each match gives list, programmes, countries, "
+            "birth dates and UN reference. Optional type, country, birth year. Input: name."),
+        tags=["sanctions", "ofac", "sdn", "aml", "kyc", "kyb", "compliance", "screening", "osint", "live"],
+        input_schema=_obj({
+            "name": {"type": "string", "minLength": 2, "maxLength": 200,
+                     "description": "The person, company, vessel or aircraft name, in any word order."},
+            "type": {"type": "string", "enum": ["any", "person", "entity", "vessel", "aircraft"],
+                     "description": "Only match this kind of listing. Default any."},
+            "country": {"type": "string", "maxLength": 60,
+                        "description": "Optional country (Iran, Russia): a listing that records only other countries is dropped."},
+            "birth_year": {"type": "integer", "minimum": 1880, "maximum": 2030,
+                           "description": "Optional, for people: a listing whose recorded birth years are all more than a year away is dropped."},
+            "threshold": {"type": "number", "minimum": 0.6, "maximum": 1,
+                          "description": "Minimum match score, 0.6-1. Default 0.85."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Most matches returned, 1-50. Default 10."},
+            "lists": {"type": "array", "items": {"type": "string", "enum": ["ofac_sdn", "ofac_consolidated", "uk", "eu"]},
+                      "description": "Optional subset of lists to screen. Default all four."},
+        }, ["name"]),
+        returns=("query{}, verdict (potential_match | no_match), match_count, matches[{list, list_name, id, name, matched_name, "
+                 "score, type, programs[], countries[], birth_dates[], un_reference, listed_on, source_url}], "
+                 "lists[{list, name, publisher, license, source_url, as_of, entries, loaded}], notes[], checked_at."),
+        skill="sanctions.screen", max_seconds=180,
+        pricing_basis=("Provisional, utility tier. Provider cost zero: the governments' own list files, "
+                       "downloaded at most every six hours and matched on this node."),
+        requires=("sanctions",)),
+    Worker(
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
@@ -1666,6 +1699,8 @@ _EXAMPLE_OVERRIDES = {
     # Oslo: a live Avinor board, a METAR and aircraft overhead in one example.
     "travel.flight_status": {"airport": "OSL", "hours_ahead": 2},
     "company.enrich": {"domain": "stripe.com"},
+    # A listed company, so the example always returns a match with its lists.
+    "sanctions.screen": {"name": "Rosneft", "type": "entity"},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},

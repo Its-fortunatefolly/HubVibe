@@ -135,7 +135,19 @@ async def _lifespan(_app: "FastAPI"):
     except Exception:
         # Not fatal: worst case we run on anyio's default thread count.
         pass
+    # sanctions.screen answers from government list files of 1-30 MB each:
+    # load them now and keep them fresh, so no paying caller waits on a download.
+    warm = None
+    if os.environ.get("SANCTIONS_PREFETCH", "1") != "0" and globals().get("workers") is not None:
+        try:
+            import asyncio as _asyncio
+
+            warm = _asyncio.ensure_future(workers.providers.sanctions.SANCTIONS.keep_warm())
+        except Exception:
+            warm = None
     yield
+    if warm is not None:
+        warm.cancel()
 
 
 # The one name every discovery surface uses -- openapi.json, agent.json,
@@ -149,7 +161,7 @@ app = FastAPI(
     title=SERVICE_TITLE,
     version=SERVICE_VERSION,
     description=(
-        "59 machine-payable dev utilities under /work -- LLM inference, web "
+        "60 machine-payable dev utilities under /work -- LLM inference, web "
         "search and page extraction, Base chain reads, market and "
         "prediction-market data, BigQuery analysis and forecasting, a "
         "deterministic regression and probability engine, "
@@ -2252,7 +2264,7 @@ async def agent_manifest(request: Request):
         "name": SERVICE_TITLE,
         "base_url": base,
         "description": (
-            "59 machine-payable dev utilities (the `workers` section: LLM "
+            "60 machine-payable dev utilities (the `workers` section: LLM "
             "inference, web search and extraction, Base chain reads, market "
             "and prediction-market data, BigQuery analysis and forecasting, "
             "deterministic regression and probability statistics, "

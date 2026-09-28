@@ -19647,6 +19647,618 @@
       }
     },
     {
+      "name": "hubvibe_sanctions_screen",
+      "title": "Screen a name against US, UK and EU sanctions lists",
+      "description": "Is this person, company, vessel or aircraft sanctioned? One name screened against the OFAC SDN and consolidated lists, the UK Sanctions List and the EU financial sanctions list, read from the governments' own files (each list's date returned). Fuzzy, word-order-free: aliases and one-letter typos match, a different surname does not. Each match gives list, programmes, countries, birth dates and UN reference. Optional type, country, birth year. Input: name. $0.05 per call. Returns: query{}, verdict (potential_match | no_match), match_count, matches[{list, list_name, id, name, matched_name, score, type, programs[], countries[], birth_dates[], un_reference, listed_on, source_url}], lists[{list, name, publisher, license, source_url, as_of, entries, loaded}], notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": "The person, company, vessel or aircraft name, in any word order."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "any",
+              "person",
+              "entity",
+              "vessel",
+              "aircraft"
+            ],
+            "description": "Only match this kind of listing. Default any."
+          },
+          "country": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "Optional country (Iran, Russia): a listing that records only other countries is dropped."
+          },
+          "birth_year": {
+            "type": "integer",
+            "minimum": 1880,
+            "maximum": 2030,
+            "description": "Optional, for people: a listing whose recorded birth years are all more than a year away is dropped."
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0.6,
+            "maximum": 1,
+            "description": "Minimum match score, 0.6-1. Default 0.85."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Most matches returned, 1-50. Default 10."
+          },
+          "lists": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ofac_sdn",
+                "ofac_consolidated",
+                "uk",
+                "eu"
+              ]
+            },
+            "description": "Optional subset of lists to screen. Default all four."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The name screened.",
+                    "examples": [
+                      "Rosneft"
+                    ]
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "any",
+                      "person",
+                      "entity",
+                      "vessel",
+                      "aircraft"
+                    ],
+                    "description": "The kind of listing matched.",
+                    "examples": [
+                      "entity"
+                    ]
+                  },
+                  "threshold": {
+                    "type": "number",
+                    "description": "Minimum match score used.",
+                    "examples": [
+                      0.85
+                    ]
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Most matches returned.",
+                    "examples": [
+                      10
+                    ]
+                  },
+                  "lists": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The lists asked for; null means all four.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "country": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Country filter, as given.",
+                    "examples": [
+                      "Russia"
+                    ]
+                  },
+                  "birth_year": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Birth-year filter, as given.",
+                    "examples": [
+                      1952
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "type",
+                  "threshold",
+                  "limit",
+                  "lists",
+                  "country",
+                  "birth_year"
+                ],
+                "description": "The screening request."
+              },
+              "verdict": {
+                "type": "string",
+                "enum": [
+                  "potential_match",
+                  "no_match"
+                ],
+                "description": "potential_match: at least one listing scored at or above the threshold. no_match: none did.",
+                "examples": [
+                  "potential_match"
+                ]
+              },
+              "match_count": {
+                "type": "integer",
+                "description": "Number of matches returned.",
+                "examples": [
+                  3
+                ]
+              },
+              "matches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "list": {
+                      "type": "string",
+                      "enum": [
+                        "ofac_sdn",
+                        "ofac_consolidated",
+                        "uk",
+                        "eu"
+                      ],
+                      "description": "Which list.",
+                      "examples": [
+                        "ofac_sdn"
+                      ]
+                    },
+                    "list_name": {
+                      "type": "string",
+                      "description": "The list's name.",
+                      "examples": [
+                        "OFAC Specially Designated Nationals (SDN) List"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "description": "The list's own id for the entry.",
+                      "examples": [
+                        "12345"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "The entry's primary name.",
+                      "examples": [
+                        "ROSNEFT"
+                      ]
+                    },
+                    "matched_name": {
+                      "type": "string",
+                      "description": "The name or alias that matched.",
+                      "examples": [
+                        "ROSNEFT"
+                      ]
+                    },
+                    "score": {
+                      "type": "number",
+                      "description": "Match score, 0-1 (1 = the same words).",
+                      "examples": [
+                        1.0
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "person",
+                        "entity",
+                        "vessel",
+                        "aircraft"
+                      ],
+                      "description": "Kind of listing.",
+                      "examples": [
+                        "entity"
+                      ]
+                    },
+                    "programs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A sanctions programme or regime.",
+                        "examples": [
+                          "RUSSIA-EO14024"
+                        ]
+                      },
+                      "description": "Programmes the entry is listed under.",
+                      "examples": [
+                        []
+                      ]
+                    },
+                    "countries": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A country the list records.",
+                        "examples": [
+                          "Russia"
+                        ]
+                      },
+                      "description": "Countries the list records (address, nationality, birth).",
+                      "examples": [
+                        []
+                      ]
+                    },
+                    "birth_dates": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "A date of birth as the list records it.",
+                        "examples": [
+                          "07 Oct 1952"
+                        ]
+                      },
+                      "description": "Dates of birth the list records.",
+                      "examples": [
+                        []
+                      ]
+                    },
+                    "un_reference": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "UN Security Council reference, when the list records one.",
+                      "examples": [
+                        "TAi.002"
+                      ]
+                    },
+                    "listed_on": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Designation date, when the list records it.",
+                      "examples": [
+                        "2014-07-16"
+                      ]
+                    },
+                    "source_url": {
+                      "type": "string",
+                      "description": "Where the list is published.",
+                      "examples": [
+                        "https://sanctionssearch.ofac.treas.gov/"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "list",
+                    "list_name",
+                    "id",
+                    "name",
+                    "matched_name",
+                    "score",
+                    "type",
+                    "programs",
+                    "countries",
+                    "birth_dates",
+                    "un_reference",
+                    "listed_on",
+                    "source_url"
+                  ],
+                  "description": "One listing."
+                },
+                "description": "Matches, best first.",
+                "examples": [
+                  []
+                ]
+              },
+              "lists": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "list": {
+                      "type": "string",
+                      "description": "List id.",
+                      "examples": [
+                        "ofac_sdn"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "List name.",
+                      "examples": [
+                        "OFAC Specially Designated Nationals (SDN) List"
+                      ]
+                    },
+                    "publisher": {
+                      "type": "string",
+                      "description": "Who publishes it.",
+                      "examples": [
+                        "US Department of the Treasury, Office of Foreign Assets Control"
+                      ]
+                    },
+                    "license": {
+                      "type": "string",
+                      "description": "Its reuse licence.",
+                      "examples": [
+                        "US government work (public domain)"
+                      ]
+                    },
+                    "source_url": {
+                      "type": "string",
+                      "description": "Where it is published.",
+                      "examples": [
+                        "https://sanctionssearch.ofac.treas.gov/"
+                      ]
+                    },
+                    "as_of": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The list's own publication date.",
+                      "examples": [
+                        "2026-09-23"
+                      ]
+                    },
+                    "entries": {
+                      "type": "integer",
+                      "description": "Entries loaded from it.",
+                      "examples": [
+                        19391
+                      ]
+                    },
+                    "loaded": {
+                      "type": "boolean",
+                      "description": "The list was screened.",
+                      "examples": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "list",
+                    "name",
+                    "publisher",
+                    "license",
+                    "source_url",
+                    "as_of",
+                    "entries",
+                    "loaded"
+                  ],
+                  "description": "One list screened."
+                },
+                "description": "Every list asked for, with its date.",
+                "examples": [
+                  []
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "A potential match is a lead to review, not a determination."
+                  ]
+                },
+                "description": "Caveats.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "verdict",
+              "match_count",
+              "matches",
+              "lists",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "sanctions.screen response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Screen a name against US, UK and EU sanctions lists"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/sanctions/screen",
+        "price_usd": 0.05
+      }
+    },
+    {
       "name": "hubvibe_commerce_shipping",
       "title": "Shipping options, eligibility and cart total for a product",
       "description": "Can this product ship to me, for how much, and what is the cart total? Any Shopify storefront, keyless: the variant goes into a real cart session, the store's totals are read, and the store quotes its shipping options to the destination. Returns options with prices and days, eligibility (true, false with the store's reason, or the address fields still needed), subtotal and total before tax. No order placed. Input: url, ship_to{country, province, postal_code}; optional variant, quantity. $0.50 per call. Returns: url, store{platform, domain, currency}, product{id, title, handle}, variant{id, name, sku, price, available, requires_shipping}, quantity, ship_to{}, cart{subtotal, total, currency, item_count, requires_shipping}, eligible, eligibility_reasons[], missing_fields[], shipping_options[{name, price, currency, delivery_days_min, delivery_days_max, description, carrier}], cheapest_shipping{}, estimated_total{}, taxes_note, source, notes[], checked_at.",
