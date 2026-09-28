@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.19.1",
+  "version": "1.22.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -15239,6 +15239,3289 @@
         "method": "POST",
         "path": "/work/email/verify",
         "price_usd": 0.02
+      }
+    },
+    {
+      "name": "hubvibe_property_context",
+      "title": "Everything the public record says about a US address",
+      "description": "One US address or point, one call: FEMA National Risk Index ratings for flooding and 17 other hazards with expected annual loss, tract median home value, rent, income, ownership and vacancy (Census ACS), price trend (FHFA), fair market rents for the metro and ZIP (HUD), nearby public schools with enrollment and ratios (NCES), walkability (EPA) and Superfund sites nearby, plus tract, county, ZIP, metro and districts. Input: address or lat and lng. $0.25 per call. Returns: input{}, matched_address, lat, lng, geography{state, county, tract, zip, metro, congressional_district, school_district...}, flood{zone, special_flood_hazard_area...}, hazard_risk{overall_rating, hazards{}, notice...}, housing{median_home_value, median_gross_rent...}, price_trend{}, fair_market_rent{zip{}...}, schools[], walkability{}, superfund_sites[], sources[], sections_failed[], notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 200,
+            "description": "US street address with city and state or ZIP."
+          },
+          "lat": {
+            "type": "number",
+            "minimum": 17,
+            "maximum": 72,
+            "description": "Latitude, instead of an address."
+          },
+          "lng": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": -64,
+            "description": "Longitude, instead of an address."
+          },
+          "school_radius_km": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 5,
+            "description": "Schools within this radius. Default 1.5."
+          },
+          "superfund_radius_km": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 15,
+            "description": "Superfund sites within this radius. Default 5."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "address"
+            ]
+          },
+          {
+            "required": [
+              "lat",
+              "lng"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Address as sent; null when a point was sent.",
+                    "examples": [
+                      "4600 Silver Hill Rd, Washington, DC 20233"
+                    ]
+                  },
+                  "lat": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Latitude as sent; null when an address was sent.",
+                    "examples": [
+                      38.845
+                    ]
+                  },
+                  "lng": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Longitude as sent; null when an address was sent.",
+                    "examples": [
+                      -76.928
+                    ]
+                  }
+                },
+                "required": [
+                  "address",
+                  "lat",
+                  "lng"
+                ],
+                "description": "What was asked."
+              },
+              "matched_address": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The Census Geocoder's standardised match; null for a point.",
+                "examples": [
+                  "4600 SILVER HILL RD, WASHINGTON, DC, 20233"
+                ]
+              },
+              "lat": {
+                "type": "number",
+                "description": "Latitude used.",
+                "examples": [
+                  38.84505589808
+                ]
+              },
+              "lng": {
+                "type": "number",
+                "description": "Longitude used.",
+                "examples": [
+                  -76.92836638093
+                ]
+              },
+              "geography": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "State.",
+                    "examples": [
+                      "Maryland"
+                    ]
+                  },
+                  "state_fips": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "State FIPS.",
+                    "examples": [
+                      "24"
+                    ]
+                  },
+                  "county": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "County.",
+                    "examples": [
+                      "Prince George's County"
+                    ]
+                  },
+                  "county_fips": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "County FIPS.",
+                    "examples": [
+                      "24033"
+                    ]
+                  },
+                  "tract": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Census tract GEOID.",
+                    "examples": [
+                      "24033802405"
+                    ]
+                  },
+                  "block_group": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Block group GEOID.",
+                    "examples": [
+                      "240338024052"
+                    ]
+                  },
+                  "place": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "City or census-designated place.",
+                    "examples": [
+                      "Suitland CDP"
+                    ]
+                  },
+                  "zip": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "ZIP code tabulation area.",
+                    "examples": [
+                      "20746"
+                    ]
+                  },
+                  "metro": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Metropolitan or micropolitan area.",
+                    "examples": [
+                      "Washington-Arlington-Alexandria, DC-VA-MD-WV Metro Area"
+                    ]
+                  },
+                  "metro_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "CBSA code.",
+                    "examples": [
+                      "47900"
+                    ]
+                  },
+                  "congressional_district": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Congressional district.",
+                    "examples": [
+                      "Congressional District 4"
+                    ]
+                  },
+                  "school_district": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "School district.",
+                    "examples": [
+                      "Prince George's County Public Schools"
+                    ]
+                  }
+                },
+                "required": [
+                  "state",
+                  "state_fips",
+                  "county",
+                  "county_fips",
+                  "tract",
+                  "block_group",
+                  "place",
+                  "zip",
+                  "metro",
+                  "metro_code",
+                  "congressional_district",
+                  "school_district"
+                ],
+                "description": "Where the address sits (Census Geocoder)."
+              },
+              "hazard_risk": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "overall_rating": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Composite risk rating.",
+                    "examples": [
+                      "Very Low"
+                    ]
+                  },
+                  "overall_score": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Composite risk score (0-100 percentile).",
+                    "examples": [
+                      7.41
+                    ]
+                  },
+                  "expected_annual_loss_usd": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Expected annual loss for the tract, all hazards.",
+                    "examples": [
+                      401271
+                    ]
+                  },
+                  "social_vulnerability": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Social vulnerability rating.",
+                    "examples": [
+                      "Relatively High"
+                    ]
+                  },
+                  "community_resilience": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Community resilience rating.",
+                    "examples": [
+                      "Relatively Low"
+                    ]
+                  },
+                  "hazards": {
+                    "type": "object",
+                    "description": "Rating per hazard (18 hazards); null where FEMA does not rate it.",
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "examples": [
+                      {
+                        "riverine_flooding": "Very Low",
+                        "hurricane": "Relatively Low",
+                        "heat_wave": "Relatively Moderate"
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "National Risk Index release.",
+                    "examples": [
+                      "December 2025"
+                    ]
+                  },
+                  "notice": {
+                    "type": "string",
+                    "description": "FEMA's required notice.",
+                    "examples": [
+                      "This product uses the Federal Emergency Management Agency's National Risk Index..."
+                    ]
+                  }
+                },
+                "required": [
+                  "overall_rating",
+                  "overall_score",
+                  "expected_annual_loss_usd",
+                  "social_vulnerability",
+                  "community_resilience",
+                  "hazards",
+                  "version",
+                  "notice"
+                ],
+                "description": "FEMA National Risk Index for the tract; null when unavailable."
+              },
+              "housing": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "median_home_value": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Median value of owner-occupied homes, USD.",
+                    "examples": [
+                      332200
+                    ]
+                  },
+                  "median_home_value_moe": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Margin of error of that median, USD.",
+                    "examples": [
+                      24540
+                    ]
+                  },
+                  "median_gross_rent": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Median gross rent, USD per month.",
+                    "examples": [
+                      1486
+                    ]
+                  },
+                  "median_household_income": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Median household income, USD.",
+                    "examples": [
+                      70286
+                    ]
+                  },
+                  "population": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Population.",
+                    "examples": [
+                      3053
+                    ]
+                  },
+                  "owner_occupied_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Share of occupied homes that are owner-occupied, %.",
+                    "examples": [
+                      30.3
+                    ]
+                  },
+                  "median_year_built": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Median year homes were built.",
+                    "examples": [
+                      1969
+                    ]
+                  },
+                  "vacancy_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Share of housing units vacant, %.",
+                    "examples": [
+                      16.8
+                    ]
+                  },
+                  "survey": {
+                    "type": "string",
+                    "description": "Which survey.",
+                    "examples": [
+                      "ACS 5-year estimates 2020-2024 (Census Bureau)"
+                    ]
+                  },
+                  "level": {
+                    "type": "string",
+                    "description": "Geography of the figures.",
+                    "examples": [
+                      "census tract"
+                    ]
+                  }
+                },
+                "required": [
+                  "median_home_value",
+                  "median_home_value_moe",
+                  "median_gross_rent",
+                  "median_household_income",
+                  "population",
+                  "owner_occupied_pct",
+                  "median_year_built",
+                  "vacancy_pct",
+                  "survey",
+                  "level"
+                ],
+                "description": "Census tract housing and income figures; null when the tract has none."
+              },
+              "price_trend": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "latest_year": {
+                    "type": "integer",
+                    "description": "Latest year with an index value.",
+                    "examples": [
+                      2025
+                    ]
+                  },
+                  "annual_change_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Change in that year, %.",
+                    "examples": [
+                      9.46
+                    ]
+                  },
+                  "five_year_change_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Change over the five years to it, %.",
+                    "examples": [
+                      28.31
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Which index.",
+                    "examples": [
+                      "FHFA House Price Index, annual, census tract"
+                    ]
+                  }
+                },
+                "required": [
+                  "latest_year",
+                  "annual_change_pct",
+                  "five_year_change_pct",
+                  "source"
+                ],
+                "description": "Tract house price trend; null when FHFA publishes none for the tract."
+              },
+              "fair_market_rent": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "area": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "HUD fair market rent area.",
+                    "examples": [
+                      "Washington-Arlington-Alexandria, DC-VA-MD HUD Metro FMR Area"
+                    ]
+                  },
+                  "studio": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Studio, USD/month.",
+                    "examples": [
+                      1953
+                    ]
+                  },
+                  "one_bedroom": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "1 bedroom.",
+                    "examples": [
+                      2015
+                    ]
+                  },
+                  "two_bedroom": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "2 bedrooms.",
+                    "examples": [
+                      2246
+                    ]
+                  },
+                  "three_bedroom": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "3 bedrooms.",
+                    "examples": [
+                      2835
+                    ]
+                  },
+                  "four_bedroom": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "4 bedrooms.",
+                    "examples": [
+                      3332
+                    ]
+                  },
+                  "zip": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "zip": {
+                        "type": "string",
+                        "description": "ZIP.",
+                        "examples": [
+                          "20746"
+                        ]
+                      },
+                      "studio": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Studio.",
+                        "examples": [
+                          1720
+                        ]
+                      },
+                      "one_bedroom": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "1 bedroom.",
+                        "examples": [
+                          1860
+                        ]
+                      },
+                      "two_bedroom": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "2 bedrooms.",
+                        "examples": [
+                          2070
+                        ]
+                      },
+                      "three_bedroom": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "3 bedrooms.",
+                        "examples": [
+                          2610
+                        ]
+                      },
+                      "four_bedroom": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "4 bedrooms.",
+                        "examples": [
+                          3070
+                        ]
+                      }
+                    },
+                    "required": [
+                      "zip",
+                      "studio",
+                      "one_bedroom",
+                      "two_bedroom",
+                      "three_bedroom",
+                      "four_bedroom"
+                    ],
+                    "description": "HUD Small Area (ZIP) fair market rents; null outside metro areas that publish them."
+                  }
+                },
+                "required": [
+                  "area",
+                  "studio",
+                  "one_bedroom",
+                  "two_bedroom",
+                  "three_bedroom",
+                  "four_bedroom",
+                  "zip"
+                ],
+                "description": "HUD fair market rents (rent plus utilities); null when unavailable."
+              },
+              "schools": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "School.",
+                      "examples": [
+                        "Suitland Elementary"
+                      ]
+                    },
+                    "level": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Level.",
+                      "examples": [
+                        "Elementary"
+                      ]
+                    },
+                    "grades": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Grade span.",
+                      "examples": [
+                        "PK-05"
+                      ]
+                    },
+                    "enrollment": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Students enrolled.",
+                      "examples": [
+                        514
+                      ]
+                    },
+                    "students_per_teacher": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Students per teacher.",
+                      "examples": [
+                        14.94
+                      ]
+                    },
+                    "charter": {
+                      "type": "boolean",
+                      "description": "Charter school.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "district": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "District.",
+                      "examples": [
+                        "Prince George's County Public Schools"
+                      ]
+                    },
+                    "city": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "City.",
+                      "examples": [
+                        "Suitland"
+                      ]
+                    },
+                    "distance_km": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Straight-line distance.",
+                      "examples": [
+                        0.88
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "level",
+                    "grades",
+                    "enrollment",
+                    "students_per_teacher",
+                    "charter",
+                    "district",
+                    "city",
+                    "distance_km"
+                  ],
+                  "description": "A public school (NCES 2024-25)."
+                },
+                "description": "Public schools within the radius, nearest first.",
+                "examples": [
+                  []
+                ]
+              },
+              "school_radius_km": {
+                "type": "number",
+                "description": "Radius searched for schools.",
+                "examples": [
+                  1.5
+                ]
+              },
+              "walkability": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "index": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "EPA National Walkability Index, 1 (least) to 20 (most).",
+                    "examples": [
+                      11.33
+                    ]
+                  },
+                  "meters_to_transit": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Distance to the nearest transit stop, metres.",
+                    "examples": [
+                      926.71
+                    ]
+                  },
+                  "block_group": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Block group the index describes.",
+                    "examples": [
+                      "240338024051"
+                    ]
+                  }
+                },
+                "required": [
+                  "index",
+                  "meters_to_transit",
+                  "block_group"
+                ],
+                "description": "EPA walkability; null when unavailable."
+              },
+              "superfund_sites": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Site.",
+                      "examples": [
+                        "SAN JACINTO FOUNDRY"
+                      ]
+                    },
+                    "address": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Address.",
+                      "examples": [
+                        "3617 BAER STREET"
+                      ]
+                    },
+                    "city": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "City.",
+                      "examples": [
+                        "HOUSTON"
+                      ]
+                    },
+                    "state": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "State.",
+                      "examples": [
+                        "TX"
+                      ]
+                    },
+                    "status": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "NPL status.",
+                      "examples": [
+                        "CURRENTLY ON THE FINAL NPL"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "EPA facility page.",
+                      "examples": [
+                        "https://ofmpub.epa.gov/frs_public2/fii_query_detail.disp_program_facility?p_registry_id=110005037361"
+                      ]
+                    },
+                    "distance_km": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Straight-line distance.",
+                      "examples": [
+                        4.61
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "address",
+                    "city",
+                    "state",
+                    "status",
+                    "url",
+                    "distance_km"
+                  ],
+                  "description": "A Superfund (NPL) site."
+                },
+                "description": "Superfund sites within the radius, nearest first.",
+                "examples": [
+                  []
+                ]
+              },
+              "superfund_radius_km": {
+                "type": "number",
+                "description": "Radius searched for Superfund sites.",
+                "examples": [
+                  5.0
+                ]
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Source.",
+                      "examples": [
+                        "FEMA National Flood Hazard Layer"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Where it is published.",
+                      "examples": [
+                        "https://www.fema.gov/flood-maps/national-flood-hazard-layer"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "url"
+                  ],
+                  "description": "A source."
+                },
+                "description": "Every source this answer draws on."
+              },
+              "sections_failed": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A section whose source did not answer; that section is null or empty.",
+                  "examples": [
+                    "walkability"
+                  ]
+                },
+                "description": "Sections that could not be fetched this time; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "FEMA has no digital flood map at this point."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "input",
+              "matched_address",
+              "lat",
+              "lng",
+              "geography",
+              "hazard_risk",
+              "housing",
+              "price_trend",
+              "fair_market_rent",
+              "schools",
+              "school_radius_km",
+              "walkability",
+              "superfund_sites",
+              "superfund_radius_km",
+              "sources",
+              "sections_failed",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "property.context response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Everything the public record says about a US address"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/property/context",
+        "price_usd": 0.25
+      }
+    },
+    {
+      "name": "hubvibe_travel_flight_status",
+      "title": "Flight and airport status right now",
+      "description": "What is happening at an airport, or to a flight, now. By airport code (IATA or ICAO): FAA ground stops, ground delay programs with average and max delay, closures and runway configuration (US); the live departure and arrival board with gates and status (Norway, Avinor); current METAR and TAF (any ICAO airport); aircraft in the air around it. By callsign: that aircraft's live position, altitude and speed. Input: airport or callsign; optional flight, direction, hours_ahead. $0.25 per call. Returns: query{}, airport{iata, icao, name, city, country, lat, lon}, delays{status, ground_stop, ground_delay, closure, arrival_delay, departure_delay, runways, notices}, board{departures[], arrivals[], attribution}, weather{metar, taf, flight_category...}, aircraft[], aircraft_scope, coverage{}, attribution[], sections_failed[], notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "airport": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 4,
+            "description": "IATA (OSL, JFK) or ICAO (ENGM, KJFK) code."
+          },
+          "callsign": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 8,
+            "description": "Callsign as broadcast (SAS1411, UAL123): the aircraft's live position."
+          },
+          "flight": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 8,
+            "description": "Flight number to pick from the board (SK344)."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "both",
+              "departures",
+              "arrivals"
+            ],
+            "description": "Board direction. Default both."
+          },
+          "hours_ahead": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Board window ahead, hours. Default 3."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "airport"
+            ]
+          },
+          {
+            "required": [
+              "callsign"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "object",
+                "properties": {
+                  "airport": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Airport code sent.",
+                    "examples": [
+                      "OSL"
+                    ]
+                  },
+                  "callsign": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Callsign sent.",
+                    "examples": [
+                      "SAS51D"
+                    ]
+                  },
+                  "flight": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Flight filter.",
+                    "examples": [
+                      "SK344"
+                    ]
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "both",
+                      "departures",
+                      "arrivals"
+                    ],
+                    "description": "Board direction.",
+                    "examples": [
+                      "both"
+                    ]
+                  },
+                  "hours_ahead": {
+                    "type": "integer",
+                    "description": "Board window ahead, hours.",
+                    "examples": [
+                      3
+                    ]
+                  }
+                },
+                "required": [
+                  "airport",
+                  "callsign",
+                  "flight",
+                  "direction",
+                  "hours_ahead"
+                ],
+                "description": "What was asked."
+              },
+              "airport": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "iata": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "IATA code.",
+                    "examples": [
+                      "OSL"
+                    ]
+                  },
+                  "icao": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "ICAO code.",
+                    "examples": [
+                      "ENGM"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Airport.",
+                    "examples": [
+                      "Oslo-Gardermoen International Airport"
+                    ]
+                  },
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "City.",
+                    "examples": [
+                      "Oslo (Gardermoen)"
+                    ]
+                  },
+                  "country": {
+                    "type": "string",
+                    "description": "ISO country.",
+                    "examples": [
+                      "NO"
+                    ]
+                  },
+                  "lat": {
+                    "type": "number",
+                    "description": "Latitude.",
+                    "examples": [
+                      60.1939
+                    ]
+                  },
+                  "lon": {
+                    "type": "number",
+                    "description": "Longitude.",
+                    "examples": [
+                      11.1004
+                    ]
+                  }
+                },
+                "required": [
+                  "iata",
+                  "icao",
+                  "name",
+                  "city",
+                  "country",
+                  "lat",
+                  "lon"
+                ],
+                "description": "The airport (OurAirports, public domain); null for a callsign-only query."
+              },
+              "delays": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "delays",
+                      "ground_delay",
+                      "ground_stop",
+                      "closed"
+                    ],
+                    "description": "Overall FAA status.",
+                    "examples": [
+                      "ground_delay"
+                    ]
+                  },
+                  "ground_stop": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Ground stop in force.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "ground_delay": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Ground delay program: reason, from, until, avg_minutes, max_minutes.",
+                    "examples": [
+                      {
+                        "reason": "low ceilings",
+                        "from": "2026-09-28T15:00:00Z",
+                        "until": "2026-09-28T23:29:00Z",
+                        "avg_minutes": 44,
+                        "max_minutes": 120
+                      }
+                    ]
+                  },
+                  "closure": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Closure notice.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "arrival_delay": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Arrival delays.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "departure_delay": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Departure delays.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "deicing": {
+                    "type": "boolean",
+                    "description": "De-icing in progress.",
+                    "examples": [
+                      false
+                    ]
+                  },
+                  "runways": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "arrival": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Arrival runways.",
+                        "examples": [
+                          "28L/28R"
+                        ]
+                      },
+                      "departure": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Departure runways.",
+                        "examples": [
+                          "28L/28R"
+                        ]
+                      },
+                      "arrival_rate_per_hour": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Arrival rate.",
+                        "examples": [
+                          30
+                        ]
+                      }
+                    },
+                    "required": [
+                      "arrival",
+                      "departure",
+                      "arrival_rate_per_hour"
+                    ],
+                    "description": "Runway configuration; null when not published."
+                  },
+                  "notices": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A notice.",
+                      "examples": [
+                        "!SFO 09/165 ..."
+                      ]
+                    },
+                    "description": "Free-form FAA notices.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Source.",
+                    "examples": [
+                      "FAA NAS Status"
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "ground_stop",
+                  "ground_delay",
+                  "closure",
+                  "arrival_delay",
+                  "departure_delay",
+                  "deicing",
+                  "runways",
+                  "notices",
+                  "source"
+                ],
+                "description": "FAA National Airspace System status (US airports); null elsewhere."
+              },
+              "board": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "departures": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "flight": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Flight number.",
+                          "examples": [
+                            "SK344"
+                          ]
+                        },
+                        "airline": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Airline code.",
+                          "examples": [
+                            "SK"
+                          ]
+                        },
+                        "direction": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "D or A.",
+                          "examples": [
+                            "D"
+                          ]
+                        },
+                        "other_airport": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Destination or origin (IATA).",
+                          "examples": [
+                            "TRD"
+                          ]
+                        },
+                        "other_airport_name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Its name.",
+                          "examples": [
+                            "Trondheim Airport, Værnes"
+                          ]
+                        },
+                        "scheduled": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Scheduled time (UTC).",
+                          "examples": [
+                            "2026-09-28T11:15:00Z"
+                          ]
+                        },
+                        "status": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "departed, arrived, new time, new info or cancelled.",
+                          "examples": [
+                            "departed"
+                          ]
+                        },
+                        "status_time": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Time the status refers to (UTC).",
+                          "examples": [
+                            "2026-09-28T11:22:38Z"
+                          ]
+                        },
+                        "gate": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Gate.",
+                          "examples": [
+                            "A20"
+                          ]
+                        },
+                        "check_in": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Check-in rows.",
+                          "examples": [
+                            "4-6"
+                          ]
+                        },
+                        "belt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Baggage belt (arrivals).",
+                          "examples": [
+                            "3"
+                          ]
+                        },
+                        "delayed": {
+                          "type": "boolean",
+                          "description": "Marked delayed.",
+                          "examples": [
+                            false
+                          ]
+                        },
+                        "sector": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "domestic, schengen or international.",
+                          "examples": [
+                            "domestic"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "flight",
+                        "airline",
+                        "direction",
+                        "other_airport",
+                        "other_airport_name",
+                        "scheduled",
+                        "status",
+                        "status_time",
+                        "gate",
+                        "check_in",
+                        "belt",
+                        "delayed",
+                        "sector"
+                      ],
+                      "description": "One flight on the board."
+                    },
+                    "description": "Departures, by scheduled time.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "arrivals": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "flight": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Flight number.",
+                          "examples": [
+                            "SK344"
+                          ]
+                        },
+                        "airline": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Airline code.",
+                          "examples": [
+                            "SK"
+                          ]
+                        },
+                        "direction": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "D or A.",
+                          "examples": [
+                            "D"
+                          ]
+                        },
+                        "other_airport": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Destination or origin (IATA).",
+                          "examples": [
+                            "TRD"
+                          ]
+                        },
+                        "other_airport_name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Its name.",
+                          "examples": [
+                            "Trondheim Airport, Værnes"
+                          ]
+                        },
+                        "scheduled": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Scheduled time (UTC).",
+                          "examples": [
+                            "2026-09-28T11:15:00Z"
+                          ]
+                        },
+                        "status": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "departed, arrived, new time, new info or cancelled.",
+                          "examples": [
+                            "departed"
+                          ]
+                        },
+                        "status_time": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Time the status refers to (UTC).",
+                          "examples": [
+                            "2026-09-28T11:22:38Z"
+                          ]
+                        },
+                        "gate": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Gate.",
+                          "examples": [
+                            "A20"
+                          ]
+                        },
+                        "check_in": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Check-in rows.",
+                          "examples": [
+                            "4-6"
+                          ]
+                        },
+                        "belt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Baggage belt (arrivals).",
+                          "examples": [
+                            "3"
+                          ]
+                        },
+                        "delayed": {
+                          "type": "boolean",
+                          "description": "Marked delayed.",
+                          "examples": [
+                            false
+                          ]
+                        },
+                        "sector": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "domestic, schengen or international.",
+                          "examples": [
+                            "domestic"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "flight",
+                        "airline",
+                        "direction",
+                        "other_airport",
+                        "other_airport_name",
+                        "scheduled",
+                        "status",
+                        "status_time",
+                        "gate",
+                        "check_in",
+                        "belt",
+                        "delayed",
+                        "sector"
+                      ],
+                      "description": "One flight on the board."
+                    },
+                    "description": "Arrivals, by scheduled time.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "last_update": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "When Avinor last updated the board.",
+                    "examples": [
+                      "2026-09-28T12:29:26.891757Z"
+                    ]
+                  },
+                  "attribution": {
+                    "type": "string",
+                    "description": "Required credit.",
+                    "examples": [
+                      "Flight data from Avinor"
+                    ]
+                  },
+                  "attribution_url": {
+                    "type": "string",
+                    "description": "Credit link.",
+                    "examples": [
+                      "https://www.avinor.no"
+                    ]
+                  }
+                },
+                "required": [
+                  "departures",
+                  "arrivals",
+                  "last_update",
+                  "attribution",
+                  "attribution_url"
+                ],
+                "description": "Live board (Norway, Avinor); null elsewhere."
+              },
+              "weather": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "metar": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Raw METAR.",
+                    "examples": [
+                      "METAR ENGM 281220Z 17008KT 9999 -RA BKN012 14/12 Q1017"
+                    ]
+                  },
+                  "taf": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Raw TAF.",
+                    "examples": [
+                      "TAF ENGM 281100Z 2812/2912 ..."
+                    ]
+                  },
+                  "flight_category": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "VFR, MVFR, IFR or LIFR.",
+                    "examples": [
+                      "MVFR"
+                    ]
+                  },
+                  "temperature_c": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Temperature.",
+                    "examples": [
+                      14
+                    ]
+                  },
+                  "dewpoint_c": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Dew point.",
+                    "examples": [
+                      12
+                    ]
+                  },
+                  "wind_dir_deg": {
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ],
+                    "description": "Wind direction (VRB when variable).",
+                    "examples": [
+                      170
+                    ]
+                  },
+                  "wind_kt": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Wind speed.",
+                    "examples": [
+                      8
+                    ]
+                  },
+                  "gust_kt": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Gusts.",
+                    "examples": [
+                      24
+                    ]
+                  },
+                  "visibility": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Visibility as reported.",
+                    "examples": [
+                      "6+"
+                    ]
+                  },
+                  "weather": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Present weather.",
+                    "examples": [
+                      "-RA"
+                    ]
+                  },
+                  "observed_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Report time.",
+                    "examples": [
+                      "2026-09-28T12:20:00.000Z"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Source.",
+                    "examples": [
+                      "NOAA Aviation Weather Center"
+                    ]
+                  }
+                },
+                "required": [
+                  "metar",
+                  "taf",
+                  "flight_category",
+                  "temperature_c",
+                  "dewpoint_c",
+                  "wind_dir_deg",
+                  "wind_kt",
+                  "gust_kt",
+                  "visibility",
+                  "weather",
+                  "observed_at",
+                  "source"
+                ],
+                "description": "Airport weather; null without a METAR."
+              },
+              "aircraft": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "callsign": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Callsign.",
+                      "examples": [
+                        "SAS51D"
+                      ]
+                    },
+                    "hex": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "ICAO 24-bit address.",
+                      "examples": [
+                        "4cac79"
+                      ]
+                    },
+                    "registration": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Registration.",
+                      "examples": [
+                        "EI-SIJ"
+                      ]
+                    },
+                    "type": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Aircraft type.",
+                      "examples": [
+                        "A20N"
+                      ]
+                    },
+                    "lat": {
+                      "type": "number",
+                      "description": "Latitude.",
+                      "examples": [
+                        59.561
+                      ]
+                    },
+                    "lon": {
+                      "type": "number",
+                      "description": "Longitude.",
+                      "examples": [
+                        10.538
+                      ]
+                    },
+                    "altitude_ft": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Barometric altitude.",
+                      "examples": [
+                        36975
+                      ]
+                    },
+                    "on_ground": {
+                      "type": "boolean",
+                      "description": "On the ground.",
+                      "examples": [
+                        false
+                      ]
+                    },
+                    "ground_speed_kt": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Ground speed.",
+                      "examples": [
+                        486.8
+                      ]
+                    },
+                    "track_deg": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Track.",
+                      "examples": [
+                        76.8
+                      ]
+                    },
+                    "vertical_rate_fpm": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Climb/descent rate.",
+                      "examples": [
+                        0
+                      ]
+                    },
+                    "squawk": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Squawk.",
+                      "examples": [
+                        "6220"
+                      ]
+                    },
+                    "distance_km": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Distance from the airport.",
+                      "examples": [
+                        12.4
+                      ]
+                    }
+                  },
+                  "required": [
+                    "callsign",
+                    "hex",
+                    "registration",
+                    "type",
+                    "lat",
+                    "lon",
+                    "altitude_ft",
+                    "on_ground",
+                    "ground_speed_kt",
+                    "track_deg",
+                    "vertical_rate_fpm",
+                    "squawk",
+                    "distance_km"
+                  ],
+                  "description": "An aircraft (adsb.lol, ODbL)."
+                },
+                "description": "Aircraft, nearest first.",
+                "examples": [
+                  []
+                ]
+              },
+              "aircraft_scope": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "What the aircraft list covers.",
+                "examples": [
+                  "within 25 nautical miles"
+                ]
+              },
+              "coverage": {
+                "type": "object",
+                "properties": {
+                  "delays": {
+                    "type": "boolean",
+                    "description": "FAA covers this airport.",
+                    "examples": [
+                      false
+                    ]
+                  },
+                  "board": {
+                    "type": "boolean",
+                    "description": "Avinor covers it.",
+                    "examples": [
+                      true
+                    ]
+                  },
+                  "weather": {
+                    "type": "boolean",
+                    "description": "A METAR station exists.",
+                    "examples": [
+                      true
+                    ]
+                  },
+                  "aircraft": {
+                    "type": "boolean",
+                    "description": "Live positions.",
+                    "examples": [
+                      true
+                    ]
+                  }
+                },
+                "required": [
+                  "delays",
+                  "board",
+                  "weather",
+                  "aircraft"
+                ],
+                "description": "Which sources cover this query."
+              },
+              "attribution": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "description": "Credit.",
+                      "examples": [
+                        "Flight data from Avinor"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Link.",
+                      "examples": [
+                        "https://www.avinor.no"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "url"
+                  ],
+                  "description": "A required credit."
+                },
+                "description": "Credits to show with the data.",
+                "examples": [
+                  []
+                ]
+              },
+              "sections_failed": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A section whose source did not answer.",
+                  "examples": [
+                    "aircraft"
+                  ]
+                },
+                "description": "Empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "Live boards cover Norway."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "airport",
+              "delays",
+              "board",
+              "weather",
+              "aircraft",
+              "aircraft_scope",
+              "coverage",
+              "attribution",
+              "sections_failed",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "travel.flight_status response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Flight and airport status right now"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/travel/flight_status",
+        "price_usd": 0.25
+      }
+    },
+    {
+      "name": "hubvibe_company_enrich",
+      "title": "Company profile from a domain or a name",
+      "description": "Who is this company? From a domain or a name: legal and common name, founding date, headcount with its date, industries, headquarters, parent, CEO and founders, stock listings, LEI, SEC CIK and registration number, legal form and status, official social accounts and logo. Sources: Wikidata (CC0), the global LEI register, SEC EDGAR and the company's own site (marked self-declared); every field names its source. Input: domain or name. $0.05 per call. Returns: query{}, company{name, legal_name, description, website, domain, founded, employees{count, as_of, source}, industries[], headquarters{city, country, country_code, address}, parent, ceo, founders[], logo_url, status, legal_form, jurisdiction}, identifiers{wikidata, lei, cik, registration_number, listings[], sec_tickers[], sic...}, socials{x, linkedin, facebook, instagram, github, youtube}, sources[], field_sources{}, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 253,
+            "description": "Company domain (stripe.com) or its URL."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120,
+            "description": "Company name (Toyota), instead of a domain."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "domain"
+            ]
+          },
+          {
+            "required": [
+              "name"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "object",
+                "properties": {
+                  "domain": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Domain asked, normalised.",
+                    "examples": [
+                      "stripe.com"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Name asked.",
+                    "examples": [
+                      "Stripe"
+                    ]
+                  }
+                },
+                "required": [
+                  "domain",
+                  "name"
+                ],
+                "description": "What was asked."
+              },
+              "company": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Common name.",
+                    "examples": [
+                      "Stripe"
+                    ]
+                  },
+                  "legal_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Registered legal name.",
+                    "examples": [
+                      "STRIPE, LLC"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "One-line description.",
+                    "examples": [
+                      "Irish-American payment technology company"
+                    ]
+                  },
+                  "website": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Official website.",
+                    "examples": [
+                      "https://stripe.com/"
+                    ]
+                  },
+                  "domain": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Domain.",
+                    "examples": [
+                      "stripe.com"
+                    ]
+                  },
+                  "founded": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Founding date (year, month or day precision).",
+                    "examples": [
+                      "2010"
+                    ]
+                  },
+                  "employees": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "count": {
+                        "type": "integer",
+                        "description": "Headcount.",
+                        "examples": [
+                          8000
+                        ]
+                      },
+                      "as_of": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Date of the figure.",
+                        "examples": [
+                          "2022"
+                        ]
+                      },
+                      "source": {
+                        "type": "string",
+                        "description": "Source.",
+                        "examples": [
+                          "wikidata"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "count",
+                      "as_of",
+                      "source"
+                    ],
+                    "description": "Latest known headcount; null when unknown."
+                  },
+                  "industries": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "Industry.",
+                      "examples": [
+                        "financial services"
+                      ]
+                    },
+                    "description": "Industries.",
+                    "examples": [
+                      [
+                        "financial services"
+                      ]
+                    ]
+                  },
+                  "headquarters": {
+                    "type": "object",
+                    "properties": {
+                      "city": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "City.",
+                        "examples": [
+                          "San Francisco"
+                        ]
+                      },
+                      "country": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Country.",
+                        "examples": [
+                          "United States"
+                        ]
+                      },
+                      "country_code": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "ISO 3166 code.",
+                        "examples": [
+                          "US"
+                        ]
+                      },
+                      "address": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Registered headquarters address.",
+                        "examples": [
+                          "354 Oyster Point Boulevard, South San Francisco, 94080"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "city",
+                      "country",
+                      "country_code",
+                      "address"
+                    ],
+                    "description": "Headquarters."
+                  },
+                  "parent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Parent organisation.",
+                    "examples": [
+                      "Alphabet Inc."
+                    ]
+                  },
+                  "ceo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Chief executive.",
+                    "examples": [
+                      "Patrick Collison"
+                    ]
+                  },
+                  "founders": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "Founder.",
+                      "examples": [
+                        "Patrick Collison"
+                      ]
+                    },
+                    "description": "Founders.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "logo_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Logo file.",
+                    "examples": [
+                      "https://commons.wikimedia.org/wiki/Special:FilePath/Stripe_Logo.svg"
+                    ]
+                  },
+                  "status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Legal entity status (LEI register).",
+                    "examples": [
+                      "ACTIVE"
+                    ]
+                  },
+                  "legal_form": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Legal form.",
+                    "examples": [
+                      "Limited Liability Company"
+                    ]
+                  },
+                  "jurisdiction": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Jurisdiction.",
+                    "examples": [
+                      "US-DE"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "legal_name",
+                  "description",
+                  "website",
+                  "domain",
+                  "founded",
+                  "employees",
+                  "industries",
+                  "headquarters",
+                  "parent",
+                  "ceo",
+                  "founders",
+                  "logo_url",
+                  "status",
+                  "legal_form",
+                  "jurisdiction"
+                ],
+                "description": "The company."
+              },
+              "identifiers": {
+                "type": "object",
+                "properties": {
+                  "wikidata": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Wikidata item.",
+                    "examples": [
+                      "Q7624104"
+                    ]
+                  },
+                  "lei": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Legal Entity Identifier.",
+                    "examples": [
+                      "549300CLHGIPTCYHQ143"
+                    ]
+                  },
+                  "cik": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "SEC Central Index Key.",
+                    "examples": [
+                      "1691342"
+                    ]
+                  },
+                  "registration_number": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Company registration number.",
+                    "examples": [
+                      "4675506"
+                    ]
+                  },
+                  "registration_authority": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Registration authority id (GLEIF RA list).",
+                    "examples": [
+                      "RA000602"
+                    ]
+                  },
+                  "listings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "ticker": {
+                          "type": "string",
+                          "description": "Ticker.",
+                          "examples": [
+                            "AAPL"
+                          ]
+                        },
+                        "exchange": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Exchange.",
+                          "examples": [
+                            "Nasdaq"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "ticker",
+                        "exchange"
+                      ],
+                      "description": "A listing."
+                    },
+                    "description": "Stock listings.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "sec_tickers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "Ticker.",
+                      "examples": [
+                        "AAPL"
+                      ]
+                    },
+                    "description": "Tickers on SEC file.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "sic": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "SIC code.",
+                    "examples": [
+                      "3571"
+                    ]
+                  },
+                  "sic_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "SIC industry.",
+                    "examples": [
+                      "Electronic Computers"
+                    ]
+                  },
+                  "state_of_incorporation": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "State of incorporation (SEC).",
+                    "examples": [
+                      "CA"
+                    ]
+                  }
+                },
+                "required": [
+                  "wikidata",
+                  "lei",
+                  "cik",
+                  "registration_number",
+                  "registration_authority",
+                  "listings",
+                  "sec_tickers",
+                  "sic",
+                  "sic_description",
+                  "state_of_incorporation"
+                ],
+                "description": "Identifiers."
+              },
+              "socials": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "x account.",
+                    "examples": [
+                      "https://x.com/stripe"
+                    ]
+                  },
+                  "linkedin": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "linkedin account.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "facebook": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "facebook account.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "instagram": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "instagram account.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "github": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "github account.",
+                    "examples": [
+                      null
+                    ]
+                  },
+                  "youtube": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "youtube account.",
+                    "examples": [
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "x",
+                  "linkedin",
+                  "facebook",
+                  "instagram",
+                  "github",
+                  "youtube"
+                ],
+                "description": "Official social accounts."
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A source used.",
+                  "examples": [
+                    "Wikidata (CC0)"
+                  ]
+                },
+                "description": "Sources that answered.",
+                "examples": [
+                  [
+                    "Wikidata (CC0)"
+                  ]
+                ]
+              },
+              "field_sources": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Which source gave each chosen field.",
+                "examples": [
+                  {
+                    "name": "wikidata",
+                    "legal_name": "lei_register"
+                  }
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "Homepage not read."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "company",
+              "identifiers",
+              "socials",
+              "sources",
+              "field_sources",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "company.enrich response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Company profile from a domain or a name"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/company/enrich",
+        "price_usd": 0.05
       }
     },
     {

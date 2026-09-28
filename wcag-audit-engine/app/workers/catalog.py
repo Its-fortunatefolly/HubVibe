@@ -1021,6 +1021,85 @@ CATALOG = [
                        "no third-party verification service."),
         requires=("mailcheck",)),
     Worker(
+        name="property.context", price_usd=0.25, tier="standard",
+        title="Everything the public record says about a US address",
+        description=(
+            "One US address or point, one call: FEMA National Risk Index ratings for "
+            "flooding and 17 other hazards with expected annual loss, tract median home "
+            "value, rent, income, ownership and vacancy (Census ACS), price trend (FHFA), "
+            "fair market rents for the metro and ZIP (HUD), nearby public schools with "
+            "enrollment and ratios (NCES), walkability (EPA) and Superfund sites nearby, "
+            "plus tract, county, ZIP, metro and districts. Input: address or lat and lng."),
+        tags=["real-estate", "property", "address", "flood", "risk", "housing", "rent", "schools", "census", "fema", "hud", "live"],
+        input_schema=dict(_obj({
+            "address": {"type": "string", "minLength": 5, "maxLength": 200,
+                        "description": "US street address with city and state or ZIP."},
+            "lat": {"type": "number", "minimum": 17, "maximum": 72, "description": "Latitude, instead of an address."},
+            "lng": {"type": "number", "minimum": -180, "maximum": -64, "description": "Longitude, instead of an address."},
+            "school_radius_km": {"type": "number", "minimum": 0.1, "maximum": 5, "description": "Schools within this radius. Default 1.5."},
+            "superfund_radius_km": {"type": "number", "minimum": 0.1, "maximum": 15,
+                                    "description": "Superfund sites within this radius. Default 5."},
+        }, []), anyOf=[{"required": ["address"]}, {"required": ["lat", "lng"]}]),
+        returns=("input{}, matched_address, lat, lng, geography{state, county, tract, zip, metro, congressional_district, "
+                 "school_district...}, flood{zone, special_flood_hazard_area...}, hazard_risk{overall_rating, hazards{}, "
+                 "notice...}, housing{median_home_value, median_gross_rent...}, price_trend{}, fair_market_rent{zip{}...}, "
+                 "schools[], walkability{}, superfund_sites[], sources[], sections_failed[], notes[], checked_at."),
+        skill="property.context", max_seconds=60,
+        pricing_basis=("Provisional, standard tier. Provider cost zero: public federal services plus two annual tract "
+                       "tables shipped with the node."),
+        requires=("property_data",)),
+    Worker(
+        name="travel.flight_status", price_usd=0.25, tier="standard",
+        title="Flight and airport status right now",
+        description=(
+            "What is happening at an airport, or to a flight, now. By airport code (IATA "
+            "or ICAO): FAA ground stops, ground delay programs with average and max "
+            "delay, closures and runway configuration (US); the live departure and "
+            "arrival board with gates and status (Norway, Avinor); current METAR and TAF "
+            "(any ICAO airport); aircraft in the air around it. By callsign: that "
+            "aircraft's live position, altitude and speed. Input: airport or callsign; "
+            "optional flight, direction, hours_ahead."),
+        tags=["flights", "flight-status", "airport", "delays", "departures", "arrivals", "aviation", "weather", "live"],
+        input_schema=dict(_obj({
+            "airport": {"type": "string", "minLength": 3, "maxLength": 4, "description": "IATA (OSL, JFK) or ICAO (ENGM, KJFK) code."},
+            "callsign": {"type": "string", "minLength": 2, "maxLength": 8,
+                         "description": "Callsign as broadcast (SAS1411, UAL123): the aircraft's live position."},
+            "flight": {"type": "string", "minLength": 2, "maxLength": 8, "description": "Flight number to pick from the board (SK344)."},
+            "direction": {"type": "string", "enum": ["both", "departures", "arrivals"], "description": "Board direction. Default both."},
+            "hours_ahead": {"type": "integer", "minimum": 1, "maximum": 12, "description": "Board window ahead, hours. Default 3."},
+        }, []), anyOf=[{"required": ["airport"]}, {"required": ["callsign"]}]),
+        returns=("query{}, airport{iata, icao, name, city, country, lat, lon}, delays{status, ground_stop, ground_delay, "
+                 "closure, arrival_delay, departure_delay, runways, notices}, board{departures[], arrivals[], attribution}, "
+                 "weather{metar, taf, flight_category...}, aircraft[], aircraft_scope, coverage{}, attribution[], "
+                 "sections_failed[], notes[], checked_at."),
+        skill="travel.flight_status", max_seconds=45,
+        pricing_basis=("Provisional, standard tier. Provider cost zero: FAA, NOAA and Avinor public feeds and adsb.lol "
+                       "(ODbL), shared per their own refresh pace."),
+        requires=("aviation",)),
+    Worker(
+        name="company.enrich", price_usd=0.05, tier="utility",
+        title="Company profile from a domain or a name",
+        description=(
+            "Who is this company? From a domain or a name: legal and common name, "
+            "founding date, headcount with its date, industries, headquarters, parent, "
+            "CEO and founders, stock listings, LEI, SEC CIK and registration number, "
+            "legal form and status, official social accounts and logo. Sources: "
+            "Wikidata (CC0), the global LEI register, SEC EDGAR and the company's own "
+            "site (marked self-declared); every field names its source. Input: domain "
+            "or name."),
+        tags=["company", "enrichment", "firmographics", "lei", "leads", "kyb", "wikidata", "sec", "live"],
+        input_schema=dict(_obj({
+            "domain": {"type": "string", "minLength": 4, "maxLength": 253, "description": "Company domain (stripe.com) or its URL."},
+            "name": {"type": "string", "minLength": 2, "maxLength": 120, "description": "Company name (Toyota), instead of a domain."},
+        }, []), anyOf=[{"required": ["domain"]}, {"required": ["name"]}]),
+        returns=("query{}, company{name, legal_name, description, website, domain, founded, employees{count, as_of, source}, "
+                 "industries[], headquarters{city, country, country_code, address}, parent, ceo, founders[], logo_url, status, "
+                 "legal_form, jurisdiction}, identifiers{wikidata, lei, cik, registration_number, listings[], sec_tickers[], sic...}, "
+                 "socials{x, linkedin, facebook, instagram, github, youtube}, sources[], field_sources{}, notes[], checked_at."),
+        skill="company.enrich", max_seconds=45,
+        pricing_basis="Provisional, utility tier. Provider cost zero: Wikidata, GLEIF and SEC public data, one homepage read.",
+        requires=("company_data",)),
+    Worker(
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
@@ -1560,6 +1639,11 @@ _EXAMPLE_OVERRIDES = {
     # A role address on a domain that publishes MX records, so the example
     # exercises DNS, SMTP and the role flag without naming a person.
     "email.verify": {"email": "support@github.com"},
+    # The Census Bureau's own address, so the example geocodes on the first try.
+    "property.context": {"address": "4600 Silver Hill Rd, Washington, DC 20233"},
+    # Oslo: a live Avinor board, a METAR and aircraft overhead in one example.
+    "travel.flight_status": {"airport": "OSL", "hours_ahead": 2},
+    "company.enrich": {"domain": "stripe.com"},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},

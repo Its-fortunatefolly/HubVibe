@@ -48,7 +48,7 @@ HUBVIBE_BASE_URL = os.environ.get(
 )
 
 # Kept equal to SERVICE_VERSION / server.json / mcp.json by a test.
-VERSION = "1.19.1"
+VERSION = "1.22.0"
 
 server = MCPServer(
     name="hubvibe",
