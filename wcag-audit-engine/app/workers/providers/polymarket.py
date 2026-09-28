@@ -98,24 +98,30 @@ class _Polymarket:
 
     async def search(self, query: Optional[str] = None, limit: int = 10,
                      active_only: bool = True) -> runtime.ProviderResult:
-        params = {"limit": max(1, min(int(limit), 50)), "order": "volume",
-                  "ascending": "false"}
-        if active_only:
-            params.update({"active": "true", "closed": "false"})
-        markets = await self._get("/markets", params)
-        shaped = [self._shape(m) for m in markets if isinstance(m, dict)]
+        limit = max(1, min(int(limit), 50))
         if query:
-            needle = query.lower()
-            matched = [m for m in shaped
-                       if needle in str(m.get("question", "")).lower()
-                       or needle in str(m.get("slug", "")).lower()]
-            # Falling back to the unfiltered set would silently answer a
-            # different question than the one asked.
-            shaped = matched
+            # Polymarket's own search, which matches the whole catalogue. (Filtering
+            # only the top markets by volume answered almost every topic with
+            # nothing once sports lines took over the top of that list.)
+            params = {"q": query, "limit_per_type": 20, "search_profiles": "false", "search_tags": "false"}
+            if active_only:
+                params["events_status"] = "active"
+            found = await self._get("/public-search", params)
+            events = (found[0] or {}).get("events") or [] if found and isinstance(found[0], dict) else []
+            markets = [m for e in events if isinstance(e, dict) for m in (e.get("markets") or [])
+                       if isinstance(m, dict) and (not active_only or (m.get("active") and not m.get("closed")))]
+            shaped = [self._shape(m) for m in markets]
+            shaped.sort(key=lambda m: m.get("volume") or 0, reverse=True)
+            shaped = shaped[:limit]
+        else:
+            params = {"limit": limit, "order": "volume", "ascending": "false"}
+            if active_only:
+                params.update({"active": "true", "closed": "false"})
+            markets = await self._get("/markets", params)
+            shaped = [self._shape(m) for m in markets if isinstance(m, dict)]
         return runtime.ProviderResult(
             value={"query": query, "markets": shaped, "count": len(shaped)},
             cost_micros=0, cost_measured=True, usage=f"markets={len(shaped)}")
-
 
     async def by_slug(self, slug: str) -> runtime.ProviderResult:
         # `closed` must be sent explicitly: without it the list endpoint can
