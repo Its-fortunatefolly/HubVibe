@@ -88,6 +88,10 @@ Shared:
 - MPP_CHALLENGE_TTL_SECONDS       default "300"
 - MPP_CHALLENGE_SECRET            signs challenges when STRIPE_SECRET_KEY is
                                    not set (the EVM rail needs no Stripe)
+- MPP_HASH_LEDGER_PATH            default /data/hubvibe-mpp-hashes.db: the
+                                   durable record of spent `hash` credentials
+                                   (tempo and evm), on the persistent volume
+                                   next to the worker ledger
 """
 
 import base64
@@ -98,6 +102,8 @@ import json
 import logging
 import os
 import re
+import sqlite3
+import threading
 import time
 from typing import Optional
 
@@ -162,6 +168,73 @@ _TRANSFER_EVENT_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f5
 
 # Best-effort, single-instance replay guard -- see module docstring.
 _used_credentials: set = set()
+
+# --- durable replay record for `hash` credentials (tempo and evm) -------------
+#
+# A hash credential is a transaction hash plus a challenge, and nothing ties
+# the hash to ONE challenge instance: the same on-chain transfer satisfies any
+# fresh challenge for the same amount and recipient. The in-process set above
+# forgets on every restart, after which any past transfer would pay again for
+# a new call, forever. So a verified hash is written here, on the persistent
+# volume, before access is granted; the PRIMARY KEY decides the one winner.
+# Every new purchase is a new transfer with its own hash, so repeat buying is
+# untouched: only a transfer that has already paid is refused.
+#
+# If the record cannot be written, the payment is refused (fail closed), and
+# the reason is logged loudly rather than reading as "not configured".
+_HASH_LEDGER_SCHEMA = """
+CREATE TABLE IF NOT EXISTS mpp_hash_claims (
+    tx_hash    TEXT PRIMARY KEY,
+    method     TEXT NOT NULL,
+    claimed_at REAL NOT NULL
+)
+"""
+_hash_ledger_lock = threading.Lock()
+
+
+def _hash_ledger_path() -> str:
+    return os.environ.get("MPP_HASH_LEDGER_PATH") or "/data/hubvibe-mpp-hashes.db"
+
+
+def _claim_hash(tx_hash: str, method: str) -> bool:
+    """True only for the first durable claim of this hash; False if it was
+    already spent or the record could not be written. Never raises."""
+    try:
+        with _hash_ledger_lock:
+            conn = sqlite3.connect(_hash_ledger_path(), timeout=10, isolation_level=None)
+            try:
+                conn.execute(_HASH_LEDGER_SCHEMA)
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO mpp_hash_claims (tx_hash, method, claimed_at) "
+                    "VALUES (?, ?, ?)",
+                    (tx_hash.lower(), method, time.time()),
+                )
+                return cursor.rowcount == 1
+            finally:
+                conn.close()
+    except Exception as exc:
+        logging.getLogger(__name__).error(
+            "MPP %s payment REFUSED: the spent-hash record at %s could not be written "
+            "(%s: %s). Set MPP_HASH_LEDGER_PATH to a writable persistent path.",
+            method, _hash_ledger_path(), type(exc).__name__, exc,
+        )
+        return False
+
+
+def _release_hash(tx_hash: str) -> None:
+    """Undo a claim whose paid job then failed, so the retry is accepted.
+    Never raises."""
+    try:
+        with _hash_ledger_lock:
+            conn = sqlite3.connect(_hash_ledger_path(), timeout=10, isolation_level=None)
+            try:
+                conn.execute(_HASH_LEDGER_SCHEMA)
+                conn.execute("DELETE FROM mpp_hash_claims WHERE tx_hash = ?", (tx_hash.lower(),))
+            finally:
+                conn.close()
+    except Exception as exc:
+        logging.getLogger(__name__).error("MPP spent-hash release failed for %s: %s: %s",
+                     tx_hash, type(exc).__name__, exc)
 
 
 def _secret_key() -> Optional[bytes]:
@@ -710,8 +783,9 @@ def _verify_tempo(challenge: dict, payload: dict) -> bool:
         # not implemented -- fail closed rather than guess at validity.
         return False
     tx_hash = payload.get("hash")
-    if not tx_hash or not isinstance(tx_hash, str):
+    if not isinstance(tx_hash, str) or not re.match(r"^0x[0-9a-fA-F]{64}$", tx_hash):
         return False
+    tx_hash = tx_hash.lower()
     if tx_hash in _used_credentials:
         return False
     try:
@@ -723,8 +797,26 @@ def _verify_tempo(challenge: dict, payload: dict) -> bool:
         return False
     if str(receipt.get("status")) not in ("0x1", "1"):
         return False
-    if not _receipt_matches(receipt, request_obj):
+    transfer = _matching_transfer(receipt, request_obj)
+    if transfer is None:
         return False
+    if not _claim_hash(tx_hash, "tempo"):
+        return False
+    # The same facts an evm (and x402) settlement records, so the worker
+    # ledger names the payer and the receipt says "paid": the router marks a
+    # call settled only when it can name who paid.
+    if len(_settlements) >= _SETTLEMENTS_MAX:
+        _settlements.clear()
+    _settlements[tx_hash] = {
+        "rail": "mpp",
+        "method": "tempo",
+        "payer": transfer["payer"],
+        "pay_to": transfer["recipient"],
+        "amount_atomic": transfer["amount"],
+        "asset": transfer["token"],
+        "network": f"eip155:{_TEMPO_CHAIN_ID}",
+        "tx_hash": tx_hash,
+    }
     _used_credentials.add(tx_hash)
     return True
 
@@ -784,6 +876,8 @@ def _verify_evm(challenge: dict, payload: dict) -> bool:
         return False
     transfer = _matching_transfer(receipt, request_obj)
     if transfer is None:
+        return False
+    if not _claim_hash(tx_hash, "evm"):
         return False
     if len(_settlements) >= _SETTLEMENTS_MAX:
         _settlements.clear()
@@ -897,9 +991,13 @@ def release_credential(authorization_header: str) -> None:
     try:
         decoded = json.loads(_b64url_decode(authorization_header))
         payload = decoded.get("payload") or {}
-        for field in ("spt", "hash"):
-            value = payload.get(field)
-            if isinstance(value, str):
-                _used_credentials.discard(value)
+        spt = payload.get("spt")
+        if isinstance(spt, str):
+            _used_credentials.discard(spt)
+        tx_hash = payload.get("hash")
+        if isinstance(tx_hash, str):
+            _used_credentials.discard(tx_hash)
+            _used_credentials.discard(tx_hash.lower())
+            _release_hash(tx_hash)
     except Exception:
         pass
