@@ -1,7 +1,7 @@
 # HubVibe
 
-**One node, 62 machine-payable jobs, one price per call, one receipt per job.**
-HubVibe sells work to autonomous agents over HTTP 402: 57 workers under
+**One node, 63 machine-payable jobs, one price per call, one receipt per job.**
+HubVibe sells work to autonomous agents over HTTP 402: 58 workers under
 `/work/*` — LLM inference, live web search and page extraction, Base chain
 reads, spot and prediction-market data, BigQuery analysis and forecasting,
 deterministic regression and probability statistics,
@@ -157,7 +157,7 @@ Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
 The same payment gate sells a wider catalog beside the audits — each worker
 validated for free before any payment is read, never billed for a call that
 produced no result, with per-provider retries, exponential backoff, failover
-and a circuit breaker behind it. All 57 are in the catalog; every one the node can serve is live on the public node at hubvibe-io.com (`GET /work` lists
+and a circuit breaker behind it. All 58 are in the catalog; every one the node can serve is live on the public node at hubvibe-io.com (`GET /work` lists
 them, free). On any other deployment a worker whose provider is not
 configured is absent, with a specific reason, until it is.
 

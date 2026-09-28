@@ -1049,6 +1049,34 @@ CATALOG = [
                        "tables shipped with the node."),
         requires=("property_data",)),
     Worker(
+        name="travel.flight_status", price_usd=0.25, tier="standard",
+        title="Flight and airport status right now",
+        description=(
+            "What is happening at an airport, or to a flight, now. By airport code (IATA "
+            "or ICAO): FAA ground stops, ground delay programs with average and max "
+            "delay, closures and runway configuration (US); the live departure and "
+            "arrival board with gates and status (Norway, Avinor); current METAR and TAF "
+            "(any ICAO airport); aircraft in the air around it. By callsign: that "
+            "aircraft's live position, altitude and speed. Input: airport or callsign; "
+            "optional flight, direction, hours_ahead."),
+        tags=["flights", "flight-status", "airport", "delays", "departures", "arrivals", "aviation", "weather", "live"],
+        input_schema=dict(_obj({
+            "airport": {"type": "string", "minLength": 3, "maxLength": 4, "description": "IATA (OSL, JFK) or ICAO (ENGM, KJFK) code."},
+            "callsign": {"type": "string", "minLength": 2, "maxLength": 8,
+                         "description": "Callsign as broadcast (SAS1411, UAL123): the aircraft's live position."},
+            "flight": {"type": "string", "minLength": 2, "maxLength": 8, "description": "Flight number to pick from the board (SK344)."},
+            "direction": {"type": "string", "enum": ["both", "departures", "arrivals"], "description": "Board direction. Default both."},
+            "hours_ahead": {"type": "integer", "minimum": 1, "maximum": 12, "description": "Board window ahead, hours. Default 3."},
+        }, []), anyOf=[{"required": ["airport"]}, {"required": ["callsign"]}]),
+        returns=("query{}, airport{iata, icao, name, city, country, lat, lon}, delays{status, ground_stop, ground_delay, "
+                 "closure, arrival_delay, departure_delay, runways, notices}, board{departures[], arrivals[], attribution}, "
+                 "weather{metar, taf, flight_category...}, aircraft[], aircraft_scope, coverage{}, attribution[], "
+                 "sections_failed[], notes[], checked_at."),
+        skill="travel.flight_status", max_seconds=45,
+        pricing_basis=("Provisional, standard tier. Provider cost zero: FAA, NOAA and Avinor public feeds and adsb.lol "
+                       "(ODbL), shared per their own refresh pace."),
+        requires=("aviation",)),
+    Worker(
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
@@ -1590,6 +1618,8 @@ _EXAMPLE_OVERRIDES = {
     "email.verify": {"email": "support@github.com"},
     # The Census Bureau's own address, so the example geocodes on the first try.
     "property.context": {"address": "4600 Silver Hill Rd, Washington, DC 20233"},
+    # Oslo: a live Avinor board, a METAR and aircraft overhead in one example.
+    "travel.flight_status": {"airport": "OSL", "hours_ahead": 2},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},

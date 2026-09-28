@@ -15,14 +15,14 @@ and one or more async methods returning runtime.ProviderResult.
 
 from . import (  # noqa: F401
     base_rpc, bigquery, bluesky, brave, code_exec, coinbase_market, completion, duffel, equities,
-    gemini, google_routes, imagen, liteapi, macro, mailcheck, maps_grounding, mastodon, mcp_probe, news, opendata, property_data,
+    gemini, google_routes, imagen, liteapi, macro, mailcheck, maps_grounding, mastodon, mcp_probe, news, opendata, property_data, aviation,
     polymarket, search_grounding, sec_edgar, shopify_cart, stt, tabular, translate, tts, veo, web, x_api, youtube,
 )
 
 ALL = (gemini, bigquery, base_rpc, coinbase_market, polymarket, web,
       search_grounding, code_exec, imagen, tts, stt, mcp_probe, completion,
       maps_grounding, veo, equities, sec_edgar, opendata, google_routes, youtube,
-      bluesky, mastodon, x_api, duffel, news, macro, tabular, liteapi, shopify_cart, brave, translate, mailcheck, property_data)
+      bluesky, mastodon, x_api, duffel, news, macro, tabular, liteapi, shopify_cart, brave, translate, mailcheck, property_data, aviation)
 
 
 def health() -> dict:

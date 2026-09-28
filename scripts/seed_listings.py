@@ -99,6 +99,7 @@ ROUTES = [
     ("utility", "/work/data/macro", {"indicator": "inflation", "country": "JP", "last": 5}),
     ("utility", "/work/email/verify", {"email": "support@github.com"}),
     ("standard", "/work/property/context", {"address": "4600 Silver Hill Rd, Washington, DC 20233"}),
+    ("standard", "/work/travel/flight_status", {"airport": "OSL", "hours_ahead": 2}),
     ("standard", "/work/commerce/shipping", {"url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10", "ship_to": {"country": "US", "province": "NY", "postal_code": "10001"}}),
     ("standard", "/work/travel/hotels", {"place": "hotel near Shibuya station Tokyo", "days_ahead": 30, "nights": 2, "max_hotels": 3}),
     ("standard", "/work/travel/flights", {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3}),

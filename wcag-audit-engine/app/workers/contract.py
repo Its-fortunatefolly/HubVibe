@@ -352,6 +352,20 @@ _NORMALITY = {
 }
 
 
+_BOARD_ROW = _obj({
+    "flight": _s("Flight number.", "SK344", nullable=True), "airline": _s("Airline code.", "SK", nullable=True),
+    "direction": _s("D or A.", "D", nullable=True), "other_airport": _s("Destination or origin (IATA).", "TRD", nullable=True),
+    "other_airport_name": _s("Its name.", "Trondheim Airport, Værnes", nullable=True),
+    "scheduled": _s("Scheduled time (UTC).", "2026-09-28T11:15:00Z", nullable=True),
+    "status": _s("departed, arrived, new time, new info or cancelled.", "departed", nullable=True),
+    "status_time": _s("Time the status refers to (UTC).", "2026-09-28T11:22:38Z", nullable=True),
+    "gate": _s("Gate.", "A20", nullable=True), "check_in": _s("Check-in rows.", "4-6", nullable=True),
+    "belt": _s("Baggage belt (arrivals).", "3", nullable=True), "delayed": _b("Marked delayed.", False),
+    "sector": _s("domestic, schengen or international.", "domestic", nullable=True),
+}, ["flight", "airline", "direction", "other_airport", "other_airport_name", "scheduled", "status", "status_time", "gate",
+    "check_in", "belt", "delayed", "sector"], "One flight on the board.")
+
+
 def _nobj(properties: dict, required: list, description: str) -> dict:
     """An object that is null when the metric was not requested or is undefined."""
     return {"type": ["object", "null"], "properties": properties, "required": required,
@@ -1128,6 +1142,73 @@ OUTPUT_SCHEMAS = {
     }, ["email", "normalized", "local_part", "domain", "domain_ascii", "verdict", "reason", "syntax_valid",
         "domain_exists", "accepts_mail", "mx", "mail_provider", "mailbox", "disposable", "role_account",
         "free_provider", "did_you_mean", "disposable_list_as_of", "notes", "checked_at"]),
+
+    "travel.flight_status": _obj({
+        "query": _obj({"airport": _s("Airport code sent.", "OSL", nullable=True), "callsign": _s("Callsign sent.", "SAS51D", nullable=True),
+                       "flight": _s("Flight filter.", "SK344", nullable=True),
+                       "direction": _enum(["both", "departures", "arrivals"], "Board direction.", "both"),
+                       "hours_ahead": _i("Board window ahead, hours.", 3)},
+                      ["airport", "callsign", "flight", "direction", "hours_ahead"], "What was asked."),
+        "airport": _nobj({"iata": _s("IATA code.", "OSL", nullable=True), "icao": _s("ICAO code.", "ENGM", nullable=True),
+                          "name": _s("Airport.", "Oslo-Gardermoen International Airport"), "city": _s("City.", "Oslo (Gardermoen)", nullable=True),
+                          "country": _s("ISO country.", "NO"), "lat": _n("Latitude.", 60.1939), "lon": _n("Longitude.", 11.1004)},
+                         ["iata", "icao", "name", "city", "country", "lat", "lon"], "The airport (OurAirports, public domain); null for a callsign-only query."),
+        "delays": _nobj({
+            "status": _enum(["normal", "delays", "ground_delay", "ground_stop", "closed"], "Overall FAA status.", "ground_delay"),
+            "ground_stop": {"type": ["object", "null"], "description": "Ground stop in force.", "examples": [None]},
+            "ground_delay": {"type": ["object", "null"], "description": "Ground delay program: reason, from, until, avg_minutes, max_minutes.",
+                             "examples": [{"reason": "low ceilings", "from": "2026-09-28T15:00:00Z", "until": "2026-09-28T23:29:00Z", "avg_minutes": 44, "max_minutes": 120}]},
+            "closure": {"type": ["object", "null"], "description": "Closure notice.", "examples": [None]},
+            "arrival_delay": {"type": ["object", "null"], "description": "Arrival delays.", "examples": [None]},
+            "departure_delay": {"type": ["object", "null"], "description": "Departure delays.", "examples": [None]},
+            "deicing": _b("De-icing in progress.", False),
+            "runways": _nobj({"arrival": _s("Arrival runways.", "28L/28R", nullable=True), "departure": _s("Departure runways.", "28L/28R", nullable=True),
+                              "arrival_rate_per_hour": _i("Arrival rate.", 30, nullable=True)},
+                             ["arrival", "departure", "arrival_rate_per_hour"], "Runway configuration; null when not published."),
+            "notices": _arr(_s("A notice.", "!SFO 09/165 ..."), "Free-form FAA notices.", []),
+            "source": _s("Source.", "FAA NAS Status"),
+        }, ["status", "ground_stop", "ground_delay", "closure", "arrival_delay", "departure_delay", "deicing", "runways", "notices", "source"],
+            "FAA National Airspace System status (US airports); null elsewhere."),
+        "board": _nobj({
+            "departures": _arr(_BOARD_ROW, "Departures, by scheduled time.", []),
+            "arrivals": _arr(_BOARD_ROW, "Arrivals, by scheduled time.", []),
+            "last_update": _s("When Avinor last updated the board.", "2026-09-28T12:29:26.891757Z", nullable=True),
+            "attribution": _s("Required credit.", "Flight data from Avinor"),
+            "attribution_url": _s("Credit link.", "https://www.avinor.no"),
+        }, ["departures", "arrivals", "last_update", "attribution", "attribution_url"], "Live board (Norway, Avinor); null elsewhere."),
+        "weather": _nobj({
+            "metar": _s("Raw METAR.", "METAR ENGM 281220Z 17008KT 9999 -RA BKN012 14/12 Q1017", nullable=True),
+            "taf": _s("Raw TAF.", "TAF ENGM 281100Z 2812/2912 ...", nullable=True),
+            "flight_category": _s("VFR, MVFR, IFR or LIFR.", "MVFR", nullable=True),
+            "temperature_c": _n("Temperature.", 14, nullable=True), "dewpoint_c": _n("Dew point.", 12, nullable=True),
+            "wind_dir_deg": {"type": ["number", "string", "null"], "description": "Wind direction (VRB when variable).", "examples": [170]},
+            "wind_kt": _n("Wind speed.", 8, nullable=True), "gust_kt": _n("Gusts.", 24, nullable=True),
+            "visibility": _s("Visibility as reported.", "6+", nullable=True), "weather": _s("Present weather.", "-RA", nullable=True),
+            "observed_at": _s("Report time.", "2026-09-28T12:20:00.000Z", nullable=True),
+            "source": _s("Source.", "NOAA Aviation Weather Center"),
+        }, ["metar", "taf", "flight_category", "temperature_c", "dewpoint_c", "wind_dir_deg", "wind_kt", "gust_kt", "visibility",
+            "weather", "observed_at", "source"], "Airport weather; null without a METAR."),
+        "aircraft": _arr(_obj({
+            "callsign": _s("Callsign.", "SAS51D", nullable=True), "hex": _s("ICAO 24-bit address.", "4cac79", nullable=True),
+            "registration": _s("Registration.", "EI-SIJ", nullable=True), "type": _s("Aircraft type.", "A20N", nullable=True),
+            "lat": _n("Latitude.", 59.561), "lon": _n("Longitude.", 10.538),
+            "altitude_ft": _n("Barometric altitude.", 36975, nullable=True), "on_ground": _b("On the ground.", False),
+            "ground_speed_kt": _n("Ground speed.", 486.8, nullable=True), "track_deg": _n("Track.", 76.8, nullable=True),
+            "vertical_rate_fpm": _n("Climb/descent rate.", 0, nullable=True), "squawk": _s("Squawk.", "6220", nullable=True),
+            "distance_km": _n("Distance from the airport.", 12.4, nullable=True),
+        }, ["callsign", "hex", "registration", "type", "lat", "lon", "altitude_ft", "on_ground", "ground_speed_kt", "track_deg",
+            "vertical_rate_fpm", "squawk", "distance_km"], "An aircraft (adsb.lol, ODbL)."), "Aircraft, nearest first.", []),
+        "aircraft_scope": _s("What the aircraft list covers.", "within 25 nautical miles", nullable=True),
+        "coverage": _obj({"delays": _b("FAA covers this airport.", False), "board": _b("Avinor covers it.", True),
+                          "weather": _b("A METAR station exists.", True), "aircraft": _b("Live positions.", True)},
+                         ["delays", "board", "weather", "aircraft"], "Which sources cover this query."),
+        "attribution": _arr(_obj({"text": _s("Credit.", "Flight data from Avinor"), "url": _s("Link.", "https://www.avinor.no")},
+                                 ["text", "url"], "A required credit."), "Credits to show with the data.", []),
+        "sections_failed": _arr(_s("A section whose source did not answer.", "aircraft"), "Empty when none.", []),
+        "notes": _arr(_s("A caveat.", "Live boards cover Norway."), "Caveats; empty when none.", []),
+        "checked_at": _CHECKED_AT,
+    }, ["query", "airport", "delays", "board", "weather", "aircraft", "aircraft_scope", "coverage", "attribution",
+        "sections_failed", "notes", "checked_at"]),
 
     "property.context": _obj({
         "input": _obj({"address": _s("Address as sent; null when a point was sent.", "4600 Silver Hill Rd, Washington, DC 20233", nullable=True),
@@ -1988,6 +2069,12 @@ REPRESENTATIVE_QUERIES = {
         "GDP of South Korea in US dollars for the last ten years",
         "euro area unemployment, monthly, from Eurostat",
         "any World Bank indicator for a country as a series with the latest value",
+    ],
+    "travel.flight_status": [
+        "is there a ground stop or delay program at SFO right now",
+        "live departures board for Oslo airport with gates and status",
+        "where is flight SAS1411 right now, altitude and speed",
+        "current METAR and TAF weather at an airport",
     ],
     "property.context": [
         "flood zone, hazard risk and neighbourhood facts for a US address",
