@@ -18,3 +18,5 @@ solana==0.36.12
 # Coinbase CDP facilitator auth: per-request JWTs for api.cdp.coinbase.com
 # (mainnet x402 settlement + the x402 Bazaar listing).
 cdp-sdk==1.48.1
+# email.verify: MX lookups (wcag-audit-engine/app/workers/providers/mailcheck.py).
+dnspython==2.8.0

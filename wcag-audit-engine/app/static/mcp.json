@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -14710,6 +14710,498 @@
         "method": "POST",
         "path": "/work/data/macro",
         "price_usd": 0.1
+      }
+    },
+    {
+      "name": "hubvibe_email_verify",
+      "title": "Verify an email address before you send",
+      "description": "Will mail to this address arrive? Checked now at the source: syntax, the domain's own DNS (MX, null MX, no such domain) and its own mail server, asked whether the mailbox exists and whether it accepts every address (catch-all). No message is sent. Flags disposable domains, role accounts (info@, sales@), free providers, likely typos (gmial.com) and the mail provider. Verdict: deliverable, undeliverable, risky or unknown, with the reason. Input: email. $0.02 per call. Returns: email, normalized, local_part, domain, domain_ascii, verdict, reason, syntax_valid, domain_exists, accepts_mail, mx[{host, priority}], mail_provider, mailbox{checked, exists, catch_all, smtp_code, smtp_message, mx_host}, disposable, role_account, free_provider, did_you_mean, disposable_list_as_of, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 320,
+            "description": "One email address, such as jane@example.com."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string",
+                "description": "The address as given.",
+                "examples": [
+                  "support@github.com"
+                ]
+              },
+              "normalized": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Local part with the domain lower-cased and punycoded; null when the syntax is invalid.",
+                "examples": [
+                  "support@github.com"
+                ]
+              },
+              "local_part": {
+                "type": "string",
+                "description": "The part before @.",
+                "examples": [
+                  "support"
+                ]
+              },
+              "domain": {
+                "type": "string",
+                "description": "The domain as given.",
+                "examples": [
+                  "github.com"
+                ]
+              },
+              "domain_ascii": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The domain in ASCII (punycode for internationalised names); null when invalid.",
+                "examples": [
+                  "github.com"
+                ]
+              },
+              "verdict": {
+                "type": "string",
+                "enum": [
+                  "deliverable",
+                  "undeliverable",
+                  "risky",
+                  "unknown"
+                ],
+                "description": "deliverable: the mail server confirmed the mailbox. undeliverable: bad syntax, no such domain, no mail server, or no such mailbox. risky: disposable domain or a server that accepts every address. unknown: the server would not say.",
+                "examples": [
+                  "deliverable"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "mailbox_exists",
+                  "invalid_syntax",
+                  "domain_not_found",
+                  "domain_accepts_no_mail",
+                  "no_mail_server",
+                  "mailbox_not_found",
+                  "disposable_domain",
+                  "accept_all_domain",
+                  "smtp_refused",
+                  "smtp_try_later",
+                  "smtp_unreachable",
+                  "smtp_inconclusive"
+                ],
+                "description": "Why the verdict is what it is.",
+                "examples": [
+                  "mailbox_exists"
+                ]
+              },
+              "syntax_valid": {
+                "type": "boolean",
+                "description": "The address is well-formed.",
+                "examples": [
+                  true
+                ]
+              },
+              "domain_exists": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "The domain exists in DNS; null when not looked up.",
+                "examples": [
+                  true
+                ]
+              },
+              "accepts_mail": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "The domain has somewhere to deliver mail (MX or address fallback); null when not looked up.",
+                "examples": [
+                  true
+                ]
+              },
+              "mx": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string",
+                      "description": "Mail server host.",
+                      "examples": [
+                        "aspmx.l.google.com"
+                      ]
+                    },
+                    "priority": {
+                      "type": "integer",
+                      "description": "MX preference (lower is tried first).",
+                      "examples": [
+                        1
+                      ]
+                    }
+                  },
+                  "required": [
+                    "host",
+                    "priority"
+                  ],
+                  "description": "One mail server."
+                },
+                "description": "The domain's mail servers, in the order mail tries them.",
+                "examples": [
+                  []
+                ]
+              },
+              "mail_provider": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Who runs the domain's mail (google, microsoft, yahoo, zoho, proton, amazon_ses...); null when not recognised.",
+                "examples": [
+                  "google"
+                ]
+              },
+              "mailbox": {
+                "type": "object",
+                "properties": {
+                  "checked": {
+                    "type": "boolean",
+                    "description": "The mail server gave a yes-or-no answer about the mailbox.",
+                    "examples": [
+                      true
+                    ]
+                  },
+                  "exists": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "The mailbox exists; null when it could not be proved.",
+                    "examples": [
+                      true
+                    ]
+                  },
+                  "catch_all": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "The server also accepted a random address on the domain; null when not tested.",
+                    "examples": [
+                      false
+                    ]
+                  },
+                  "smtp_code": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "The server's reply code to the mailbox question.",
+                    "examples": [
+                      250
+                    ]
+                  },
+                  "smtp_message": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The server's reply text, trimmed.",
+                    "examples": [
+                      "2.1.5 OK"
+                    ]
+                  },
+                  "mx_host": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The mail server that answered.",
+                    "examples": [
+                      "aspmx.l.google.com"
+                    ]
+                  }
+                },
+                "required": [
+                  "checked",
+                  "exists",
+                  "catch_all",
+                  "smtp_code",
+                  "smtp_message",
+                  "mx_host"
+                ],
+                "description": "What the mail server said."
+              },
+              "disposable": {
+                "type": "boolean",
+                "description": "The domain is a known throwaway-mail domain.",
+                "examples": [
+                  false
+                ]
+              },
+              "role_account": {
+                "type": "boolean",
+                "description": "The local part is a role (info, sales, support...), not a person.",
+                "examples": [
+                  true
+                ]
+              },
+              "free_provider": {
+                "type": "boolean",
+                "description": "A free consumer mail provider (gmail.com, outlook.com...).",
+                "examples": [
+                  false
+                ]
+              },
+              "did_you_mean": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "A likely intended address when the domain looks like a typo of a common provider.",
+                "examples": [
+                  "jane@gmail.com"
+                ]
+              },
+              "disposable_list_as_of": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Date of the disposable-domain list used.",
+                "examples": [
+                  "2026-09-28"
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "Role address: it usually reaches a team or a shared inbox, not one person."
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "email",
+              "normalized",
+              "local_part",
+              "domain",
+              "domain_ascii",
+              "verdict",
+              "reason",
+              "syntax_valid",
+              "domain_exists",
+              "accepts_mail",
+              "mx",
+              "mail_provider",
+              "mailbox",
+              "disposable",
+              "role_account",
+              "free_provider",
+              "did_you_mean",
+              "disposable_list_as_of",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          }
+        },
+        "title": "email.verify response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Verify an email address before you send"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/email/verify",
+        "price_usd": 0.02
       }
     },
     {
