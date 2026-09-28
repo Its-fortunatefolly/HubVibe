@@ -940,22 +940,22 @@ CATALOG = [
         name="news.search", price_usd=0.25, tier="standard",
         title="Current news on any topic, in any language",
         description=(
-            "Current headlines on any topic from the publishers of the reader's own "
-            "country and language: the query goes to the Google News edition for the "
-            "language and region asked (71 editions verified: en, ja, ko, zh, de, fr, "
-            "es, pt, ar, hi, id, th, vi and more), and a ticker adds Yahoo Finance's "
-            "own feed for that stock, including non-US listings. Merged, de-duplicated, "
-            "newest first, with publisher, time and summary; a window in hours "
-            "optional. Input: query and/or symbol; optional language, region, limit."),
-        tags=["news", "headlines", "current", "multilingual", "press", "finance", "google-news", "live"],
+            "Current news on any topic in any language from the GDELT Project, which "
+            "reads the world's press every 15 minutes: titles matched in their original "
+            "script (半導体, 반도체, tarifs), optionally only articles in one language, "
+            "newest first, with publisher, language and link; a US ticker searches the "
+            "company's name. Window up to 30 days (default 72 hours). Carries GDELT's "
+            "required citation. Input: query and/or symbol; optional language, limit, "
+            "since_hours."),
+        tags=["news", "headlines", "current", "multilingual", "press", "finance", "gdelt", "live"],
         input_schema=_obj({
             "query": {"type": "string", "minLength": 1, "maxLength": 300,
                       "description": "Topic words in any language (半導体, 반도체, tarifs douaniers)."},
             "symbol": {"type": "string", "pattern": "^[A-Za-z0-9.\\-=^]{1,12}$",
-                       "description": "Optional ticker (AAPL, 7203.T, 005930.KS) for that stock's own news feed."},
+                       "description": "Optional US ticker (AAPL, MSFT): searches the company's name from the SEC ticker table."},
             "language": _LANGUAGE,
             "region": {"type": "string", "pattern": "^[A-Za-z]{2}$",
-                       "description": "ISO 3166-1 alpha-2 country whose publishers to search (JP, KR, GB). Default: the language's home edition."},
+                       "description": "Accepted for compatibility; GDELT does not record a publisher's country, so use language."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Default 20."},
             "since_hours": {"type": "integer", "minimum": 1, "maximum": 720,
                             "description": "Only articles published within this many hours."},
@@ -964,7 +964,7 @@ CATALOG = [
                  "articles[{title, url, source_name, source_url, published_at, summary, feed}], article_count, "
                  "limit, since_hours, notes[], checked_at."),
         skill="news.search", max_seconds=45,
-        pricing_basis="Provisional. Provider cost zero (public feeds); one request per feed searched.",
+        pricing_basis="Provisional. BigQuery scan of GDELT's public table, about 100 MB per day searched (under $0.001).",
         requires=("news",)),
     Worker(
         name="data.macro", price_usd=0.10, tier="utility",

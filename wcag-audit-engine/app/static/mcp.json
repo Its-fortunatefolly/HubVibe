@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -5429,7 +5429,7 @@
                       "type": "string",
                       "description": "Article link.",
                       "examples": [
-                        "https://news.google.com/rss/articles/CBMi..."
+                        "https://www.reuters.com/markets/..."
                       ]
                     },
                     "source_name": {
@@ -5461,7 +5461,7 @@
                   ],
                   "description": "One recent headline."
                 },
-                "description": "Recent headlines read for this call (Google News), newest first; empty when none.",
+                "description": "Recent headlines read for this call (GDELT, cite https://www.gdeltproject.org/), newest first; empty when none.",
                 "examples": [
                   []
                 ]
@@ -5473,7 +5473,7 @@
                 ],
                 "description": "Why headlines are missing or partial; null when they were read cleanly.",
                 "examples": [
-                  "Headlines unavailable for this call: Google News (US:en) timed out"
+                  "Headlines unavailable for this call: gdelt:query: BigQuery did not finish within 60s"
                 ]
               },
               "analysis": {
@@ -8591,7 +8591,7 @@
                       "type": "string",
                       "description": "Article link.",
                       "examples": [
-                        "https://news.google.com/rss/articles/CBMi..."
+                        "https://www.reuters.com/markets/..."
                       ]
                     },
                     "source_name": {
@@ -8623,7 +8623,7 @@
                   ],
                   "description": "One recent headline."
                 },
-                "description": "Recent headlines read for this call (Google News), newest first; empty when none.",
+                "description": "Recent headlines read for this call (GDELT, cite https://www.gdeltproject.org/), newest first; empty when none.",
                 "examples": [
                   []
                 ]
@@ -8635,7 +8635,7 @@
                 ],
                 "description": "Why headlines are missing or partial; null when they were read cleanly.",
                 "examples": [
-                  "Headlines unavailable for this call: Google News (US:en) timed out"
+                  "Headlines unavailable for this call: gdelt:query: BigQuery did not finish within 60s"
                 ]
               },
               "model": {
@@ -13766,7 +13766,7 @@
     {
       "name": "hubvibe_news_search",
       "title": "Current news on any topic, in any language",
-      "description": "Current headlines on any topic from the publishers of the reader's own country and language: the query goes to the Google News edition for the language and region asked (71 editions verified: en, ja, ko, zh, de, fr, es, pt, ar, hi, id, th, vi and more), and a ticker adds Yahoo Finance's own feed for that stock, including non-US listings. Merged, de-duplicated, newest first, with publisher, time and summary; a window in hours optional. Input: query and/or symbol; optional language, region, limit. $0.25 per call. Returns: query, symbol, language, edition{}, sources_searched[], sources_ok[], sources_failed[], articles[{title, url, source_name, source_url, published_at, summary, feed}], article_count, limit, since_hours, notes[], checked_at.",
+      "description": "Current news on any topic in any language from the GDELT Project, which reads the world's press every 15 minutes: titles matched in their original script (半導体, 반도체, tarifs), optionally only articles in one language, newest first, with publisher, language and link; a US ticker searches the company's name. Window up to 30 days (default 72 hours). Carries GDELT's required citation. Input: query and/or symbol; optional language, limit, since_hours. $0.25 per call. Returns: query, symbol, language, edition{}, sources_searched[], sources_ok[], sources_failed[], articles[{title, url, source_name, source_url, published_at, summary, feed}], article_count, limit, since_hours, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -13780,7 +13780,7 @@
           "symbol": {
             "type": "string",
             "pattern": "^[A-Za-z0-9.\\-=^]{1,12}$",
-            "description": "Optional ticker (AAPL, 7203.T, 005930.KS) for that stock's own news feed."
+            "description": "Optional US ticker (AAPL, MSFT): searches the company's name from the SEC ticker table."
           },
           "language": {
             "type": "string",
@@ -13791,7 +13791,7 @@
           "region": {
             "type": "string",
             "pattern": "^[A-Za-z]{2}$",
-            "description": "ISO 3166-1 alpha-2 country whose publishers to search (JP, KR, GB). Default: the language's home edition."
+            "description": "Accepted for compatibility; GDELT does not record a publisher's country, so use language."
           },
           "limit": {
             "type": "integer",
@@ -13860,74 +13860,44 @@
                   "string",
                   "null"
                 ],
-                "description": "Ticker whose own feed was read; null when none.",
+                "description": "Ticker whose company name was searched; null when none.",
                 "examples": [
-                  "7203.T"
+                  "AAPL"
                 ]
               },
               "language": {
-                "type": "string",
-                "description": "BCP-47 language the edition was chosen for.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "BCP-47 language asked for; null when none.",
                 "examples": [
                   "ja"
                 ]
               },
-              "edition": {
+              "language_filter": {
                 "type": [
-                  "object",
+                  "string",
                   "null"
                 ],
-                "properties": {
-                  "hl": {
-                    "type": "string",
-                    "description": "Google News language code.",
-                    "examples": [
-                      "ja"
-                    ]
-                  },
-                  "gl": {
-                    "type": "string",
-                    "description": "Country edition.",
-                    "examples": [
-                      "JP"
-                    ]
-                  },
-                  "ceid": {
-                    "type": "string",
-                    "description": "Edition id.",
-                    "examples": [
-                      "JP:ja"
-                    ]
-                  },
-                  "verified": {
-                    "type": "boolean",
-                    "description": "True for the 71 editions verified to answer; false for a pair tried on request.",
-                    "examples": [
-                      true
-                    ]
-                  }
-                },
-                "required": [
-                  "hl",
-                  "gl",
-                  "ceid",
-                  "verified"
-                ],
-                "description": "The Google News edition used; null when no query was given."
+                "description": "Language the articles were limited to; null when every language was searched.",
+                "examples": [
+                  "ja"
+                ]
               },
               "sources_searched": {
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "description": "Feed id.",
+                  "description": "Search id.",
                   "examples": [
-                    "google_news:JP:ja"
+                    "gdelt:query"
                   ]
                 },
-                "description": "Feeds this call asked.",
+                "description": "Searches this call ran.",
                 "examples": [
                   [
-                    "google_news:JP:ja"
+                    "gdelt:query"
                   ]
                 ]
               },
@@ -13935,15 +13905,15 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "description": "Feed id.",
+                  "description": "Search id.",
                   "examples": [
-                    "google_news:JP:ja"
+                    "gdelt:query"
                   ]
                 },
-                "description": "Feeds that answered.",
+                "description": "Searches that answered.",
                 "examples": [
                   [
-                    "google_news:JP:ja"
+                    "gdelt:query"
                   ]
                 ]
               },
@@ -13954,16 +13924,16 @@
                   "properties": {
                     "source": {
                       "type": "string",
-                      "description": "Feed id.",
+                      "description": "Search id.",
                       "examples": [
-                        "yahoo_finance:7203.T"
+                        "gdelt:symbol:7203.T"
                       ]
                     },
                     "reason": {
                       "type": "string",
                       "description": "Why it did not answer this call.",
                       "examples": [
-                        "Yahoo Finance RSS (7203.T) timed out"
+                        "Symbol news covers US-listed tickers"
                       ]
                     }
                   },
@@ -13971,9 +13941,9 @@
                     "source",
                     "reason"
                   ],
-                  "description": "A feed that failed for this call."
+                  "description": "A search that failed for this call."
                 },
-                "description": "Feeds that did not answer, with the reason; never silently dropped.",
+                "description": "Searches that did not answer, with the reason; never silently dropped.",
                 "examples": [
                   []
                 ]
@@ -13985,16 +13955,16 @@
                   "properties": {
                     "title": {
                       "type": "string",
-                      "description": "Headline, publisher suffix removed.",
+                      "description": "Headline in its original language.",
                       "examples": [
                         "半導体株が反発、関税協議の進展で"
                       ]
                     },
                     "url": {
                       "type": "string",
-                      "description": "Article link (Google News links resolve to the publisher).",
+                      "description": "The publisher's article link.",
                       "examples": [
-                        "https://news.google.com/rss/articles/CBMi..."
+                        "https://www.nikkei.com/article/DGXZQO..."
                       ]
                     },
                     "source_name": {
@@ -14002,9 +13972,9 @@
                         "string",
                         "null"
                       ],
-                      "description": "Publisher.",
+                      "description": "Publisher domain.",
                       "examples": [
-                        "日本経済新聞"
+                        "nikkei.com"
                       ]
                     },
                     "source_url": {
@@ -14014,7 +13984,7 @@
                       ],
                       "description": "Publisher site.",
                       "examples": [
-                        "https://www.nikkei.com"
+                        "https://nikkei.com"
                       ]
                     },
                     "published_at": {
@@ -14022,9 +13992,9 @@
                         "string",
                         "null"
                       ],
-                      "description": "Publication time (UTC).",
+                      "description": "When GDELT first saw it (UTC, 15-minute batches).",
                       "examples": [
-                        "2026-09-27T02:32:00Z"
+                        "2026-09-27T02:30:00Z"
                       ]
                     },
                     "summary": {
@@ -14032,20 +14002,29 @@
                         "string",
                         "null"
                       ],
-                      "description": "Plain-text summary when the feed carries one.",
+                      "description": "Summary; GDELT carries none, so null.",
                       "examples": [
-                        "半導体関連株が..."
+                        null
+                      ]
+                    },
+                    "language": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Article language (BCP-47).",
+                      "examples": [
+                        "ja"
                       ]
                     },
                     "feed": {
                       "type": "string",
                       "enum": [
-                        "google_news",
-                        "yahoo_finance"
+                        "gdelt"
                       ],
-                      "description": "Which feed it came from.",
+                      "description": "Which source it came from.",
                       "examples": [
-                        "google_news"
+                        "gdelt"
                       ]
                     }
                   },
@@ -14056,6 +14035,7 @@
                     "source_url",
                     "published_at",
                     "summary",
+                    "language",
                     "feed"
                   ],
                   "description": "One article."
@@ -14077,14 +14057,35 @@
                 ]
               },
               "since_hours": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "description": "Window applied, in hours; null when none.",
+                "type": "integer",
+                "description": "Window searched, in hours.",
                 "examples": [
-                  24
+                  72
                 ]
+              },
+              "attribution": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Required citation.",
+                    "examples": [
+                      "Source: The GDELT Project"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "Required link.",
+                    "examples": [
+                      "https://www.gdeltproject.org/"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "url"
+                ],
+                "description": "The citation GDELT's licence requires with every use."
               },
               "notes": {
                 "type": "array",
@@ -14092,7 +14093,7 @@
                   "type": "string",
                   "description": "A caveat.",
                   "examples": [
-                    "Edition XX:yy returned nothing for this query; results are from the en/US edition."
+                    "GDELT does not record a publisher's country, so region is not a filter."
                   ]
                 },
                 "description": "Caveats; empty when none.",
@@ -14113,7 +14114,7 @@
               "query",
               "symbol",
               "language",
-              "edition",
+              "language_filter",
               "sources_searched",
               "sources_ok",
               "sources_failed",
@@ -14121,6 +14122,7 @@
               "article_count",
               "limit",
               "since_hours",
+              "attribution",
               "notes",
               "checked_at"
             ]

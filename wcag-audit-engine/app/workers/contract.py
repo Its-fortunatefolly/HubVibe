@@ -393,13 +393,13 @@ _CONDITION["properties"]["allowed"] = {"type": ["boolean", "null"], "description
 
 
 _HEADLINE = _obj({"title": _s("Headline.", "Bitcoin steadies as ETF inflows resume"),
-                  "url": _s("Article link.", "https://news.google.com/rss/articles/CBMi..."),
+                  "url": _s("Article link.", "https://www.reuters.com/markets/..."),
                   "source_name": _s("Publisher.", "Reuters", nullable=True),
                   "published_at": _s("Publication time (UTC).", "2026-09-27T09:00:00Z", nullable=True)},
                  ["title", "url", "source_name", "published_at"], "One recent headline.")
-_NEWS = _arr(_HEADLINE, "Recent headlines read for this call (Google News), newest first; empty when none.", [])
+_NEWS = _arr(_HEADLINE, "Recent headlines read for this call (GDELT, cite https://www.gdeltproject.org/), newest first; empty when none.", [])
 _NEWS_NOTE = _s("Why headlines are missing or partial; null when they were read cleanly.",
-                "Headlines unavailable for this call: Google News (US:en) timed out", nullable=True)
+                "Headlines unavailable for this call: gdelt:query: BigQuery did not finish within 60s", nullable=True)
 
 
 OUTPUT_SCHEMAS = {
@@ -1033,36 +1033,37 @@ OUTPUT_SCHEMAS = {
 
     "news.search": _obj({
         "query": _s("Topic searched, as given; null when only a symbol was asked.", "半導体", nullable=True),
-        "symbol": _s("Ticker whose own feed was read; null when none.", "7203.T", nullable=True),
-        "language": _s("BCP-47 language the edition was chosen for.", "ja"),
-        "edition": _nobj({"hl": _s("Google News language code.", "ja"), "gl": _s("Country edition.", "JP"),
-                          "ceid": _s("Edition id.", "JP:ja"),
-                          "verified": _b("True for the 71 editions verified to answer; false for a pair tried on request.", True)},
-                         ["hl", "gl", "ceid", "verified"], "The Google News edition used; null when no query was given."),
-        "sources_searched": _arr(_s("Feed id.", "google_news:JP:ja"), "Feeds this call asked.", ["google_news:JP:ja"]),
-        "sources_ok": _arr(_s("Feed id.", "google_news:JP:ja"), "Feeds that answered.", ["google_news:JP:ja"]),
-        "sources_failed": _arr(_obj({"source": _s("Feed id.", "yahoo_finance:7203.T"),
-                                     "reason": _s("Why it did not answer this call.", "Yahoo Finance RSS (7203.T) timed out")},
-                                    ["source", "reason"], "A feed that failed for this call."),
-                               "Feeds that did not answer, with the reason; never silently dropped.", []),
+        "symbol": _s("Ticker whose company name was searched; null when none.", "AAPL", nullable=True),
+        "language": _s("BCP-47 language asked for; null when none.", "ja", nullable=True),
+        "language_filter": _s("Language the articles were limited to; null when every language was searched.", "ja", nullable=True),
+        "sources_searched": _arr(_s("Search id.", "gdelt:query"), "Searches this call ran.", ["gdelt:query"]),
+        "sources_ok": _arr(_s("Search id.", "gdelt:query"), "Searches that answered.", ["gdelt:query"]),
+        "sources_failed": _arr(_obj({"source": _s("Search id.", "gdelt:symbol:7203.T"),
+                                     "reason": _s("Why it did not answer this call.", "Symbol news covers US-listed tickers")},
+                                    ["source", "reason"], "A search that failed for this call."),
+                               "Searches that did not answer, with the reason; never silently dropped.", []),
         "articles": _arr(_obj({
-            "title": _s("Headline, publisher suffix removed.", "半導体株が反発、関税協議の進展で"),
-            "url": _s("Article link (Google News links resolve to the publisher).", "https://news.google.com/rss/articles/CBMi..."),
-            "source_name": _s("Publisher.", "日本経済新聞", nullable=True),
-            "source_url": _s("Publisher site.", "https://www.nikkei.com", nullable=True),
-            "published_at": _s("Publication time (UTC).", "2026-09-27T02:32:00Z", nullable=True),
-            "summary": _s("Plain-text summary when the feed carries one.", "半導体関連株が...", nullable=True),
-            "feed": _enum(["google_news", "yahoo_finance"], "Which feed it came from.", "google_news"),
-        }, ["title", "url", "source_name", "source_url", "published_at", "summary", "feed"], "One article."),
+            "title": _s("Headline in its original language.", "半導体株が反発、関税協議の進展で"),
+            "url": _s("The publisher's article link.", "https://www.nikkei.com/article/DGXZQO..."),
+            "source_name": _s("Publisher domain.", "nikkei.com", nullable=True),
+            "source_url": _s("Publisher site.", "https://nikkei.com", nullable=True),
+            "published_at": _s("When GDELT first saw it (UTC, 15-minute batches).", "2026-09-27T02:30:00Z", nullable=True),
+            "summary": _s("Summary; GDELT carries none, so null.", None, nullable=True),
+            "language": _s("Article language (BCP-47).", "ja", nullable=True),
+            "feed": _enum(["gdelt"], "Which source it came from.", "gdelt"),
+        }, ["title", "url", "source_name", "source_url", "published_at", "summary", "language", "feed"], "One article."),
             "Articles, newest first, duplicates by title removed."),
         "article_count": _i("Articles returned.", 20),
         "limit": _i("Most articles asked for.", 20),
-        "since_hours": _i("Window applied, in hours; null when none.", 24, nullable=True),
-        "notes": _arr(_s("A caveat.", "Edition XX:yy returned nothing for this query; results are from the en/US edition."),
+        "since_hours": _i("Window searched, in hours.", 72),
+        "attribution": _obj({"text": _s("Required citation.", "Source: The GDELT Project"),
+                             "url": _s("Required link.", "https://www.gdeltproject.org/")}, ["text", "url"],
+                            "The citation GDELT's licence requires with every use."),
+        "notes": _arr(_s("A caveat.", "GDELT does not record a publisher's country, so region is not a filter."),
                       "Caveats; empty when none.", []),
         "checked_at": _CHECKED_AT,
-    }, ["query", "symbol", "language", "edition", "sources_searched", "sources_ok", "sources_failed", "articles",
-        "article_count", "limit", "since_hours", "notes", "checked_at"]),
+    }, ["query", "symbol", "language", "language_filter", "sources_searched", "sources_ok", "sources_failed", "articles",
+        "article_count", "limit", "since_hours", "attribution", "notes", "checked_at"]),
 
     "data.macro": _obj({
         "indicator": _obj({"alias": _s("Alias used; null for a raw code.", "inflation", nullable=True),
