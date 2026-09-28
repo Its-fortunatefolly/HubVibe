@@ -471,6 +471,9 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
     }
     if warning:
         content["billing_warning"] = warning
+    if "google-translate-llm" in ctx.providers_used:
+        # Cloud Translation's attribution requirement travels with translated text.
+        content["attribution"] = [{"text": "Translated by Google", "url": "https://translate.google.com"}]
 
     delivered = _deliver(content, auth)
     facts = _payment_facts_of(auth)

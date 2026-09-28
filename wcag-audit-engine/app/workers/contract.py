@@ -1900,6 +1900,9 @@ RESPONSE_ENVELOPE = {
                           "/work/receipts/rcpt_9f1c2b3a4d5e6f70"),
         "billing_warning": _s("Present only when the charge was recorded with a caveat.",
                               "settlement pending"),
+        "attribution": _arr(_obj({"text": _s("Credit.", "Translated by Google"),
+                                  "url": _s("Link.", "https://translate.google.com")}, ["text", "url"], "A credit."),
+                            "Present only when the result's text was machine-translated: the credit to show with it."),
     },
     "required": ["status", "worker", "price_usd", "result", "provenance", "receipt_id", "receipt_url"],
 }
