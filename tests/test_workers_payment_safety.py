@@ -610,3 +610,82 @@ def test_an_x402_payer_is_unaffected_by_the_mpp_fact_lookup(app_module, client, 
     receipt = client.get(response.json()["receipt_url"]).json()
     assert receipt["outcome"] == "delivered_not_settled" and receipt["payment"]["rail"] is None
     assert consulted == []
+
+
+# --- an MPP Tempo payment, end to end through a paid route ------------------
+
+TEMPO_PAY_TO = "0xc4a6aa93ba00d5c02145c33fe6f2212654fcdfb7"
+TEMPO_USDC = "0x20C000000000000000000000b9537d11c60E8b50"
+
+
+@pytest.fixture
+def tempo_env(monkeypatch):
+    """Switch the Tempo rail on BEFORE app_module loads main.py (list it
+    first in the test's arguments)."""
+    monkeypatch.setenv("MPP_TEMPO_RECIPIENT_ADDRESS", TEMPO_PAY_TO)
+    monkeypatch.setenv("MPP_CHALLENGE_SECRET", "a-long-random-secret")
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("MPP_TEMPO_TOKEN_ADDRESS", raising=False)
+    monkeypatch.delenv("MPP_TEMPO_RPC_URL", raising=False)
+
+
+def test_a_tempo_paid_job_is_delivered_once_with_a_paid_receipt(tempo_env, app_module, client, monkeypatch):
+    """Pay the node's own 402 exactly as an mppx client would in push mode:
+    read the tempo challenge, send the transfer, present its hash."""
+    import base64
+    import json as _json
+
+    module = app_module
+    # main.py reuses an already-loaded payment module, whose config was read
+    # when it first loaded; set the Tempo rail on that instance directly.
+    mpp = module.mpp_payments
+    monkeypatch.setattr(mpp, "_TEMPO_RECIPIENT_ADDRESS", TEMPO_PAY_TO)
+    monkeypatch.setattr(mpp, "_TEMPO_TOKEN_ADDRESS", TEMPO_USDC)
+    monkeypatch.setattr(mpp, "_TEMPO_CHAIN_ID", 4217)
+    monkeypatch.setattr(mpp, "_TEMPO_RPC_URL", "https://rpc.tempo.xyz")
+
+    async def works(ctx, payload):
+        return _valid("market.quote", answer=42)
+
+    _stub_skill(module, monkeypatch, "market.quote", works)
+    W.router.configure(
+        authorize_and_rate_limit=module._authorize_and_rate_limit,
+        bill=module._bill, deliver=module._deliver,
+        failed_response=module._failed_audit_response,
+        mpp_payment_facts=module.mpp_payments.settlement_for)
+
+    unpaid = client.post("/work/market/quote", json={"product_id": "BTC-USD"})
+    assert unpaid.status_code == 402
+    tempo = [h for h in unpaid.headers.get_list("www-authenticate") if 'method="tempo"' in h]
+    assert len(tempo) == 1, unpaid.headers.get_list("www-authenticate")
+    fields = dict(part.split("=", 1) for part in tempo[0][len("Payment "):].split(", "))
+    challenge = {k: v.strip('"') for k, v in fields.items()}
+    request = _json.loads(base64.urlsafe_b64decode(challenge["request"] + "=="))
+    assert request["recipient"] == TEMPO_PAY_TO and request["currency"] == TEMPO_USDC
+    assert request["amount"] == "20000" and request["methodDetails"]["supportedModes"] == ["push"]
+
+    tx = "0x" + "ef" * 32
+    payer = "0x37555e884c5eba10f6e816dbecea30965b9b38c0"
+    pad = lambda a: "0x" + a[2:].lower().rjust(64, "0")
+    receipt_on_chain = {"status": "0x1", "logs": [{
+        "address": TEMPO_USDC,
+        "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", pad(payer), pad(TEMPO_PAY_TO)],
+        "data": "0x" + format(20000, "064x")}]}
+    monkeypatch.setattr(module.mpp_payments, "_tempo_rpc",
+                        lambda m, p: receipt_on_chain if (m, p) == ("eth_getTransactionReceipt", [tx]) else None)
+    credential = base64.urlsafe_b64encode(_json.dumps(
+        {"challenge": challenge, "payload": {"type": "hash", "hash": tx}}).encode()).decode().rstrip("=")
+
+    paid = client.post("/work/market/quote", headers={"Authorization": f"Payment {credential}"},
+                       json={"product_id": "BTC-USD"})
+    assert paid.status_code == 200, paid.text
+    receipt = client.get(paid.json()["receipt_url"]).json()
+    assert receipt["outcome"] == "paid_delivered" and receipt["paid"] is True
+    assert receipt["payment"]["rail"] == "mpp" and receipt["payment"]["payer"] == payer
+    assert receipt["payment"]["tx_hash"] == tx and receipt["payment"]["network"] == "eip155:4217"
+    assert receipt["payment"]["amount_atomic"] == 20000 and receipt["payment"]["settled"] is True
+
+    # The same transfer does not pay twice.
+    again = client.post("/work/market/quote", headers={"Authorization": f"Payment {credential}"},
+                        json={"product_id": "BTC-USD"})
+    assert again.status_code == 402

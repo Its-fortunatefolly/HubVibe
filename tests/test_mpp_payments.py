@@ -537,3 +537,16 @@ def test_an_unwritable_record_refuses_the_payment(monkeypatch, tmp_path):
     module = _tempo_rail(monkeypatch, MPP_HASH_LEDGER_PATH=str(tmp_path / "missing-dir" / "x.db"))
     _tempo_rpc_paying(module, monkeypatch)
     assert module.verify_and_settle_sync(_tempo_credential(module), realm="api.example.com") is False
+
+
+def test_a_tempo_payment_records_who_paid_for_the_ledger_and_receipt(monkeypatch):
+    """The router marks a call settled only when it can name the payer; a
+    Tempo payment with no facts would read as unpaid on the buyer's receipt."""
+    module = _tempo_rail(monkeypatch)
+    _tempo_rpc_paying(module, monkeypatch)
+    credential = _tempo_credential(module)
+    assert module.settlement_for(credential) is None
+    assert module.verify_and_settle_sync(credential, realm="api.example.com") is True
+    assert module.settlement_for(credential) == {
+        "rail": "mpp", "method": "tempo", "payer": _SMART_WALLET, "pay_to": _TEMPO_PAY_TO,
+        "amount_atomic": 500000, "asset": _TEMPO_USDC, "network": "eip155:4217", "tx_hash": _TX}

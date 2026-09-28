@@ -797,10 +797,26 @@ def _verify_tempo(challenge: dict, payload: dict) -> bool:
         return False
     if str(receipt.get("status")) not in ("0x1", "1"):
         return False
-    if not _receipt_matches(receipt, request_obj):
+    transfer = _matching_transfer(receipt, request_obj)
+    if transfer is None:
         return False
     if not _claim_hash(tx_hash, "tempo"):
         return False
+    # The same facts an evm (and x402) settlement records, so the worker
+    # ledger names the payer and the receipt says "paid": the router marks a
+    # call settled only when it can name who paid.
+    if len(_settlements) >= _SETTLEMENTS_MAX:
+        _settlements.clear()
+    _settlements[tx_hash] = {
+        "rail": "mpp",
+        "method": "tempo",
+        "payer": transfer["payer"],
+        "pay_to": transfer["recipient"],
+        "amount_atomic": transfer["amount"],
+        "asset": transfer["token"],
+        "network": f"eip155:{_TEMPO_CHAIN_ID}",
+        "tx_hash": tx_hash,
+    }
     _used_credentials.add(tx_hash)
     return True
 
