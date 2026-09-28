@@ -441,3 +441,99 @@ def test_evm_hash_credential_is_bound_to_this_deployments_token_and_recipient(mo
     challenge = module._build_challenge("api.example.com", "evm", "charge", request)
     credential = module._b64url_encode(json.dumps({"challenge": challenge, "payload": {"type": "hash", "hash": _TX}}).encode())
     assert module.verify_and_settle_sync(credential, realm="api.example.com") is False
+
+
+# --- durable spent-hash record: tempo and evm --------------------------------
+
+_TEMPO_USDC = "0x20C000000000000000000000b9537d11c60E8b50"
+_TEMPO_PAY_TO = "0xc4a6aa93ba00d5c02145c33fe6f2212654fcdfb7"
+_TX2 = "0x" + "cd" * 32
+
+
+def _tempo_rail(monkeypatch, **extra):
+    return _load_mpp(
+        monkeypatch,
+        MPP_TEMPO_RECIPIENT_ADDRESS=_TEMPO_PAY_TO,
+        MPP_CHALLENGE_SECRET="a-long-random-secret",
+        **extra,
+    )
+
+
+def _tempo_credential(module, tx=_TX, base_units="500000"):
+    challenge = module._build_challenge(
+        "api.example.com", "tempo", "charge",
+        {"amount": base_units, "currency": _TEMPO_USDC, "recipient": _TEMPO_PAY_TO,
+         "methodDetails": {"chainId": 4217, "supportedModes": ["push"]}},
+    )
+    return module._b64url_encode(json.dumps({"challenge": challenge, "payload": {"type": "hash", "hash": tx}}).encode())
+
+
+def _tempo_rpc_paying(module, monkeypatch, value=500000):
+    monkeypatch.setattr(module, "_tempo_rpc",
+                        lambda m, p: _receipt(_SMART_WALLET, _TEMPO_PAY_TO, value, token=_TEMPO_USDC))
+
+
+def test_the_tempo_challenge_offers_push_mode_only_at_the_route_price(monkeypatch):
+    """mppx clients holding a local key prefer `pull` unless the challenge
+    names its modes; this node verifies `hash` (push) only, so it must say so."""
+    module = _tempo_rail(monkeypatch)
+    headers = [h for h in module.www_authenticate_headers(realm="api.example.com", price_usd=0.50)
+               if 'method="tempo"' in h]
+    assert len(headers) == 1
+    request_b64 = headers[0].split('request="')[1].split('"')[0]
+    request = json.loads(module._b64url_decode(request_b64))
+    assert request == {"amount": "500000", "currency": _TEMPO_USDC, "recipient": _TEMPO_PAY_TO,
+                       "methodDetails": {"chainId": 4217, "supportedModes": ["push"]}}
+
+
+def test_a_tempo_transfer_pays_once_even_across_a_restart(monkeypatch):
+    module = _tempo_rail(monkeypatch)
+    _tempo_rpc_paying(module, monkeypatch)
+    assert module.verify_and_settle_sync(_tempo_credential(module), realm="api.example.com") is True
+    # A restart forgets the in-process set; the same transfer under a FRESH
+    # challenge must still be refused.
+    restarted = _tempo_rail(monkeypatch)
+    _tempo_rpc_paying(restarted, monkeypatch)
+    assert restarted._used_credentials == set()
+    assert restarted.verify_and_settle_sync(_tempo_credential(restarted), realm="api.example.com") is False
+
+
+def test_an_evm_transfer_pays_once_even_across_a_restart(monkeypatch):
+    module = _evm_rail(monkeypatch)
+    monkeypatch.setattr(module, "_evm_rpc", lambda m, p: _receipt(_SMART_WALLET, _PAY_TO, 20000))
+    assert module.verify_and_settle_sync(_evm_credential(module), realm="api.example.com") is True
+    restarted = _evm_rail(monkeypatch)
+    monkeypatch.setattr(restarted, "_evm_rpc", lambda m, p: _receipt(_SMART_WALLET, _PAY_TO, 20000))
+    assert restarted.verify_and_settle_sync(_evm_credential(restarted), realm="api.example.com") is False
+
+
+def test_every_new_transfer_is_a_new_purchase(monkeypatch):
+    """Repeat buying: each purchase is its own transfer with its own hash."""
+    module = _tempo_rail(monkeypatch)
+    _tempo_rpc_paying(module, monkeypatch)
+    for i in range(5):
+        tx = "0x" + format(i + 1, "064x")
+        assert module.verify_and_settle_sync(_tempo_credential(module, tx=tx), realm="api.example.com") is True
+
+
+def test_a_failed_job_releases_the_durable_claim_for_the_retry(monkeypatch):
+    module = _tempo_rail(monkeypatch)
+    _tempo_rpc_paying(module, monkeypatch)
+    credential = _tempo_credential(module, tx=_TX2.upper().replace("0X", "0x"))
+    assert module.verify_and_settle_sync(credential, realm="api.example.com") is True
+    module.release_credential(credential)
+    restarted = _tempo_rail(monkeypatch)
+    _tempo_rpc_paying(restarted, monkeypatch)
+    assert restarted.verify_and_settle_sync(credential, realm="api.example.com") is True
+
+
+def test_a_tempo_transfer_below_the_price_does_not_pay(monkeypatch):
+    module = _tempo_rail(monkeypatch)
+    _tempo_rpc_paying(module, monkeypatch, value=499999)
+    assert module.verify_and_settle_sync(_tempo_credential(module), realm="api.example.com") is False
+
+
+def test_an_unwritable_record_refuses_the_payment(monkeypatch, tmp_path):
+    module = _tempo_rail(monkeypatch, MPP_HASH_LEDGER_PATH=str(tmp_path / "missing-dir" / "x.db"))
+    _tempo_rpc_paying(module, monkeypatch)
+    assert module.verify_and_settle_sync(_tempo_credential(module), realm="api.example.com") is False
