@@ -124,6 +124,15 @@ class _BigQuery:
         data = await self._post({"query": sql, "useLegacySql": False, "dryRun": True})
         return int(data.get("totalBytesProcessed") or 0)
 
+    async def query_clustered(self, sql: str, max_billed_gib: float = 25.0) -> runtime.ProviderResult:
+        """For a geography-clustered public table (Overture Maps): the dry-run
+        estimate is the pre-pruning upper bound (several GiB) while a nearby
+        query bills about 10 MB, so there is no estimate refusal here;
+        maximumBytesBilled stays the hard ceiling BigQuery enforces."""
+        if not google_auth.configured():
+            raise runtime.ProviderUnavailable(google_auth.unavailable_reason())
+        return await self._run(sql, int(max_billed_gib * _BYTES_PER_GIB), 0)
+
     async def query(self, sql: str, max_gib: Optional[float] = None) -> runtime.ProviderResult:
         """Estimate, refuse if too large, then run under a hard byte ceiling."""
         if not google_auth.configured():
@@ -142,6 +151,9 @@ class _BigQuery:
                 f"worker's {ceiling_gib:.0f} GiB limit. Narrow it (fewer columns, "
                 f"a partition filter, or a LIMIT on a subquery).")
 
+        return await self._run(sql, ceiling_bytes, estimated)
+
+    async def _run(self, sql: str, ceiling_bytes: int, estimated: int) -> runtime.ProviderResult:
         data = await self._post({
             "query": sql,
             "useLegacySql": False,

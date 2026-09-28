@@ -97,7 +97,11 @@ class _Places(_Keyless):
         """(label, description, lat, lon, qid) of the first search hit that has coordinates."""
         found, _ = await _get(WD_API, {"action": "wbsearchentities", "search": name, "language": "en", "type": "item",
                                        "limit": 6, "format": "json"}, "Wikidata search")
-        for hit in (found or {}).get("search", []):
+        hits = (found or {}).get("search", [])
+        wanted = name.strip().lower()
+        # An exact name match first (Wikidata ranks the University of Chicago above the city of Chicago).
+        hits = sorted(hits, key=lambda h: (str(h.get("label") or "").strip().lower() != wanted))
+        for hit in hits:
             claims, _ = await _get(WD_API, {"action": "wbgetclaims", "entity": hit["id"], "property": "P625",
                                             "format": "json"}, "Wikidata coordinates")
             for c in ((claims or {}).get("claims") or {}).get("P625", []):

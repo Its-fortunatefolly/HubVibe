@@ -1,5 +1,5 @@
 """Tests for the four wave-2b bees that are fail-closed past credentials:
-llm.generate's Claude-on-Vertex provider, maps.places/route/weather, and
+llm.generate's Claude-on-Vertex provider, maps.route, and
 video.generate.
 
 None of these can run for real here (no live Google project, no Maps key),
@@ -86,11 +86,11 @@ def _fake_google_credentials(monkeypatch):
 
 # --- maps.*: unavailable with a specific reason, not the generic one -------
 
-def test_maps_places_is_unavailable_without_a_key(client, monkeypatch):
+def test_maps_route_is_unavailable_without_a_key(client, monkeypatch):
     """This must stay unavailable EVEN WITH Google credentials -- Maps
     Grounding Lite is keyed separately from the Vertex/BigQuery scope."""
     _fake_google_credentials(monkeypatch)
-    response = client.post("/work/maps/places", json={"query": "coffee"})
+    response = client.post("/work/maps/route", json={"origin": "SF", "destination": "Oakland"})
     assert response.status_code == 503
     body = response.json()
     assert body["billed"] is False
@@ -119,7 +119,7 @@ def test_maps_grounding_provider_is_available_once_keyed(monkeypatch):
 
 def test_maps_places_rejects_an_empty_query():
     with pytest.raises(W.runtime.InvalidRequest):
-        asyncio.run(W.skills.maps.places(None, {"query": ""}))
+        W.skills.maps.precheck_places({"query": ""})
 
 
 def test_maps_route_requires_both_ends():

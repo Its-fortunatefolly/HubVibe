@@ -1477,21 +1477,31 @@ CATALOG = [
     # --- wave 2b: fail-closed until the operator enables one Google product -
     Worker(
         name="maps.places", price_usd=0.10, tier="utility",
-        title="Search places",
+        title="Find places near a location",
         description=(
-            'Places search: find businesses, addresses and points of interest by '
-            "free-text query through Google Maps Grounding Lite, for example 'coffee "
-            "near the Ferry Building, San Francisco'. Input: query, optional "
-            'region_code (ISO country code) to bias results.'),
-        tags=["maps", "places", "search", "google", "geospatial"],
+            "Places near a location, anywhere: 'coffee near the Ferry Building, San "
+            "Francisco', 'ramen near Shibuya Station', 'pharmacy' at coordinates. From "
+            "Overture Maps' open places data (80M+ places, monthly releases): name, "
+            "category, distance, address, website, phone, brand, operating status, "
+            "confidence and source datasets, nearest first; the area widens when nothing "
+            "is close. Input: query; optional near, lat and lng, radius_m, limit."),
+        tags=["maps", "places", "poi", "local", "search", "overture", "geospatial", "live"],
         input_schema=_obj({
-            "query": {"type": "string", "description": "What to find, e.g. 'coffee near the Ferry Building'."},
-            "region_code": {"type": "string", "description": "Optional ISO 3166-1 alpha-2 bias."},
+            "query": {"type": "string", "minLength": 1, "maxLength": 300,
+                      "description": "What and where: 'coffee near the Ferry Building, San Francisco'."},
+            "near": {"type": "string", "maxLength": 200, "description": "Where, if not in the query: a place, US address or airport code."},
+            "lat": {"type": "number", "minimum": -90, "maximum": 90, "description": "Latitude of the center."},
+            "lng": {"type": "number", "minimum": -180, "maximum": 180, "description": "Longitude of the center."},
+            "radius_m": {"type": "number", "minimum": 50, "maximum": 10000, "description": "Search radius in metres. Default 1000."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Most places to return. Default 10."},
+            "region_code": {"type": "string", "description": "Accepted for compatibility; the location decides the area."},
         }, ["query"]),
-        returns="query, result (places found, per Maps Grounding Lite's own shape).",
+        returns=("query, what, near{name, lat, lon, source}, radius_m, places[{id, name, category, distance_m, lat, lon, "
+                 "address, country, website, phone, brand, operating_status, confidence, sources[]}], place_count, "
+                 "attribution[], notes[], checked_at."),
         skill="maps.places", max_seconds=40,
-        pricing_basis="Provisional. Maps Grounding Lite's own billing is not yet measured here.",
-        requires=("maps_grounding",)),
+        pricing_basis="Provisional. BigQuery read of Overture's public places table, about 10 MB billed per search.",
+        requires=("places",)),
     Worker(
         name="maps.route", price_usd=0.10, tier="utility",
         title="Compute a route",
