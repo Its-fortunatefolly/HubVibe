@@ -19817,9 +19817,10 @@
                 "type": "string",
                 "enum": [
                   "potential_match",
-                  "no_match"
+                  "no_match",
+                  "incomplete"
                 ],
-                "description": "potential_match: at least one listing scored at or above the threshold. no_match: none did.",
+                "description": "potential_match: at least one listing scored at or above the threshold. no_match: none did, on every list asked for. incomplete: none did, but a list could not be screened (see notes).",
                 "examples": [
                   "potential_match"
                 ]
@@ -20216,6 +20217,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "sanctions.screen response"
