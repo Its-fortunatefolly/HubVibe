@@ -1021,6 +1021,34 @@ CATALOG = [
                        "no third-party verification service."),
         requires=("mailcheck",)),
     Worker(
+        name="property.context", price_usd=0.25, tier="standard",
+        title="Everything the public record says about a US address",
+        description=(
+            "One US address or point, one call: FEMA National Risk Index ratings for "
+            "flooding and 17 other hazards with expected annual loss, tract median home "
+            "value, rent, income, ownership and vacancy (Census ACS), price trend (FHFA), "
+            "fair market rents for the metro and ZIP (HUD), nearby public schools with "
+            "enrollment and ratios (NCES), walkability (EPA) and Superfund sites nearby, "
+            "plus tract, county, ZIP, metro and districts. Input: address or lat and lng."),
+        tags=["real-estate", "property", "address", "flood", "risk", "housing", "rent", "schools", "census", "fema", "hud", "live"],
+        input_schema=dict(_obj({
+            "address": {"type": "string", "minLength": 5, "maxLength": 200,
+                        "description": "US street address with city and state or ZIP."},
+            "lat": {"type": "number", "minimum": 17, "maximum": 72, "description": "Latitude, instead of an address."},
+            "lng": {"type": "number", "minimum": -180, "maximum": -64, "description": "Longitude, instead of an address."},
+            "school_radius_km": {"type": "number", "minimum": 0.1, "maximum": 5, "description": "Schools within this radius. Default 1.5."},
+            "superfund_radius_km": {"type": "number", "minimum": 0.1, "maximum": 15,
+                                    "description": "Superfund sites within this radius. Default 5."},
+        }, []), anyOf=[{"required": ["address"]}, {"required": ["lat", "lng"]}]),
+        returns=("input{}, matched_address, lat, lng, geography{state, county, tract, zip, metro, congressional_district, "
+                 "school_district...}, flood{zone, special_flood_hazard_area...}, hazard_risk{overall_rating, hazards{}, "
+                 "notice...}, housing{median_home_value, median_gross_rent...}, price_trend{}, fair_market_rent{zip{}...}, "
+                 "schools[], walkability{}, superfund_sites[], sources[], sections_failed[], notes[], checked_at."),
+        skill="property.context", max_seconds=60,
+        pricing_basis=("Provisional, standard tier. Provider cost zero: public federal services plus two annual tract "
+                       "tables shipped with the node."),
+        requires=("property_data",)),
+    Worker(
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
@@ -1560,6 +1588,8 @@ _EXAMPLE_OVERRIDES = {
     # A role address on a domain that publishes MX records, so the example
     # exercises DNS, SMTP and the role flag without naming a person.
     "email.verify": {"email": "support@github.com"},
+    # The Census Bureau's own address, so the example geocodes on the first try.
+    "property.context": {"address": "4600 Silver Hill Rd, Washington, DC 20233"},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},

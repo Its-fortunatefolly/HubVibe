@@ -100,7 +100,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.19.1"
+SERVICE_VERSION = "1.20.0"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -149,7 +149,7 @@ app = FastAPI(
     title=SERVICE_TITLE,
     version=SERVICE_VERSION,
     description=(
-        "56 machine-payable dev utilities under /work -- LLM inference, web "
+        "57 machine-payable dev utilities under /work -- LLM inference, web "
         "search and page extraction, Base chain reads, market and "
         "prediction-market data, BigQuery analysis and forecasting, a "
         "deterministic regression and probability engine, "
@@ -2252,7 +2252,7 @@ async def agent_manifest(request: Request):
         "name": SERVICE_TITLE,
         "base_url": base,
         "description": (
-            "56 machine-payable dev utilities (the `workers` section: LLM "
+            "57 machine-payable dev utilities (the `workers` section: LLM "
             "inference, web search and extraction, Base chain reads, market "
             "and prediction-market data, BigQuery analysis and forecasting, "
             "deterministic regression and probability statistics, "
