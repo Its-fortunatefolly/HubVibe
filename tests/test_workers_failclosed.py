@@ -135,7 +135,7 @@ def test_maps_route_rejects_an_unknown_travel_mode():
 
 def test_maps_weather_requires_a_location():
     with pytest.raises(W.runtime.InvalidRequest):
-        asyncio.run(W.skills.maps.weather(None, {}))
+        asyncio.run(W.skills.weather.weather(None, {}))
 
 
 # --- video.generate: advertised exactly when credentials resolve ----------

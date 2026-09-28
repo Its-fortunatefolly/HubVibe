@@ -1,6 +1,6 @@
 {
   "name": "hubvibe",
-  "version": "1.23.0",
+  "version": "1.24.0",
   "description": "HubVibe: pay-per-call tools for agents over MCP. Live web and news search in any language, official economic numbers, government open data from 16 portals (Korea, Japan, EU, UK and more) as rows, shopping availability and shipping, market data, research and site audits. The tool list is free; each call is priced.",
   "mcpServers": {
     "hubvibe": {

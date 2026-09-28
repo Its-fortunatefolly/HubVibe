@@ -1511,16 +1511,28 @@ CATALOG = [
         requires=("maps_grounding",)),
     Worker(
         name="maps.weather", price_usd=0.10, tier="utility",
-        title="Weather at a location",
+        title="Weather at a location, now and for seven days",
         description=(
-            'Weather at a named place, current or forecast, through Google Maps '
-            'Grounding Lite. Input: location as a place name or address.'),
-        tags=["maps", "weather", "forecast", "google", "geospatial"],
-        input_schema=_obj({"location": {"type": "string"}}, ["location"]),
-        returns="location, result (weather, per Maps Grounding Lite's own shape).",
+            "Weather anywhere on Earth: current conditions, the next 24 hours and a "
+            "seven-day forecast (temperature, precipitation, wind, humidity, cloud, "
+            "pressure, condition) from MET Norway's forecast model, plus active US "
+            "National Weather Service alerts for US locations. Input: location as a "
+            "place name, US street address or airport code, or lat and lng. Carries "
+            "the sources' required credits."),
+        tags=["weather", "forecast", "alerts", "met-norway", "nws", "geospatial", "live"],
+        input_schema=dict(_obj({
+            "location": {"type": "string", "minLength": 2, "maxLength": 200,
+                         "description": "Place name (Kyoto), US street address, or airport code (JFK)."},
+            "lat": {"type": "number", "minimum": -90, "maximum": 90, "description": "Latitude, instead of a location."},
+            "lng": {"type": "number", "minimum": -180, "maximum": 180, "description": "Longitude, instead of a location."},
+        }, []), anyOf=[{"required": ["location"]}, {"required": ["lat", "lng"]}]),
+        returns=("location, place{name, lat, lon, country, source}, current{time, temperature_c, wind_speed_ms, wind_direction_deg, "
+                 "humidity_pct, cloud_cover_pct, pressure_hpa, condition, precipitation_mm}, hourly[24], daily[7]{date, min_c, "
+                 "max_c, precipitation_mm, condition}, alerts[], alerts_covered, units{}, forecast_updated_at, attribution[], "
+                 "sections_failed[], notes[], checked_at."),
         skill="maps.weather", max_seconds=40,
-        pricing_basis="Provisional. Maps Grounding Lite's own billing is not yet measured here.",
-        requires=("maps_grounding",)),
+        pricing_basis="Provisional. Provider cost zero: MET Norway and NWS public services, shared until their own Expires.",
+        requires=("weather",)),
     Worker(
         name="video.generate", price_usd=10.00, tier="premium",
         title="Generate a video",
@@ -1677,6 +1689,7 @@ _EXAMPLE_OVERRIDES = {
     "video.generate": {"prompt": "A single bee landing on a circuit-board flower, slow motion"},
     # maps.places shares "query" with search.web; a place search needs a place.
     "maps.places": {"query": "coffee near the Ferry Building, San Francisco"},
+    "maps.weather": {"location": "Kyoto"},
     # AI.FORECAST / AI.DETECT_ANOMALIES need a DATE/TIMESTAMP column (the
     # usa_names `year` is INT64 and is refused); this is a real daily series.
     "data.forecast": {"table": _DAILY_SERIES, "timestamp_col": "date",
