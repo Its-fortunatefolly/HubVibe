@@ -728,6 +728,10 @@ OUTPUT_SCHEMAS = {
         "timestamp_col": _s("Timestamp column.", "date"),
         "data_col": _s("Value column.", "confirmed_cases"),
         "anomaly_prob_threshold": _n("Probability threshold used.", 0.95),
+        "mode": _enum(["split_by_time", "two_tables"],
+                      "split_by_time: one table, its latest periods scored against the rest; two_tables: target scored "
+                      "against history.", "split_by_time"),
+        "target_periods": _i("Latest timestamps scored in split_by_time mode; null for two tables.", 30, nullable=True),
         "columns": _arr(_s("AI.DETECT_ANOMALIES output column.", "is_anomaly"),
                         "AI.DETECT_ANOMALIES output columns.",
                         ["state_name", "date", "confirmed_cases", "is_anomaly",
@@ -739,9 +743,10 @@ OUTPUT_SCHEMAS = {
                      [{"state_name": "Texas", "date": "2023-03-20", "confirmed_cases": "8631000",
                        "is_anomaly": "false", "anomaly_probability": "0.12"}]),
         "row_count": _i("Rows returned.", 10),
+        "anomaly_count": _i("Rows flagged as anomalies at the threshold.", 2),
         "gib_processed": _GIB,
-    }, ["history_table", "target_table", "timestamp_col", "data_col", "anomaly_prob_threshold",
-        "columns", "rows", "row_count", "gib_processed"]),
+    }, ["history_table", "target_table", "timestamp_col", "data_col", "anomaly_prob_threshold", "mode",
+        "target_periods", "columns", "rows", "row_count", "anomaly_count", "gib_processed"]),
 
     "monitor.snapshot": _obj({
         "url": _s("The URL baselined.", "https://example.com"),

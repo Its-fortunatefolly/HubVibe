@@ -7421,7 +7421,7 @@
     {
       "name": "hubvibe_data_anomalies",
       "title": "Detect anomalies in a time series",
-      "description": "Anomaly detection over a BigQuery time series with AI.DETECT_ANOMALIES (TimesFM): score a target table against a history table that shares its timestamp and value columns and get the anomalous rows with probabilities. Input: history_table, target_table, timestamp_col, data_col, optional threshold and id_cols. $10.00 per call. Returns: history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, columns[], rows[], row_count, gib_processed.",
+      "description": "Anomaly detection over a BigQuery time series with AI.DETECT_ANOMALIES (TimesFM): score a target table against a history table that shares its timestamp and value columns, or give one table and its latest periods are scored against its own history. Returns every checked row with its bounds, anomaly flag and probability, plus the anomaly count. Input: history_table, target_table, timestamp_col, data_col, optional target_last, threshold and id_cols. $10.00 per call. Returns: history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, mode, target_periods, columns[], rows[], row_count, anomaly_count, gib_processed.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -7450,6 +7450,12 @@
               "type": "string"
             },
             "description": "Optional: one series per value of these columns."
+          },
+          "target_last": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 366,
+            "description": "Same table as history and target: score its latest N timestamps. Default 30."
           },
           "max_scan_gib": {
             "type": "number"
@@ -7540,6 +7546,27 @@
                   0.95
                 ]
               },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "split_by_time",
+                  "two_tables"
+                ],
+                "description": "split_by_time: one table, its latest periods scored against the rest; two_tables: target scored against history.",
+                "examples": [
+                  "split_by_time"
+                ]
+              },
+              "target_periods": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Latest timestamps scored in split_by_time mode; null for two tables.",
+                "examples": [
+                  30
+                ]
+              },
               "columns": {
                 "type": "array",
                 "items": {
@@ -7600,6 +7627,13 @@
                   10
                 ]
               },
+              "anomaly_count": {
+                "type": "integer",
+                "description": "Rows flagged as anomalies at the threshold.",
+                "examples": [
+                  2
+                ]
+              },
               "gib_processed": {
                 "type": "number",
                 "description": "Gibibytes BigQuery scanned; the metered cost basis.",
@@ -7614,9 +7648,12 @@
               "timestamp_col",
               "data_col",
               "anomaly_prob_threshold",
+              "mode",
+              "target_periods",
               "columns",
               "rows",
               "row_count",
+              "anomaly_count",
               "gib_processed"
             ]
           },

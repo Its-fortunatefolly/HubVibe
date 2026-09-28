@@ -122,6 +122,38 @@ def _excerpt(value, limit=160) -> str:
     return text[:limit]
 
 
+
+# A delivered result can pass the schema and still carry nothing (topic search
+# on market.prediction answered every query with zero markets for days). The
+# proof bodies are chosen to have answers, so an empty primary collection or a
+# zero count is a failure here, not a shrug.
+_PRIMARY = {"markets", "results", "articles", "observations", "datasets", "rows", "offers", "hotels", "posts",
+            "items", "events", "web", "news", "videos", "statuses", "records", "places", "routes",
+            "options", "facts", "tools", "headlines", "violations_sample", "series", "points"}
+
+
+_COUNTS = {"count", "row_count", "article_count", "observation_count", "web_count", "result_count", "dataset_count",
+           "market_count"}
+
+
+def _empty_payload(result) -> list:
+    if not isinstance(result, dict):
+        return []
+    empty = [k for k, v in result.items() if k in _PRIMARY and isinstance(v, list) and not v]
+    empty += [k for k, v in result.items() if k in _COUNTS and v == 0 and not isinstance(v, bool)]
+    return empty
+
+
+def _trimmed(value, limit=600):
+    if isinstance(value, dict):
+        return {k: _trimmed(v, limit) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_trimmed(v, limit) for v in value[:5]]
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit] + "..."
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--only", default="", help="comma-separated /work paths")
@@ -242,7 +274,12 @@ def main() -> int:
                 print(f"        {row['error']}")
             result = content.get("result", content) if isinstance(content, dict) else content
             row["result_excerpt"] = _excerpt(result)
+            row["result"] = _trimmed(result)
             print(f"        {row['result_excerpt']}")
+            if paid.status_code == 200:
+                empties = _empty_payload(result)
+                row["substance"] = checks.expect(not empties, "result has substance"
+                                                 + (f" (EMPTY: {', '.join(empties)})" if empties else ""))
             if worker.name == "speech.synthesize" and isinstance(result, dict):
                 synth_audio = result.get("audio_base64")
 
