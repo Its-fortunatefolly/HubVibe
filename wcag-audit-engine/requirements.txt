@@ -19,3 +19,5 @@ httpx==0.28.1
 jsonschema>=4.17,<5
 # email.verify: MX lookups (app/workers/providers/mailcheck.py).
 dnspython==2.8.0
+phonenumbers==9.0.40
+maxminddb==3.2.0

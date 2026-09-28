@@ -100,7 +100,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.28.0"
+SERVICE_VERSION = "1.29.0"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -142,12 +142,14 @@ async def _lifespan(_app: "FastAPI"):
         try:
             import asyncio as _asyncio
 
-            warm = _asyncio.ensure_future(workers.providers.sanctions.SANCTIONS.keep_warm())
+            warm = [_asyncio.ensure_future(workers.providers.sanctions.SANCTIONS.keep_warm()),
+                    # ip.lookup's DB-IP files (65 MB, monthly), for the same reason.
+                    _asyncio.ensure_future(workers.providers.iplookup.DBIP.keep_warm())]
         except Exception:
             warm = None
     yield
-    if warm is not None:
-        warm.cancel()
+    for task in warm or ():
+        task.cancel()
 
 
 # The one name every discovery surface uses -- openapi.json, agent.json,
@@ -161,7 +163,7 @@ app = FastAPI(
     title=SERVICE_TITLE,
     version=SERVICE_VERSION,
     description=(
-        "61 machine-payable dev utilities under /work -- LLM inference, web "
+        "65 machine-payable dev utilities under /work -- LLM inference, web "
         "search and page extraction, Base chain reads, market and "
         "prediction-market data, BigQuery analysis and forecasting, a "
         "deterministic regression and probability engine, "
@@ -2264,7 +2266,7 @@ async def agent_manifest(request: Request):
         "name": SERVICE_TITLE,
         "base_url": base,
         "description": (
-            "61 machine-payable dev utilities (the `workers` section: LLM "
+            "65 machine-payable dev utilities (the `workers` section: LLM "
             "inference, web search and extraction, Base chain reads, market "
             "and prediction-market data, BigQuery analysis and forecasting, "
             "deterministic regression and probability statistics, "

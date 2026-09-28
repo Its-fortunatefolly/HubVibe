@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents. Pay-per-call tools for AI agents over HTTP 402, every one an MCP tool here: web search and cited research (search.web, research.web, research.brief, research.company, verify.claims), LLM completion, analysis and structured extraction (Gemini), crypto prices and exchange rates from Coinbase, Base on-chain reads, Polymarket prediction-market odds, BigQuery SQL, natural-language data questions, TimesFM forecasting and anomaly detection, a deterministic predictive probability engine (regression, normal model, p-values), image (Imagen 4), speech (Text-to-Speech, Speech-to-Text) and video (Veo) generation, sandboxed Python, Google Maps places, routes and weather, website change monitoring, an MCP server security probe, and five deterministic site audits (accessibility via axe-core, SEO, security headers, performance, bundle). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.28.0",
+  "version": "1.29.0",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
@@ -21027,6 +21027,2121 @@
         "method": "POST",
         "path": "/work/sanctions/screen",
         "price_usd": 0.05
+      }
+    },
+    {
+      "name": "hubvibe_phone_parse",
+      "title": "Phone number intelligence: valid, where, which network, what type",
+      "description": "What a phone number itself says, checked against Google's libphonenumber numbering plans: valid or not, country and area, the network the range was issued to, line type (mobile, fixed, toll-free, VoIP, premium...), time zones and E.164, international and national formats. Offline: nothing is dialled and the owner is never looked up. Input: number; optional region for a national-format number. $0.02 per call. Returns: input{}, valid, possible, e164, international, national, country_code, region, country, location, carrier, line_type, time_zones[], metadata_version, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 40,
+            "description": "One phone number, international (+44 20 7946 0958) or national with `region`."
+          },
+          "region": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2}$",
+            "description": "Two-letter country code for a national-format number (GB, US)."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "type": "string",
+                    "description": "The number as given.",
+                    "examples": [
+                      "+44 20 7031 3000"
+                    ]
+                  },
+                  "region": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Region used for a national number.",
+                    "examples": [
+                      "GB"
+                    ]
+                  }
+                },
+                "required": [
+                  "number",
+                  "region"
+                ],
+                "description": "The request."
+              },
+              "valid": {
+                "type": "boolean",
+                "description": "A valid number in its country's numbering plan.",
+                "examples": [
+                  true
+                ]
+              },
+              "possible": {
+                "type": "boolean",
+                "description": "The length is possible for the country.",
+                "examples": [
+                  true
+                ]
+              },
+              "e164": {
+                "type": "string",
+                "description": "E.164 form.",
+                "examples": [
+                  "+442070313000"
+                ]
+              },
+              "international": {
+                "type": "string",
+                "description": "International format.",
+                "examples": [
+                  "+44 20 7031 3000"
+                ]
+              },
+              "national": {
+                "type": "string",
+                "description": "National format.",
+                "examples": [
+                  "020 7031 3000"
+                ]
+              },
+              "country_code": {
+                "type": "integer",
+                "description": "Calling code.",
+                "examples": [
+                  44
+                ]
+              },
+              "region": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "ISO country code the number belongs to.",
+                "examples": [
+                  "GB"
+                ]
+              },
+              "country": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Country name.",
+                "examples": [
+                  "United Kingdom"
+                ]
+              },
+              "location": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Area the number was issued to (city or region); null when unknown.",
+                "examples": [
+                  "London"
+                ]
+              },
+              "carrier": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Network the number range was issued to; null when not recorded (common for fixed lines).",
+                "examples": [
+                  "T-Mobile"
+                ]
+              },
+              "line_type": {
+                "type": "string",
+                "enum": [
+                  "fixed_line",
+                  "mobile",
+                  "fixed_line_or_mobile",
+                  "toll_free",
+                  "premium_rate",
+                  "shared_cost",
+                  "voip",
+                  "personal_number",
+                  "pager",
+                  "uan",
+                  "voicemail",
+                  "unknown"
+                ],
+                "description": "Kind of line.",
+                "examples": [
+                  "fixed_line"
+                ]
+              },
+              "time_zones": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "An IANA time zone.",
+                  "examples": [
+                    "Europe/London"
+                  ]
+                },
+                "description": "Time zones the number's area uses.",
+                "examples": [
+                  [
+                    "Europe/London"
+                  ]
+                ]
+              },
+              "metadata_version": {
+                "type": "string",
+                "description": "libphonenumber metadata version used.",
+                "examples": [
+                  "9.0.40"
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "Answered from the number alone."
+                  ]
+                },
+                "description": "Caveats.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "input",
+              "valid",
+              "possible",
+              "e164",
+              "international",
+              "national",
+              "country_code",
+              "region",
+              "country",
+              "location",
+              "carrier",
+              "line_type",
+              "time_zones",
+              "metadata_version",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
+          }
+        },
+        "title": "phone.parse response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Phone number intelligence: valid, where, which network, what type"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/phone/parse",
+        "price_usd": 0.02
+      }
+    },
+    {
+      "name": "hubvibe_ip_lookup",
+      "title": "IP address lookup: location, network owner, reverse DNS",
+      "description": "Where is this IP address and who runs it? City, region, country and coordinates, the network's ASN and organisation, its reverse DNS name, and whether it is public, private or reserved. IPv4 and IPv6. Location data: DB-IP Lite (CC BY 4.0, credited in every answer), updated monthly. Location is the network's registered place, never a street address. Input: ip. $0.02 per call. Returns: ip, version, scope, reverse_dns[], location{city, region, country, country_code, continent, latitude, longitude}, network{asn, organization}, database_month, attribution{text, url, license}, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "ip": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 45,
+            "description": "One IPv4 or IPv6 address, such as 8.8.8.8."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [
+          "ip"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "type": "string",
+                "description": "The address, normalised.",
+                "examples": [
+                  "8.8.8.8"
+                ]
+              },
+              "version": {
+                "type": "integer",
+                "description": "4 or 6.",
+                "examples": [
+                  4
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "public",
+                  "private",
+                  "loopback",
+                  "link_local",
+                  "multicast",
+                  "shared",
+                  "reserved"
+                ],
+                "description": "public addresses are looked up; others are described from the address alone.",
+                "examples": [
+                  "public"
+                ]
+              },
+              "reverse_dns": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A PTR name.",
+                  "examples": [
+                    "dns.google"
+                  ]
+                },
+                "description": "Reverse DNS names.",
+                "examples": [
+                  [
+                    "dns.google"
+                  ]
+                ]
+              },
+              "location": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "City.",
+                    "examples": [
+                      "Mountain View"
+                    ]
+                  },
+                  "region": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Region or state.",
+                    "examples": [
+                      "California"
+                    ]
+                  },
+                  "country": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Country.",
+                    "examples": [
+                      "United States"
+                    ]
+                  },
+                  "country_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "ISO code.",
+                    "examples": [
+                      "US"
+                    ]
+                  },
+                  "continent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Continent.",
+                    "examples": [
+                      "North America"
+                    ]
+                  },
+                  "latitude": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Latitude.",
+                    "examples": [
+                      37.422
+                    ]
+                  },
+                  "longitude": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Longitude.",
+                    "examples": [
+                      -122.085
+                    ]
+                  }
+                },
+                "required": [
+                  "city",
+                  "region",
+                  "country",
+                  "country_code",
+                  "continent",
+                  "latitude",
+                  "longitude"
+                ],
+                "description": "Registered location; null for a non-public or unknown address."
+              },
+              "network": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "asn": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Autonomous system number.",
+                    "examples": [
+                      15169
+                    ]
+                  },
+                  "organization": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Network operator.",
+                    "examples": [
+                      "Google LLC"
+                    ]
+                  }
+                },
+                "required": [
+                  "asn",
+                  "organization"
+                ],
+                "description": "Who runs the network; null when unknown."
+              },
+              "database_month": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "DB-IP Lite edition used (YYYY-MM).",
+                "examples": [
+                  "2026-09"
+                ]
+              },
+              "attribution": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Credit required by the licence.",
+                    "examples": [
+                      "IP Geolocation by DB-IP"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "Credit link.",
+                    "examples": [
+                      "https://db-ip.com"
+                    ]
+                  },
+                  "license": {
+                    "type": "string",
+                    "description": "Data licence.",
+                    "examples": [
+                      "Creative Commons Attribution 4.0 International"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "url",
+                  "license"
+                ],
+                "description": "Data credit."
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "IP location is approximate."
+                  ]
+                },
+                "description": "Caveats.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "version",
+              "scope",
+              "reverse_dns",
+              "location",
+              "network",
+              "database_month",
+              "attribution",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
+          }
+        },
+        "title": "ip.lookup response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "IP address lookup: location, network owner, reverse DNS"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/ip/lookup",
+        "price_usd": 0.02
+      }
+    },
+    {
+      "name": "hubvibe_domain_dns",
+      "title": "Domain DNS, email security and TLS certificate",
+      "description": "A domain's public setup, asked of the source: A, AAAA, CNAME, MX, NS, TXT, CAA and SOA records; its SPF and DMARC email policy, parsed; and its HTTPS certificate, verified like a browser (issuer, names, expiry, days left, TLS version). Flags missing SPF or DMARC, duplicate SPF and a certificate near expiry. No WHOIS or third-party data. Input: domain (a URL is accepted). $0.05 per call. Returns: domain, domain_ascii, exists, records{a[], aaaa[], cname[], mx[], ns[], txt[], caa[], soa[]}, email_security{spf{record, all, multiple}, dmarc{record, policy, subdomain_policy, percent, reports_to}}, tls{reachable, valid, error, ip, protocol, subject, issuer, names[], not_before, not_after, days_remaining}, notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 253,
+            "description": "A domain (github.com) or a URL on it."
+          },
+          "tls": {
+            "type": "boolean",
+            "description": "Also check the HTTPS certificate. Default true."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string",
+                "description": "The domain as given (host part).",
+                "examples": [
+                  "github.com"
+                ]
+              },
+              "domain_ascii": {
+                "type": "string",
+                "description": "ASCII (punycode) form queried.",
+                "examples": [
+                  "github.com"
+                ]
+              },
+              "exists": {
+                "type": "boolean",
+                "description": "The domain exists in DNS.",
+                "examples": [
+                  true
+                ]
+              },
+              "records": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A A record.",
+                      "examples": [
+                        "140.82.112.3"
+                      ]
+                    },
+                    "description": "A records.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "aaaa": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A AAAA record.",
+                      "examples": [
+                        "2606:50c0:8000::153"
+                      ]
+                    },
+                    "description": "AAAA records.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "cname": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A CNAME record.",
+                      "examples": [
+                        "github.github.io"
+                      ]
+                    },
+                    "description": "CNAME records.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "mx": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A MX record.",
+                      "examples": [
+                        "1 aspmx.l.google.com"
+                      ]
+                    },
+                    "description": "MX records.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "ns": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A NS record.",
+                      "examples": [
+                        "dns1.p08.nsone.net"
+                      ]
+                    },
+                    "description": "NS records.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "txt": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A TXT record.",
+                      "examples": [
+                        "v=spf1 include:_spf.google.com ~all"
+                      ]
+                    },
+                    "description": "TXT records.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "caa": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A CAA record.",
+                      "examples": [
+                        "0 issue \"digicert.com\""
+                      ]
+                    },
+                    "description": "CAA records.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "soa": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A SOA record.",
+                      "examples": [
+                        "dns1.p08.nsone.net hostmaster.nsone.net serial=1 refresh=43200 retry=7200 expire=1209600 minimum=3600"
+                      ]
+                    },
+                    "description": "SOA records.",
+                    "examples": [
+                      []
+                    ]
+                  }
+                },
+                "required": [
+                  "a",
+                  "aaaa",
+                  "cname",
+                  "mx",
+                  "ns",
+                  "txt",
+                  "caa",
+                  "soa"
+                ],
+                "description": "Records by type; empty when none."
+              },
+              "email_security": {
+                "type": "object",
+                "properties": {
+                  "spf": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "record": {
+                        "type": "string",
+                        "description": "The SPF record.",
+                        "examples": [
+                          "v=spf1 include:_spf.google.com ~all"
+                        ]
+                      },
+                      "all": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "fail",
+                          "softfail",
+                          "neutral",
+                          "pass",
+                          null
+                        ],
+                        "description": "What the record says about everyone else.",
+                        "examples": [
+                          "softfail"
+                        ]
+                      },
+                      "multiple": {
+                        "type": "boolean",
+                        "description": "More than one SPF record (an error).",
+                        "examples": [
+                          false
+                        ]
+                      }
+                    },
+                    "required": [
+                      "record",
+                      "all",
+                      "multiple"
+                    ],
+                    "description": "SPF; null when there is none."
+                  },
+                  "dmarc": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "record": {
+                        "type": "string",
+                        "description": "The DMARC record.",
+                        "examples": [
+                          "v=DMARC1; p=reject"
+                        ]
+                      },
+                      "policy": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "p= policy.",
+                        "examples": [
+                          "reject"
+                        ]
+                      },
+                      "subdomain_policy": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "sp= policy.",
+                        "examples": [
+                          "reject"
+                        ]
+                      },
+                      "percent": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "pct= value.",
+                        "examples": [
+                          100
+                        ]
+                      },
+                      "reports_to": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "rua= address.",
+                        "examples": [
+                          "mailto:dmarc@example.com"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "record",
+                      "policy",
+                      "subdomain_policy",
+                      "percent",
+                      "reports_to"
+                    ],
+                    "description": "DMARC; null when there is none."
+                  }
+                },
+                "required": [
+                  "spf",
+                  "dmarc"
+                ],
+                "description": "Email authentication policy."
+              },
+              "tls": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "reachable": {
+                    "type": "boolean",
+                    "description": "An HTTPS server answered on port 443.",
+                    "examples": [
+                      true
+                    ]
+                  },
+                  "valid": {
+                    "type": "boolean",
+                    "description": "The certificate verified for this name.",
+                    "examples": [
+                      true
+                    ]
+                  },
+                  "error": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Why the check failed.",
+                    "examples": [
+                      "certificate has expired"
+                    ]
+                  },
+                  "ip": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Address connected to.",
+                    "examples": [
+                      "140.82.112.3"
+                    ]
+                  },
+                  "protocol": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "TLS version.",
+                    "examples": [
+                      "TLSv1.3"
+                    ]
+                  },
+                  "subject": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Certificate common name.",
+                    "examples": [
+                      "github.com"
+                    ]
+                  },
+                  "issuer": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Issuing CA.",
+                    "examples": [
+                      "Sectigo Limited"
+                    ]
+                  },
+                  "names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "description": "A name the certificate covers.",
+                      "examples": [
+                        "www.github.com"
+                      ]
+                    },
+                    "description": "Subject alternative names.",
+                    "examples": [
+                      []
+                    ]
+                  },
+                  "not_before": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Valid from.",
+                    "examples": [
+                      "2026-08-01T00:00:00Z"
+                    ]
+                  },
+                  "not_after": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Valid until.",
+                    "examples": [
+                      "2026-11-29T23:59:59Z"
+                    ]
+                  },
+                  "days_remaining": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Days until expiry.",
+                    "examples": [
+                      62
+                    ]
+                  }
+                },
+                "required": [
+                  "reachable",
+                  "valid",
+                  "error",
+                  "ip"
+                ],
+                "description": "HTTPS certificate; null when not checked."
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "No DMARC record."
+                  ]
+                },
+                "description": "Findings and caveats.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "domain",
+              "domain_ascii",
+              "exists",
+              "records",
+              "email_security",
+              "tls",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
+          }
+        },
+        "title": "domain.dns response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Domain DNS, email security and TLS certificate"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/domain/dns",
+        "price_usd": 0.05
+      }
+    },
+    {
+      "name": "hubvibe_identity_check",
+      "title": "Identity check: sanctions, email, phone and IP in one call",
+      "description": "Vet a person or company before onboarding, in one call: the name screened against the OFAC, UK and EU sanctions lists; the email's mailbox, disposable and role checks; the phone's validity, country and line type; the IP's country and network. Returns each result, flags (sanctions hit, disposable email, VoIP, countries that disagree...) and one risk level: low, review or high. Input: any of name, email, phone, ip; optional country, birth_year. $0.10 per call. Returns: input{}, risk (low | review | high), flags[{code, severity, detail}], checks{sanctions, email, phone, ip}, checks_run[], checks_failed[], notes[], checked_at.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": "Person or company name to screen against sanctions lists."
+          },
+          "email": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 320,
+            "description": "Email address to verify."
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 40,
+            "description": "Phone number, international (+44 20 7946 0958) or national with `phone_region`."
+          },
+          "phone_region": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2}$",
+            "description": "Two-letter country for a national-format phone number."
+          },
+          "ip": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 45,
+            "description": "The client's IPv4 or IPv6 address."
+          },
+          "country": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 60,
+            "description": "Country the person says they are in (US or United States), compared with phone and IP."
+          },
+          "birth_year": {
+            "type": "integer",
+            "minimum": 1880,
+            "maximum": 2030,
+            "description": "Birth year, to narrow sanctions matches for a person."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "email"
+            ]
+          },
+          {
+            "required": [
+              "phone"
+            ]
+          },
+          {
+            "required": [
+              "ip"
+            ]
+          }
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Name screened.",
+                    "examples": [
+                      "Jane Smith"
+                    ]
+                  },
+                  "email": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Email checked.",
+                    "examples": [
+                      "jane@stripe.com"
+                    ]
+                  },
+                  "phone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Phone checked.",
+                    "examples": [
+                      "+44 20 7031 3000"
+                    ]
+                  },
+                  "ip": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "IP checked.",
+                    "examples": [
+                      "8.8.8.8"
+                    ]
+                  },
+                  "country": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Stated country.",
+                    "examples": [
+                      "GB"
+                    ]
+                  },
+                  "birth_year": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Birth year given.",
+                    "examples": [
+                      1980
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "email",
+                  "phone",
+                  "ip",
+                  "country",
+                  "birth_year"
+                ],
+                "description": "What was checked."
+              },
+              "risk": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "review",
+                  "high"
+                ],
+                "description": "high: a high-severity flag (sanctions match). review: a medium flag. low: none or only low flags.",
+                "examples": [
+                  "review"
+                ]
+              },
+              "flags": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "description": "Flag code.",
+                      "examples": [
+                        "country_mismatch_ip"
+                      ]
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ],
+                      "description": "How much it matters.",
+                      "examples": [
+                        "low"
+                      ]
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "What was found.",
+                      "examples": [
+                        "Stated country GB but the ip is in United States."
+                      ]
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "severity",
+                    "detail"
+                  ]
+                },
+                "description": "Everything worth a look, most severe first.",
+                "examples": [
+                  []
+                ]
+              },
+              "checks": {
+                "type": "object",
+                "properties": {
+                  "sanctions": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "enum": [
+                          "potential_match",
+                          "no_match",
+                          "incomplete"
+                        ],
+                        "description": "Screen verdict.",
+                        "examples": [
+                          "no_match"
+                        ]
+                      },
+                      "match_count": {
+                        "type": "integer",
+                        "description": "Matches.",
+                        "examples": [
+                          0
+                        ]
+                      }
+                    },
+                    "required": [
+                      "verdict",
+                      "match_count"
+                    ],
+                    "description": "sanctions.screen result (verdict, match_count, matches[], lists[]), or null."
+                  },
+                  "email": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "description": "email.verify verdict.",
+                        "examples": [
+                          "deliverable"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string",
+                        "description": "Why.",
+                        "examples": [
+                          "mailbox_exists"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "verdict",
+                      "reason"
+                    ],
+                    "description": "email.verify result (verdict, reason, disposable, role_account, free_provider, did_you_mean...), or null."
+                  },
+                  "phone": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "valid": {
+                        "type": "boolean",
+                        "description": "Valid number.",
+                        "examples": [
+                          true
+                        ]
+                      },
+                      "line_type": {
+                        "type": "string",
+                        "description": "Line type.",
+                        "examples": [
+                          "fixed_line"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "valid",
+                      "line_type"
+                    ],
+                    "description": "phone.parse result (valid, e164, country, region, carrier, line_type), or null."
+                  },
+                  "ip": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "scope": {
+                        "type": "string",
+                        "description": "public, private, reserved...",
+                        "examples": [
+                          "public"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "scope"
+                    ],
+                    "description": "ip.lookup result (scope, location, network, reverse_dns, attribution), or null."
+                  }
+                },
+                "required": [
+                  "sanctions",
+                  "email",
+                  "phone",
+                  "ip"
+                ],
+                "description": "Each check's result; null when not asked for or failed."
+              },
+              "checks_run": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A check that completed.",
+                  "examples": [
+                    "sanctions"
+                  ]
+                },
+                "description": "Checks that completed.",
+                "examples": [
+                  [
+                    "sanctions",
+                    "email"
+                  ]
+                ]
+              },
+              "checks_failed": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A check that did not complete.",
+                  "examples": [
+                    "email"
+                  ]
+                },
+                "description": "Checks that failed; the rest still ship.",
+                "examples": [
+                  []
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A note.",
+                  "examples": [
+                    "Flags are leads to review, not a determination."
+                  ]
+                },
+                "description": "Notes.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
+                ]
+              }
+            },
+            "required": [
+              "input",
+              "risk",
+              "flags",
+              "checks",
+              "checks_run",
+              "checks_failed",
+              "notes",
+              "checked_at"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
+          }
+        },
+        "title": "identity.check response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Identity check: sanctions, email, phone and IP in one call"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/identity/check",
+        "price_usd": 0.1
       }
     },
     {

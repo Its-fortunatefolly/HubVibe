@@ -20,3 +20,5 @@ solana==0.36.12
 cdp-sdk==1.48.1
 # email.verify: MX lookups (wcag-audit-engine/app/workers/providers/mailcheck.py).
 dnspython==2.8.0
+phonenumbers==9.0.40
+maxminddb==3.2.0
