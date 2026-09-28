@@ -619,9 +619,11 @@ CATALOG = [
         description=(
             'Anomaly detection over a BigQuery time series with AI.DETECT_ANOMALIES '
             '(TimesFM): score a target table against a history table that shares its '
-            'timestamp and value columns and get the anomalous rows with '
-            'probabilities. Input: history_table, target_table, timestamp_col, '
-            'data_col, optional threshold and id_cols.'),
+            'timestamp and value columns, or give one table and its latest periods '
+            'are scored against its own history. Returns every checked row with its '
+            'bounds, anomaly flag and probability, plus the anomaly count. Input: '
+            'history_table, target_table, timestamp_col, data_col, optional '
+            'target_last, threshold and id_cols.'),
         tags=["bigquery", "anomaly", "timeseries", "timesfm", "data"],
         input_schema=_obj({
             "history_table": {"type": "string", "description": "project.dataset.table"},
@@ -632,9 +634,12 @@ CATALOG = [
                                        "description": "0.5-0.999, default 0.95."},
             "id_cols": {"type": "array", "items": {"type": "string"},
                        "description": "Optional: one series per value of these columns."},
+            "target_last": {"type": "integer", "minimum": 1, "maximum": 366,
+                            "description": "Same table as history and target: score its latest N timestamps. Default 30."},
             "max_scan_gib": {"type": "number"},
         }, ["history_table", "target_table", "timestamp_col", "data_col"]),
-        returns="history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, columns[], rows[], row_count, gib_processed.",
+        returns=("history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, mode, target_periods, "
+                 "columns[], rows[], row_count, anomaly_count, gib_processed."),
         skill="data.anomalies", max_seconds=200,
         pricing_basis="Provisional, completed-work tier. Bytes scanned measured per call.",
         requires=("bigquery",)),

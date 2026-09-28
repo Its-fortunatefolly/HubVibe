@@ -215,8 +215,23 @@ async def detect_anomalies(ctx, payload: dict) -> dict:
     if not 0.5 <= threshold <= 0.999:
         raise runtime.InvalidRequest("`anomaly_prob_threshold` must be between 0.5 and 0.999.")
 
+    target_last = payload.get("target_last", 30)
+    if isinstance(target_last, bool) or not isinstance(target_last, int) or not 1 <= target_last <= 366:
+        raise runtime.InvalidRequest("`target_last` must be a whole number from 1 to 366.")
+    if history_table == target_table:
+        # One table: TimesFM can only flag points it did not see, so score the
+        # table's latest `target_last` timestamps against everything before
+        # them. (Passing the same table as both, as-is, scores nothing.)
+        cutoff = (f"(SELECT MIN(t) FROM (SELECT DISTINCT `{timestamp_col}` AS t FROM `{history_table}` "
+                  f"ORDER BY t DESC LIMIT {target_last}))")
+        history_sql = f"(SELECT * FROM `{history_table}` WHERE `{timestamp_col}` < {cutoff})"
+        target_sql = f"(SELECT * FROM `{history_table}` WHERE `{timestamp_col}` >= {cutoff})"
+        mode, periods = "split_by_time", target_last
+    else:
+        history_sql, target_sql = f"TABLE `{history_table}`", f"TABLE `{target_table}`"
+        mode, periods = "two_tables", None
     sql = (
-        f"SELECT * FROM AI.DETECT_ANOMALIES(TABLE `{history_table}`, TABLE `{target_table}`, "
+        f"SELECT * FROM AI.DETECT_ANOMALIES({history_sql}, {target_sql}, "
         f"data_col => '{data_col}', timestamp_col => '{timestamp_col}', "
         f"anomaly_prob_threshold => {threshold}{_id_cols_sql(payload)})")
 
@@ -227,8 +242,10 @@ async def detect_anomalies(ctx, payload: dict) -> dict:
     return {
         "history_table": history_table, "target_table": target_table,
         "timestamp_col": timestamp_col, "data_col": data_col,
-        "anomaly_prob_threshold": threshold, "columns": value["columns"],
-        "rows": value["rows"], "row_count": value["row_count"],
+        "anomaly_prob_threshold": threshold, "mode": mode, "target_periods": periods,
+        "columns": value["columns"], "rows": value["rows"], "row_count": value["row_count"],
+        "anomaly_count": sum(1 for r in value["rows"]
+                             if isinstance(r, dict) and str(r.get("is_anomaly")).lower() == "true"),
         "gib_processed": value["gib_processed"],
     }
 
