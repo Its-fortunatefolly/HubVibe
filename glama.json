@@ -1798,6 +1798,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "stats.probability response"
@@ -2015,6 +2043,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "chain.network response"
@@ -2262,6 +2318,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "chain.address response"
@@ -2553,6 +2637,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "chain.transaction response"
@@ -2819,6 +2931,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "market.quote response"
@@ -3170,6 +3310,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "market.prediction response"
@@ -3469,6 +3637,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "extract.page response"
@@ -3723,6 +3919,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "llm.analyze response"
@@ -3970,6 +4194,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "llm.extract response"
@@ -4259,6 +4511,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "data.query response"
@@ -4563,6 +4843,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "data.question response"
@@ -4844,6 +5152,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "research.brief response"
@@ -5093,6 +5429,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "research.page_facts response"
@@ -5596,6 +5960,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "market.intel response"
@@ -5859,6 +6251,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "search.web response"
@@ -6131,6 +6551,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "llm.generate response"
@@ -6365,6 +6813,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "code.execute response"
@@ -6601,6 +7077,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "image.generate response"
@@ -6829,6 +7333,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "speech.synthesize response"
@@ -7060,6 +7592,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "speech.transcribe response"
@@ -7376,6 +7936,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "data.forecast response"
@@ -7744,6 +8332,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "data.anomalies response"
@@ -8096,6 +8712,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "verify.claims response"
@@ -8387,6 +9031,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "research.web response"
@@ -8743,6 +9415,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "research.company response"
@@ -8978,6 +9678,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "monitor.snapshot response"
@@ -9220,6 +9948,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "monitor.check response"
@@ -9861,6 +10617,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "commerce.availability response"
@@ -10331,6 +11115,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "market.stock response"
@@ -10842,6 +11654,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "market.fundamentals response"
@@ -12207,6 +13047,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "finance.analytics response"
@@ -12762,6 +13630,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "opendata.search response"
@@ -13194,6 +14090,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "opendata.table response"
@@ -13721,6 +14645,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "search.results response"
@@ -14214,6 +15166,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "news.search response"
@@ -14709,6 +15689,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "data.macro response"
@@ -15201,6 +16209,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "email.verify response"
@@ -16398,6 +17434,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "property.context response"
@@ -17700,6 +18764,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "travel.flight_status response"
@@ -18484,6 +19576,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "company.enrich response"
@@ -19245,6 +20365,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "commerce.shipping response"
@@ -20426,6 +21574,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "travel.flights response"
@@ -21411,6 +22587,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "travel.hotels response"
@@ -21823,6 +23027,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "traffic.route response"
@@ -22284,6 +23516,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "video.youtube response"
@@ -23353,6 +24613,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "social.bluesky response"
@@ -24260,6 +25548,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "social.mastodon response"
@@ -24915,6 +26231,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "social.x_pulse response"
@@ -25251,6 +26595,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "security.mcp_inspect response"
@@ -25522,6 +26894,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "fetch.raw response"
@@ -25754,6 +27154,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "chain.rpc response"
@@ -25978,6 +27406,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "market.rates response"
@@ -26238,6 +27694,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "market.ticker response"
@@ -26564,6 +28048,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "prediction.market response"
@@ -26834,6 +28346,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "prediction.events response"
@@ -27054,6 +28594,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "maps.places response"
@@ -27299,6 +28867,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "maps.route response"
@@ -27318,14 +28914,29 @@
     },
     {
       "name": "hubvibe_maps_weather",
-      "title": "Weather at a location",
-      "description": "Weather at a named place, current or forecast, through Google Maps Grounding Lite. Input: location as a place name or address. $0.10 per call. Returns: location, result (weather, per Maps Grounding Lite's own shape).",
+      "title": "Weather at a location, now and for seven days",
+      "description": "Weather anywhere on Earth: current conditions, the next 24 hours and a seven-day forecast (temperature, precipitation, wind, humidity, cloud, pressure, condition) from MET Norway's forecast model, plus active US National Weather Service alerts for US locations. Input: location as a place name, US street address or airport code, or lat and lng. Carries the sources' required credits. $0.10 per call. Returns: location, place{name, lat, lon, country, source}, current{time, temperature_c, wind_speed_ms, wind_direction_deg, humidity_pct, cloud_cover_pct, pressure_hpa, condition, precipitation_mm}, hourly[24], daily[7]{date, min_c, max_c, precipitation_mm, condition}, alerts[], alerts_covered, units{}, forecast_updated_at, attribution[], sections_failed[], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "location": {
-            "type": "string"
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": "Place name (Kyoto), US street address, or airport code (JFK)."
+          },
+          "lat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90,
+            "description": "Latitude, instead of a location."
+          },
+          "lng": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180,
+            "description": "Longitude, instead of a location."
           },
           "language": {
             "type": "string",
@@ -27334,10 +28945,21 @@
             "description": "Optional BCP-47 language tag (en, ja, ko, pt-BR): the human-readable strings of the result (notes, details, reasons) are translated into this language; data, codes, numbers and URLs are untouched. Default: as produced."
           }
         },
-        "required": [
-          "location"
-        ],
-        "additionalProperties": false
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "location"
+            ]
+          },
+          {
+            "required": [
+              "lat",
+              "lng"
+            ]
+          }
+        ]
       },
       "outputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -27376,31 +28998,562 @@
             "type": "object",
             "properties": {
               "location": {
-                "type": "string",
-                "description": "Location as given.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Location as given; null when coordinates were sent.",
                 "examples": [
-                  "San Francisco, CA"
+                  "Kyoto"
                 ]
               },
-              "result": {
-                "description": "Current conditions, in Google Maps Grounding Lite's own response shape.",
+              "place": {
                 "type": "object",
-                "examples": [
-                  {
-                    "temperature": {
-                      "degrees": 17.2,
-                      "unit": "CELSIUS"
-                    },
-                    "weatherCondition": {
-                      "type": "PARTLY_CLOUDY"
-                    }
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Where it resolved.",
+                    "examples": [
+                      "Kyoto (city in Japan)"
+                    ]
+                  },
+                  "lat": {
+                    "type": "number",
+                    "description": "Latitude.",
+                    "examples": [
+                      35.0117
+                    ]
+                  },
+                  "lon": {
+                    "type": "number",
+                    "description": "Longitude.",
+                    "examples": [
+                      135.7683
+                    ]
+                  },
+                  "country": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "ISO country when known.",
+                    "examples": [
+                      "US"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "How the place was found.",
+                    "examples": [
+                      "Wikidata Q34600"
+                    ]
                   }
+                },
+                "required": [
+                  "name",
+                  "lat",
+                  "lon",
+                  "country",
+                  "source"
+                ],
+                "description": "The point forecast."
+              },
+              "current": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Hour (UTC).",
+                    "examples": [
+                      "2026-09-28T16:00:00Z"
+                    ]
+                  },
+                  "temperature_c": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Air temperature.",
+                    "examples": [
+                      14.6
+                    ]
+                  },
+                  "wind_speed_ms": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Wind speed.",
+                    "examples": [
+                      2.7
+                    ]
+                  },
+                  "wind_direction_deg": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Wind from.",
+                    "examples": [
+                      172.4
+                    ]
+                  },
+                  "humidity_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Relative humidity.",
+                    "examples": [
+                      83.7
+                    ]
+                  },
+                  "cloud_cover_pct": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Cloud cover.",
+                    "examples": [
+                      13.3
+                    ]
+                  },
+                  "pressure_hpa": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Sea-level pressure.",
+                    "examples": [
+                      1013.5
+                    ]
+                  },
+                  "condition": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "MET symbol code.",
+                    "examples": [
+                      "fair_day"
+                    ]
+                  },
+                  "precipitation_mm": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Precipitation in the next hour.",
+                    "examples": [
+                      0.0
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "temperature_c",
+                  "wind_speed_ms",
+                  "wind_direction_deg",
+                  "humidity_pct",
+                  "cloud_cover_pct",
+                  "pressure_hpa",
+                  "condition",
+                  "precipitation_mm"
+                ],
+                "description": "Weather at one hour."
+              },
+              "hourly": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "time": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Hour (UTC).",
+                      "examples": [
+                        "2026-09-28T16:00:00Z"
+                      ]
+                    },
+                    "temperature_c": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Air temperature.",
+                      "examples": [
+                        14.6
+                      ]
+                    },
+                    "wind_speed_ms": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Wind speed.",
+                      "examples": [
+                        2.7
+                      ]
+                    },
+                    "wind_direction_deg": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Wind from.",
+                      "examples": [
+                        172.4
+                      ]
+                    },
+                    "humidity_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Relative humidity.",
+                      "examples": [
+                        83.7
+                      ]
+                    },
+                    "cloud_cover_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Cloud cover.",
+                      "examples": [
+                        13.3
+                      ]
+                    },
+                    "pressure_hpa": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Sea-level pressure.",
+                      "examples": [
+                        1013.5
+                      ]
+                    },
+                    "condition": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "MET symbol code.",
+                      "examples": [
+                        "fair_day"
+                      ]
+                    },
+                    "precipitation_mm": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Precipitation in the next hour.",
+                      "examples": [
+                        0.0
+                      ]
+                    }
+                  },
+                  "required": [
+                    "time",
+                    "temperature_c",
+                    "wind_speed_ms",
+                    "wind_direction_deg",
+                    "humidity_pct",
+                    "cloud_cover_pct",
+                    "pressure_hpa",
+                    "condition",
+                    "precipitation_mm"
+                  ],
+                  "description": "Weather at one hour."
+                },
+                "description": "The next 24 hours."
+              },
+              "daily": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "description": "Day (UTC).",
+                      "examples": [
+                        "2026-09-29"
+                      ]
+                    },
+                    "min_c": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Low.",
+                      "examples": [
+                        12.1
+                      ]
+                    },
+                    "max_c": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "High.",
+                      "examples": [
+                        21.4
+                      ]
+                    },
+                    "precipitation_mm": {
+                      "type": "number",
+                      "description": "Total precipitation.",
+                      "examples": [
+                        1.2
+                      ]
+                    },
+                    "condition": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Midday symbol.",
+                      "examples": [
+                        "partlycloudy_day"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "date",
+                    "min_c",
+                    "max_c",
+                    "precipitation_mm",
+                    "condition"
+                  ],
+                  "description": "One day."
+                },
+                "description": "Up to seven days."
+              },
+              "alerts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "event": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Alert type.",
+                      "examples": [
+                        "Air Quality Alert"
+                      ]
+                    },
+                    "severity": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Severity.",
+                      "examples": [
+                        "Moderate"
+                      ]
+                    },
+                    "headline": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Headline.",
+                      "examples": [
+                        "Air Quality Alert issued September 28 ..."
+                      ]
+                    },
+                    "effective": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "From.",
+                      "examples": [
+                        "2026-09-28T12:00:00-05:00"
+                      ]
+                    },
+                    "expires": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Until.",
+                      "examples": [
+                        "2026-09-29T00:00:00-05:00"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "event",
+                    "severity",
+                    "headline",
+                    "effective",
+                    "expires"
+                  ],
+                  "description": "An active NWS alert."
+                },
+                "description": "Active US National Weather Service alerts; empty outside the US or when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "alerts_covered": {
+                "type": "boolean",
+                "description": "Whether alerts were checked (US points).",
+                "examples": [
+                  true
+                ]
+              },
+              "units": {
+                "type": "object",
+                "properties": {
+                  "temperature": {
+                    "type": "string",
+                    "description": "Unit.",
+                    "examples": [
+                      "celsius"
+                    ]
+                  },
+                  "wind_speed": {
+                    "type": "string",
+                    "description": "Unit.",
+                    "examples": [
+                      "m/s"
+                    ]
+                  },
+                  "precipitation": {
+                    "type": "string",
+                    "description": "Unit.",
+                    "examples": [
+                      "mm"
+                    ]
+                  },
+                  "pressure": {
+                    "type": "string",
+                    "description": "Unit.",
+                    "examples": [
+                      "hPa"
+                    ]
+                  }
+                },
+                "required": [
+                  "temperature",
+                  "wind_speed",
+                  "precipitation",
+                  "pressure"
+                ],
+                "description": "Units."
+              },
+              "forecast_updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "When MET Norway last updated this forecast.",
+                "examples": [
+                  "2026-09-28T13:18:23Z"
+                ]
+              },
+              "attribution": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "description": "Credit.",
+                      "examples": [
+                        "Data from MET Norway"
+                      ]
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Link.",
+                      "examples": [
+                        "https://www.met.no/en"
+                      ]
+                    },
+                    "license": {
+                      "type": "string",
+                      "description": "Licence.",
+                      "examples": [
+                        "CC BY 4.0"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "url",
+                    "license"
+                  ],
+                  "description": "A required credit."
+                },
+                "description": "Credits to show with the data."
+              },
+              "sections_failed": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A section whose source did not answer.",
+                  "examples": [
+                    "alerts"
+                  ]
+                },
+                "description": "Empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A caveat.",
+                  "examples": [
+                    "alerts: NWS alerts timed out"
+                  ]
+                },
+                "description": "Caveats; empty when none.",
+                "examples": [
+                  []
+                ]
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When this node read the source (UTC). Nothing here is cached.",
+                "examples": [
+                  "2026-09-26T18:00:00Z"
                 ]
               }
             },
             "required": [
               "location",
-              "result"
+              "place",
+              "current",
+              "hourly",
+              "daily",
+              "alerts",
+              "alerts_covered",
+              "units",
+              "forecast_updated_at",
+              "attribution",
+              "sections_failed",
+              "notes",
+              "checked_at"
             ]
           },
           "provenance": {
@@ -27515,6 +29668,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "maps.weather response"
@@ -27524,7 +29705,7 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
-        "title": "Weather at a location"
+        "title": "Weather at a location, now and for seven days"
       },
       "httpEndpoint": {
         "method": "POST",
@@ -27779,6 +29960,34 @@
             "examples": [
               "settlement pending"
             ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
           }
         },
         "title": "video.generate response"

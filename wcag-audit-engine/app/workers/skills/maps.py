@@ -1,4 +1,4 @@
-"""Places, routes and weather, via Google's own managed Maps Grounding Lite
+"""Places and routes, via Google's own managed Maps Grounding Lite
 MCP server -- these are thin pass-throughs to what that server already
 validates, not a reimplementation of Maps."""
 
@@ -45,18 +45,4 @@ async def route(ctx, payload: dict) -> dict:
            "result": result}
 
 
-async def weather(ctx, payload: dict) -> dict:
-    location = (payload.get("location") or "").strip()
-    if not location:
-        raise runtime.InvalidRequest("`location` is required.")
-    if len(location) > MAX_QUERY_CHARS:
-        raise runtime.InvalidRequest(f"`location` is over the {MAX_QUERY_CHARS}-character limit.")
-
-    async def call(provider):
-        return await provider.lookup_weather(location)
-
-    result = await ctx.run("lookup_weather", maps_grounding.PROVIDERS, call, per_attempt_seconds=25)
-    return {"location": location, "result": result}
-
-
-SKILLS = {"maps.places": places, "maps.route": route, "maps.weather": weather}
+SKILLS = {"maps.places": places, "maps.route": route}

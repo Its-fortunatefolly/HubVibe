@@ -15,6 +15,7 @@ import json
 import sys
 from pathlib import Path
 
+import jsonschema
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -196,3 +197,35 @@ def test_the_static_manifests_advertise_language_on_every_tool(app_module):
     static = json.loads((REPO_ROOT / "wcag-audit-engine" / "app" / "static" / "mcp.json").read_text())
     worker_tools = [t for t in static["tools"] if t["name"].startswith("hubvibe_") and t.get("httpEndpoint", {}).get("path", "").startswith("/work/")]
     assert worker_tools and all("language" in t["inputSchema"]["properties"] for t in worker_tools)
+
+
+def test_text_translated_by_google_carries_the_credit_and_untranslated_text_does_not(client, monkeypatch):
+    async def skill(ctx, payload):
+        class _Translate:
+            id = "google-translate-llm"
+
+            def available(self):
+                return True
+
+            def unavailable_reason(self):
+                return ""
+
+            async def go(self):
+                return W.runtime.ProviderResult(value="ok", cost_micros=0, cost_measured=True)
+        if payload.get("language"):
+            await ctx.run("translate", [_Translate()], lambda p: p.go())
+        return {"indicator": {"alias": "inflation", "code": "FP.CPI.TOTL.ZG", "name": "Inflation", "unit": None},
+                "country": {"code": "JP", "name": "Japan"}, "frequency": "annual", "source": "world-bank",
+                "observations": [{"period": "2024", "value": 2.74}], "observation_count": 1,
+                "latest": {"period": "2024", "value": 2.74}, "previous": None, "change": None, "as_of": "2026-07-13",
+                "source_url": "https://api.worldbank.org/v2/country/JP/indicator/FP.CPI.TOTL.ZG?format=json",
+                "notes": [], "checked_at": "2026-09-27T12:00:00Z"}
+    registry = dict(W.router.REGISTRY)
+    registry["data.macro"] = skill
+    monkeypatch.setattr(W.router, "REGISTRY", registry)
+    r = client.post("/work/data/macro", headers={"X-API-Key": "test-key"}, json={"indicator": "inflation", "country": "JP", "language": "ja"})
+    assert r.status_code == 200, r.text
+    assert r.json()["attribution"] == [{"text": "Translated by Google", "url": "https://translate.google.com"}]
+    jsonschema.validate(r.json(), W.catalog.response_schema(W.catalog.BY_NAME["data.macro"]))
+    r = client.post("/work/data/macro", headers={"X-API-Key": "test-key"}, json={"indicator": "inflation", "country": "JP"})
+    assert r.status_code == 200 and "attribution" not in r.json()
