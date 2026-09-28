@@ -33,11 +33,18 @@ async def quote(ctx, payload: dict) -> dict:
     }
 
 
-async def prediction_markets(ctx, payload: dict) -> dict:
+async def prediction_markets(ctx, payload: dict, allow_empty: bool = False) -> dict:
     """Live prediction markets and their implied probabilities.
 
     Returns the probability as a percentage rather than the raw outcome price,
     because that is the number a buying agent reasons with.
+
+    An empty list is never sold: a topic no open market matches is a free
+    refusal, and an empty list with no topic means Polymarket answered with
+    nothing (a provider failure, also unbilled). The one repeat buyer paid
+    $0.05 four times on 2026-09-25/26 for empty lists; this is why.
+    `allow_empty` is for composites (market.intel) that sell other data
+    beside the markets.
     """
     query = payload.get("query")
     if query is not None and not isinstance(query, str):
@@ -53,6 +60,13 @@ async def prediction_markets(ctx, payload: dict) -> dict:
         return await provider.search(query=query, limit=limit)
 
     value = await ctx.run("markets", polymarket.PROVIDERS, call, per_attempt_seconds=20)
+    if not value["count"] and not allow_empty:
+        if query:
+            raise runtime.InvalidRequest(
+                f"No open Polymarket market matches {query!r}. Try the market's main words "
+                "(for example 'fed rate cut', 'bitcoin', 'election'), or send no query for the "
+                "biggest markets. Nothing was charged.")
+        raise runtime.TransientProviderError("Polymarket returned no open markets.")
     return {
         "query": query,
         "markets": value["markets"],
@@ -126,6 +140,8 @@ async def prediction_events(ctx, payload: dict) -> dict:
         return await provider.events(limit=limit)
 
     value = await ctx.run("events", polymarket.PROVIDERS, call, per_attempt_seconds=20)
+    if not value["count"]:
+        raise runtime.TransientProviderError("Polymarket returned no open events.")
     return {"events": value["events"], "count": value["count"], "source": "polymarket-gamma"}
 
 

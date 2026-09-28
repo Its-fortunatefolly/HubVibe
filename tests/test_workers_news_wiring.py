@@ -47,7 +47,7 @@ def _fakes(monkeypatch, captured, news_result=None, news_error=None):
         return {"product_id": payload["product_id"], "price": 84473.0, "quote_currency": "USD",
                 "price_change_24h_pct": 1.2, "volume_24h": 1000.0}
 
-    async def fake_markets(ctx, payload):
+    async def fake_markets(ctx, payload, **kwargs):
         return {"count": 1, "markets": [{"question": "BTC above 100k by Dec 31?",
                                          "implied_probabilities": [{"outcome": "Yes", "probability_pct": 40.0}]}]}
 

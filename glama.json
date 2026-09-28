@@ -2979,14 +2979,14 @@
     {
       "name": "hubvibe_market_prediction",
       "title": "Prediction market probabilities",
-      "description": "Prediction market odds from Polymarket: live markets and the probability each outcome currently implies, as percentages rather than raw prices. Search by topic or take the highest-volume markets. Input: optional query and limit. Use prediction.market for one market by slug, prediction.events for event groupings. $0.05 per call. Returns: markets[] with question, implied_probabilities[], volume, end_date.",
+      "description": "Prediction market odds from Polymarket: live markets and the probability each outcome currently implies, as percentages rather than raw prices. Search by topic (tickers such as BTC understood) or take the highest-volume markets. A topic no open market matches is refused free, never sold empty. Input: optional query and limit. Use prediction.market for one market by slug, prediction.events for event groupings. $0.05 per call. Returns: markets[] with question, implied_probabilities[], volume, end_date.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "Topic to match (optional)."
+            "description": "Topic words to match, e.g. 'fed rate cut' or 'BTC 150k' (optional)."
           },
           "limit": {
             "type": "integer",

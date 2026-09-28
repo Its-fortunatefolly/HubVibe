@@ -8,6 +8,7 @@ any action in a market; it reports what a market currently implies.
 """
 
 import json
+import re
 import os
 from typing import Optional
 
@@ -33,6 +34,76 @@ def _as_list(raw):
         except json.JSONDecodeError:
             return [raw]
     return []
+
+
+# Words that carry no topic on their own, so a market is not matched on them.
+_STOPWORDS = {
+    "a", "an", "and", "any", "are", "as", "at", "be", "been", "by", "can", "could", "did", "do", "does", "for",
+    "from", "has", "have", "how", "if", "in", "into", "is", "it", "its", "market", "markets", "more", "most",
+    "odds", "of", "on", "or", "over", "polymarket", "prediction", "predictions", "than", "that", "the", "this",
+    "to", "under", "was", "what", "when", "where", "which", "who", "why", "will", "with", "would",
+}
+_TOKEN = re.compile(r"[0-9a-z]+")
+
+
+def _normal(text: str) -> str:
+    # "$5,000" and "5000" are the same number; hyphenated slugs are words.
+    return re.sub(r"(?<=\d),(?=\d)", "", (text or "").lower()).replace("-", " ")
+
+
+def keywords(query: str) -> list:
+    """The query's topic words, in order, without filler."""
+    out = []
+    for word in _TOKEN.findall(_normal(query)):
+        if word not in _STOPWORDS and (len(word) > 2 or word.isdigit()) and word not in out:
+            out.append(word)
+    return out
+
+
+# Words too common in market questions to identify a topic by themselves.
+_GENERIC = {
+    "above", "after", "before", "below", "best", "between", "cut", "cuts", "day", "end", "first", "happen",
+    "hit", "last", "month", "new", "next", "price", "prices", "rate", "rates", "reach", "say", "says", "stock",
+    "stocks", "today", "tomorrow", "top", "week", "win", "winner", "winners", "wins", "year", "years",
+}
+# Tickers buyers type for the names markets use.
+_ALIASES = {"btc": "bitcoin", "eth": "ethereum", "sol": "solana", "doge": "dogecoin", "xrp": "ripple",
+            "fed": "federal", "gop": "republican", "potus": "president", "nyc": "new york"}
+
+
+_COINS = {"btc": "Bitcoin", "eth": "Ethereum", "sol": "Solana", "doge": "Dogecoin", "xrp": "XRP"}
+
+
+def expand(query: str) -> str:
+    """Tickers as the names Polymarket's questions use ("BTC hit 150k" ->
+    "Bitcoin hit 150k"), so its search ranks the price markets first."""
+    return re.sub(r"\b(btc|eth|sol|doge)\b", lambda m: _COINS[m.group(1).lower()], query, flags=re.I)
+
+
+def _has(word: str, have: set, text: str) -> bool:
+    if word in have or (len(word) > 4 and word.endswith("s") and word[:-1] in have):
+        return True
+    if len(word) >= 5 and any(h.startswith(word) for h in have):
+        return True
+    alias = _ALIASES.get(word)
+    return bool(alias) and (alias in have or alias in text)
+
+
+def relevant(words: list, text: str, lenient: bool = False) -> bool:
+    """True when the market's own text holds enough of the query's words:
+    all of one or two, and more than half of three or more. A word also
+    counts in its singular form (elections -> election) and a ticker as its
+    name (btc -> bitcoin). `lenient` asks only for every distinctive word
+    (not generic, not a number): "bitcoin price end of year" -> bitcoin."""
+    if not words:
+        return True
+    text = _normal(text)
+    have = set(_TOKEN.findall(text))
+    if lenient:
+        strong = [w for w in words if w not in _GENERIC and not any(c.isdigit() for c in w)]
+        return bool(strong) and all(_has(w, have, text) for w in strong)
+    found = sum(1 for w in words if _has(w, have, text))
+    return found >= (len(words) if len(words) <= 2 else len(words) // 2 + 1)
 
 
 class _Polymarket:
@@ -103,13 +174,23 @@ class _Polymarket:
             # Polymarket's own search, which matches the whole catalogue. (Filtering
             # only the top markets by volume answered almost every topic with
             # nothing once sports lines took over the top of that list.)
-            params = {"q": query, "limit_per_type": 20, "search_profiles": "false", "search_tags": "false"}
+            params = {"q": expand(query), "limit_per_type": 20, "search_profiles": "false", "search_tags": "false"}
             if active_only:
                 params["events_status"] = "active"
             found = await self._get("/public-search", params)
             events = (found[0] or {}).get("events") or [] if found and isinstance(found[0], dict) else []
-            markets = [m for e in events if isinstance(e, dict) for m in (e.get("markets") or [])
-                       if isinstance(m, dict) and (not active_only or (m.get("active") and not m.get("closed")))]
+            # Polymarket's search is fuzzy: nonsense text still brings back
+            # something ("xyzzy plumbus nonsense" -> a Consensys IPO market,
+            # "nvidia earnings" -> Micron's, seen live 2026-09-28). Keep only
+            # markets whose own words carry the query's key words.
+            words = keywords(expand(query))
+            candidates = [(m, " ".join(str(x or "") for x in (m.get("question"), m.get("slug"), e.get("title"),
+                                                              e.get("slug"))))
+                          for e in events if isinstance(e, dict) for m in (e.get("markets") or [])
+                          if isinstance(m, dict) and (not active_only or (m.get("active") and not m.get("closed")))]
+            markets = [m for m, text in candidates if relevant(words, text)]
+            if not markets:
+                markets = [m for m, text in candidates if relevant(words, text, lenient=True)]
             shaped = [self._shape(m) for m in markets]
             shaped.sort(key=lambda m: m.get("volume") or 0, reverse=True)
             shaped = shaped[:limit]
