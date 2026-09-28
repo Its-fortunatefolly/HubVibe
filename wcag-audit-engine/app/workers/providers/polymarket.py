@@ -114,11 +114,15 @@ class _Polymarket:
             shaped.sort(key=lambda m: m.get("volume") or 0, reverse=True)
             shaped = shaped[:limit]
         else:
-            params = {"limit": limit, "order": "volume", "ascending": "false"}
+            # `volumeNum`, not `volume`: on /markets `volume` sorts as TEXT, so
+            # "top by volume" came back as $100 weather bets and $1,000 soccer
+            # lines (seen live 2026-09-28). /events sorts `volume` numerically.
+            params = {"limit": limit, "order": "volumeNum", "ascending": "false"}
             if active_only:
                 params.update({"active": "true", "closed": "false"})
             markets = await self._get("/markets", params)
             shaped = [self._shape(m) for m in markets if isinstance(m, dict)]
+            shaped.sort(key=lambda m: m.get("volume") or 0, reverse=True)
         return runtime.ProviderResult(
             value={"query": query, "markets": shaped, "count": len(shaped)},
             cost_micros=0, cost_measured=True, usage=f"markets={len(shaped)}")
