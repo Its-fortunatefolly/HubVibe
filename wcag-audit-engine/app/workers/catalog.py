@@ -834,6 +834,36 @@ CATALOG = [
         pricing_basis="Provisional. Provider cost zero (official public API); two requests at most.",
         requires=("sec_edgar",)),
     Worker(
+        name="market.insiders", price_usd=0.10, tier="utility",
+        title="Insider trades from SEC Form 4 filings",
+        description=(
+            'What a company\'s officers, directors and 10% owners bought and sold, parsed from the '
+            'Form 4s they filed with the SEC, read at call time from EDGAR. Each trade: insider, '
+            'role, date, code and meaning, shares, price, value, holdings after, 10b5-1 plan flag, '
+            'filing link. Summary: open-market buys vs sells, net shares and dollars, distinct '
+            'insiders. Input: symbol (US ticker) or cik; optional days (default 90), codes such '
+            'as ["P","S"], max_filings.'),
+        tags=["market", "insider", "insiders", "form-4", "sec", "edgar", "stocks", "ownership", "signals"],
+        input_schema=dict(_obj({
+            "symbol": dict(_SYMBOL, description="US ticker in the SEC's table, e.g. NVDA. Use this OR `cik`."),
+            "cik": {"type": ["integer", "string"], "description": "SEC Central Index Key of the issuer, e.g. 1045810."},
+            "days": {"type": "integer", "minimum": 1, "maximum": 365,
+                     "description": "Look back this many days by filing date. Default 90."},
+            "codes": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                      "description": ("Keep only these Form 4 transaction codes, e.g. [\"P\"] for open-market "
+                                      "buys, [\"P\", \"S\"] for buys and sells. Default: all.")},
+            "max_filings": {"type": "integer", "minimum": 1, "maximum": 40,
+                            "description": "Most recent Form 4 filings to read. Default 20."},
+            "include_derivatives": {"type": "boolean",
+                                    "description": "Include option and other derivative lines. Default true."},
+        }, []), anyOf=[{"required": ["symbol"]}, {"required": ["cik"]}]),
+        returns=("symbol, cik, issuer_name, window, codes, filings_read, transactions[] (insider, role, date, "
+                 "code, code_meaning, shares, price, value, shares_after, rule_10b5_1, filing_url), "
+                 "transaction_count, summary, as_of, notes[], source, checked_at."),
+        skill="market.insiders", max_seconds=60,
+        pricing_basis="Provisional. Provider cost zero (official public API); one filing list plus one small XML per Form 4.",
+        requires=("sec_edgar",)),
+    Worker(
         name="finance.analytics", price_usd=0.50, tier="standard",
         title="Trading mathematics: returns, risk, drawdown, VaR, beta, indicators, options, Kelly",
         description=(
@@ -1711,6 +1741,7 @@ _EXAMPLE_OVERRIDES = {
     "market.stock": {"symbol": "AAPL", "range": "1mo"},
     # Either symbol or cik is valid, so nothing is `required`.
     "market.fundamentals": {"symbol": "AAPL", "periods": 4, "forms": ["10-K", "10-Q"]},
+    "market.insiders": {"symbol": "NVDA", "days": 90, "codes": ["P", "S"]},
     # Inline prices with an option and a bet, so the example computes offline.
     "finance.analytics": {
         "prices": [100, 101.5, 99.8, 102.2, 103.9, 103.1, 105.4, 104.2, 106.8, 108.0, 107.1,
