@@ -58,8 +58,12 @@ def test_no_query_still_reads_the_top_markets_by_volume(monkeypatch):
     calls = []
 
     async def fake_get(self, path, params):
-        calls.append(path)
-        return [SEARCH["events"][0]["markets"][0]]
+        calls.append((path, dict(params)))
+        return [SEARCH["events"][0]["markets"][0], SEARCH["events"][0]["markets"][1]]
     monkeypatch.setattr(type(PM.PROVIDERS[0]), "_get", fake_get)
     out = asyncio.run(PM.PROVIDERS[0].search(None, limit=3)).value
-    assert calls == ["/markets"] and out["count"] == 1
+    assert [c[0] for c in calls] == ["/markets"] and out["count"] == 2
+    # `volume` sorts as text on /markets ($100 weather bets first, seen live
+    # 2026-09-28); `volumeNum` is the numeric field.
+    assert calls[0][1]["order"] == "volumeNum" and calls[0][1]["ascending"] == "false"
+    assert [m["slug"] for m in out["markets"]] == ["btc-80k-sep", "will-bitcoin-reach-100k-in-september-2026"]
