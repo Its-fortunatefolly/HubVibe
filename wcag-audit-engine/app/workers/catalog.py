@@ -1163,6 +1163,99 @@ CATALOG = [
                        "downloaded at most every six hours and matched on this node."),
         requires=("sanctions",)),
     Worker(
+        name="phone.parse", price_usd=0.02, tier="utility",
+        title="Phone number intelligence: valid, where, which network, what type",
+        description=(
+            "What a phone number itself says, checked against Google's libphonenumber "
+            "numbering plans: valid or not, country and area, the network the range was "
+            "issued to, line type (mobile, fixed, toll-free, VoIP, premium...), time zones "
+            "and E.164, international and national formats. Offline: nothing is dialled "
+            "and the owner is never looked up. Input: number; optional region for a "
+            "national-format number."),
+        tags=["phone", "validation", "carrier", "line-type", "e164", "osint", "kyc", "leads", "live"],
+        input_schema=_obj({
+            "number": {"type": "string", "minLength": 3, "maxLength": 40,
+                       "description": "One phone number, international (+44 20 7946 0958) or national with `region`."},
+            "region": {"type": "string", "pattern": "^[A-Za-z]{2}$",
+                       "description": "Two-letter country code for a national-format number (GB, US)."},
+        }, ["number"]),
+        returns=("input{}, valid, possible, e164, international, national, country_code, region, country, location, carrier, "
+                 "line_type, time_zones[], metadata_version, notes[], checked_at."),
+        skill="phone.parse", max_seconds=15,
+        pricing_basis="Provisional, utility tier. Provider cost zero: libphonenumber metadata on this node (Apache-2.0).",
+        requires=("phone",)),
+    Worker(
+        name="ip.lookup", price_usd=0.02, tier="utility",
+        title="IP address lookup: location, network owner, reverse DNS",
+        description=(
+            "Where is this IP address and who runs it? City, region, country and "
+            "coordinates, the network's ASN and organisation, its reverse DNS name, and "
+            "whether it is public, private or reserved. IPv4 and IPv6. Location data: "
+            "DB-IP Lite (CC BY 4.0, credited in every answer), updated monthly. Location is "
+            "the network's registered place, never a street address. Input: ip."),
+        tags=["ip", "geolocation", "asn", "network", "reverse-dns", "osint", "fraud", "security", "live"],
+        input_schema=_obj({
+            "ip": {"type": "string", "minLength": 2, "maxLength": 45, "description": "One IPv4 or IPv6 address, such as 8.8.8.8."},
+        }, ["ip"]),
+        returns=("ip, version, scope, reverse_dns[], location{city, region, country, country_code, continent, latitude, "
+                 "longitude}, network{asn, organization}, database_month, attribution{text, url, license}, notes[], checked_at."),
+        skill="ip.lookup", max_seconds=120,
+        pricing_basis="Provisional, utility tier. Provider cost zero: DB-IP Lite files on this node plus one DNS query.",
+        requires=("iplookup",)),
+    Worker(
+        name="domain.dns", price_usd=0.05, tier="utility",
+        title="Domain DNS, email security and TLS certificate",
+        description=(
+            "A domain's public setup, asked of the source: A, AAAA, CNAME, MX, NS, TXT, CAA "
+            "and SOA records; its SPF and DMARC email policy, parsed; and its HTTPS "
+            "certificate, verified like a browser (issuer, names, expiry, days left, TLS "
+            "version). Flags missing SPF or DMARC, duplicate SPF and a certificate near "
+            "expiry. No WHOIS or third-party data. Input: domain (a URL is accepted)."),
+        tags=["dns", "domain", "mx", "spf", "dmarc", "tls", "certificate", "osint", "security", "live"],
+        input_schema=_obj({
+            "domain": {"type": "string", "minLength": 3, "maxLength": 253, "description": "A domain (github.com) or a URL on it."},
+            "tls": {"type": "boolean", "description": "Also check the HTTPS certificate. Default true."},
+        }, ["domain"]),
+        returns=("domain, domain_ascii, exists, records{a[], aaaa[], cname[], mx[], ns[], txt[], caa[], soa[]}, "
+                 "email_security{spf{record, all, multiple}, dmarc{record, policy, subdomain_policy, percent, reports_to}}, "
+                 "tls{reachable, valid, error, ip, protocol, subject, issuer, names[], not_before, not_after, days_remaining}, "
+                 "notes[], checked_at."),
+        skill="domain.dns", max_seconds=45,
+        pricing_basis="Provisional, utility tier. Provider cost zero: DNS queries and one TLS handshake from this node.",
+        requires=("dnsintel",)),
+    Worker(
+        name="identity.check", price_usd=0.10, tier="utility",
+        title="Identity check: sanctions, email, phone and IP in one call",
+        description=(
+            "Vet a person or company before onboarding, in one call: the name screened "
+            "against the OFAC, UK and EU sanctions lists; the email's mailbox, disposable "
+            "and role checks; the phone's validity, country and line type; the IP's country "
+            "and network. Returns each result, flags (sanctions hit, disposable email, VoIP, "
+            "countries that disagree...) and one risk level: low, review or high. Input: any "
+            "of name, email, phone, ip; optional country, birth_year."),
+        tags=["identity", "kyc", "verification", "sanctions", "email", "phone", "ip", "fraud", "onboarding", "osint"],
+        input_schema=dict(_obj({
+            "name": {"type": "string", "minLength": 2, "maxLength": 200,
+                     "description": "Person or company name to screen against sanctions lists."},
+            "email": {"type": "string", "minLength": 3, "maxLength": 320, "description": "Email address to verify."},
+            "phone": {"type": "string", "minLength": 3, "maxLength": 40,
+                      "description": "Phone number, international (+44 20 7946 0958) or national with `phone_region`."},
+            "phone_region": {"type": "string", "pattern": "^[A-Za-z]{2}$",
+                             "description": "Two-letter country for a national-format phone number."},
+            "ip": {"type": "string", "minLength": 2, "maxLength": 45, "description": "The client's IPv4 or IPv6 address."},
+            "country": {"type": "string", "minLength": 2, "maxLength": 60,
+                        "description": "Country the person says they are in (US or United States), compared with phone and IP."},
+            "birth_year": {"type": "integer", "minimum": 1880, "maximum": 2030,
+                           "description": "Birth year, to narrow sanctions matches for a person."},
+        }, []), anyOf=[{"required": ["name"]}, {"required": ["email"]}, {"required": ["phone"]}, {"required": ["ip"]}]),
+        returns=("input{}, risk (low | review | high), flags[{code, severity, detail}], checks{sanctions, email, phone, "
+                 "ip}, checks_run[], checks_failed[], notes[], checked_at."),
+        skill="identity.check", max_seconds=90,
+        pricing_basis=("Provisional, utility tier: under the four checks bought one by one ($0.11). Provider cost zero: "
+                       "government list files, DNS/SMTP, libphonenumber and DB-IP data on this node."),
+        composes=["sanctions.screen", "email.verify", "phone.parse", "ip.lookup"],
+        requires=("sanctions", "mailcheck", "phone", "iplookup")),
+    Worker(
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
@@ -1731,6 +1824,12 @@ _EXAMPLE_OVERRIDES = {
     "company.enrich": {"domain": "stripe.com"},
     # A listed company, so the example always returns a match with its lists.
     "sanctions.screen": {"name": "Rosneft", "type": "entity"},
+    # Google's published London number and public resolver: no private person.
+    "phone.parse": {"number": "+44 20 7031 3000"},
+    "ip.lookup": {"ip": "8.8.8.8"},
+    "domain.dns": {"domain": "github.com"},
+    "identity.check": {"name": "Jane Smith", "email": "jane@stripe.com", "phone": "+44 20 7031 3000",
+                       "ip": "8.8.8.8", "country": "GB"},
     "traffic.route": {"origin": "Ferry Building, San Francisco, CA", "destination": "Oakland City Hall, Oakland, CA", "travel_mode": "DRIVE", "traffic": "aware"},
     "video.youtube": {"query": "open source licensing", "max_results": 3},
     "social.bluesky": {"mode": "profile", "actor": "bsky.app", "posts": 3},
