@@ -1196,6 +1196,116 @@ def payment_required_v2_dict(
         return {}
 
 
+# The largest PAYMENT-REQUIRED value this node sends. Python's aiohttp refuses
+# any response header line over 8,190 bytes and Node's fetch any header block
+# over 16 KB; measured 2026-09-29, 60 of 68 routes were over the first and 12
+# over the second, so those clients never saw the price. 7,000 leaves room
+# for the header name and the other headers on the same response.
+HEADER_BUDGET = int(os.environ.get("X402_HEADER_BUDGET_BYTES", "7000"))
+
+# Full Bazaar records by resource URL, as each route declares them. The header
+# carries a slimmed copy; a v2 client echoes that copy into its payment, and
+# the facilitator catalogues the resource from the payment's `extensions`
+# (x402.extensions.bazaar.facilitator.extract_discovery_info), so the full
+# record is put back on the payment before it is verified and settled.
+_FULL_DISCOVERY: dict = {}
+_FULL_DISCOVERY_MAX = 1024
+_SCHEMA_NOISE = ("description", "examples", "title", "$comment", "default")
+
+
+def _strip_schema_noise(node):
+    if isinstance(node, dict):
+        return {k: _strip_schema_noise(v) for k, v in node.items() if k not in _SCHEMA_NOISE}
+    if isinstance(node, list):
+        return [_strip_schema_noise(v) for v in node]
+    return node
+
+
+def _shallow_schema(node):
+    """Top-level property names and types only."""
+    if not isinstance(node, dict):
+        return node
+    out = {k: v for k, v in node.items() if k in ("type", "required", "$schema")}
+    props = node.get("properties")
+    if isinstance(props, dict):
+        out["properties"] = {name: ({"type": sub.get("type")} if isinstance(sub, dict) and sub.get("type") else {})
+                             for name, sub in props.items()}
+    return out
+
+
+def slim_discovery(extensions: Optional[dict], fits) -> Optional[dict]:
+    """The Bazaar record cut down, step by step, until `fits(extensions)`:
+    schema descriptions and examples out; then the output schema to its
+    top-level fields; then the output example out; then the whole output
+    half; and as a last resort no record in the header at all (the full one
+    still reaches the facilitator on the payment)."""
+    if not extensions or "bazaar" not in extensions or fits(extensions):
+        return extensions
+    import copy
+
+    bazaar = copy.deepcopy(extensions["bazaar"])
+    rest = {k: v for k, v in extensions.items() if k != "bazaar"}
+
+    def attempt():
+        return dict(rest, bazaar=bazaar)
+
+    schema = bazaar.get("schema")
+    if isinstance(schema, dict):
+        bazaar["schema"] = _strip_schema_noise(schema)
+        if fits(attempt()):
+            return attempt()
+    output = (((bazaar.get("schema") or {}).get("properties") or {}).get("output"))
+    if isinstance(output, dict):
+        bazaar["schema"]["properties"]["output"] = _shallow_schema(_strip_schema_noise(output))
+        for inner in ("properties",):
+            example = bazaar["schema"]["properties"]["output"].get(inner, {})
+            if isinstance(example, dict) and isinstance(example.get("schema"), dict):
+                example["schema"] = _shallow_schema(example["schema"])
+        if fits(attempt()):
+            return attempt()
+    info_output = (bazaar.get("info") or {}).get("output")
+    if isinstance(info_output, dict) and "example" in info_output:
+        bazaar["info"]["output"] = {k: v for k, v in info_output.items() if k != "example"}
+        if fits(attempt()):
+            return attempt()
+    if isinstance(bazaar.get("info"), dict):
+        bazaar["info"].pop("output", None)
+    if isinstance(bazaar.get("schema"), dict) and isinstance(bazaar["schema"].get("properties"), dict):
+        bazaar["schema"]["properties"].pop("output", None)
+        if isinstance(bazaar["schema"].get("required"), list):
+            bazaar["schema"]["required"] = [r for r in bazaar["schema"]["required"] if r != "output"]
+    if fits(attempt()):
+        return attempt()
+    return rest or None
+
+
+def _remember_discovery(resource_url: Optional[str], extensions: Optional[dict]) -> None:
+    if not resource_url or not extensions or "bazaar" not in extensions:
+        return
+    if resource_url not in _FULL_DISCOVERY and len(_FULL_DISCOVERY) >= _FULL_DISCOVERY_MAX:
+        _FULL_DISCOVERY.pop(next(iter(_FULL_DISCOVERY)))
+    _FULL_DISCOVERY[resource_url] = extensions["bazaar"]
+
+
+def restore_full_discovery(payload) -> None:
+    """Put this node's full Bazaar record back on a v2 payment whose client
+    echoed the slimmed header copy. Only the record for the payment's own
+    resource, only when the payment carries a Bazaar record already, never
+    raises (the payment's signature does not cover `extensions`)."""
+    try:
+        if getattr(payload, "x402_version", getattr(payload, "x402Version", None)) != 2:
+            return
+        extensions = getattr(payload, "extensions", None)
+        resource = getattr(payload, "resource", None)
+        url = getattr(resource, "url", None) if resource is not None else None
+        full = _FULL_DISCOVERY.get(url or "")
+        if full is None or not isinstance(extensions, dict) or "bazaar" not in extensions:
+            return
+        payload.extensions = dict(extensions, bazaar=full)
+    except Exception:  # pragma: no cover - discovery must never cost a payment
+        logging.getLogger(__name__).debug("could not restore the full Bazaar record", exc_info=True)
+
+
 def payment_required_header(
     price: Optional[str] = None,
     resource_url: Optional[str] = None,
@@ -1211,17 +1321,28 @@ def payment_required_header(
     without it, every v2 client is served the v1 path whether or not it wants
     it, and the v2 `extensions` slot (where the Bazaar discovery record
     actually belongs in v2) has nowhere to live.
+
+    The header is kept under HEADER_BUDGET: the Bazaar record in it is slimmed
+    to fit (slim_discovery), and the full record is restored on the payment
+    before the facilitator sees it (restore_full_discovery).
     """
-    challenge = payment_required_v2(
-        price=price, resource_url=resource_url, description=description,
-        extensions=extensions, error=error, tags=tags,
-    )
-    if challenge is None:
-        return {}
     try:
         from x402.http.utils import encode_payment_required_header
+    except Exception as exc:
+        _warn_unpayable_challenge(exc)
+        return {}
 
-        return {"PAYMENT-REQUIRED": encode_payment_required_header(challenge)}
+    def encode(ext):
+        challenge = payment_required_v2(
+            price=price, resource_url=resource_url, description=description,
+            extensions=ext, error=error, tags=tags,
+        )
+        return None if challenge is None else encode_payment_required_header(challenge)
+
+    try:
+        _remember_discovery(resource_url, extensions)
+        value = encode(slim_discovery(extensions, lambda ext: len(encode(ext) or "") <= HEADER_BUDGET))
+        return {"PAYMENT-REQUIRED": value} if value else {}
     except Exception as exc:
         _warn_unpayable_challenge(exc)
         return {}
@@ -1627,6 +1748,7 @@ def verify_only_sync(
                 f"the payment header could not be decoded ({type(exc).__name__})",
             )
             raise
+        restore_full_discovery(payload)
         nonce = _payment_nonce(payload)
         if not _admit_nonce(nonce):
             logging.getLogger(__name__).warning(
