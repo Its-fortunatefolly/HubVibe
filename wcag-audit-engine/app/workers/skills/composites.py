@@ -138,7 +138,7 @@ async def market_intel(ctx, payload: dict) -> dict:
 
     quote = await market_skill.quote(ctx, {"product_id": product_id})
     markets = await market_skill.prediction_markets(ctx, {
-        "query": query, "limit": int(payload.get("limit", 10))})
+        "query": query, "limit": int(payload.get("limit", 10))}, allow_empty=True)
     base = product_id.split("-")[0]
     news, news_note = await recent_headlines(
         ctx, query or _ASSET_NAMES.get(base, base), payload.get("language"))

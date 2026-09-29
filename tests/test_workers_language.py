@@ -182,7 +182,7 @@ def test_the_composites_and_monitor_pass_the_language_to_the_inference_step(monk
         return {"product_id": "BTC-USD", "price": "1", "quote_currency": "USD",
                 "price_change_24h_pct": "0", "volume_24h": "0"}
 
-    async def fake_markets(ctx, payload):
+    async def fake_markets(ctx, payload, **kwargs):
         return {"count": 0, "markets": []}
 
     async def fake_search(ctx, query):

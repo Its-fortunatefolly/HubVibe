@@ -317,12 +317,13 @@ CATALOG = [
         description=(
             'Prediction market odds from Polymarket: live markets and the probability '
             'each outcome currently implies, as percentages rather than raw prices. '
-            'Search by topic or take the highest-volume markets. Input: optional '
-            'query and limit. Use prediction.market for one market by slug, '
-            'prediction.events for event groupings.'),
+            'Search by topic (tickers such as BTC understood) or take the highest-volume '
+            'markets. A topic no open market matches is refused free, never sold empty. '
+            'Input: optional query and limit. Use prediction.market for one market by '
+            'slug, prediction.events for event groupings.'),
         tags=["prediction", "forecast", "probability", "polymarket", "odds"],
         input_schema=_obj({
-            "query": {"type": "string", "description": "Topic to match (optional)."},
+            "query": {"type": "string", "description": "Topic words to match, e.g. 'fed rate cut' or 'BTC 150k' (optional)."},
             "limit": {"type": "integer", "description": "1-50, default 10."},
         }, []),
         returns="markets[] with question, implied_probabilities[], volume, end_date.",
