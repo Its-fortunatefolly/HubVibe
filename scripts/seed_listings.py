@@ -15,10 +15,12 @@ bills nothing and so is not listed -- rerun and it is retried.
     DRY_RUN=1 python3 scripts/seed_listings.py    # price the run, pay nothing
     python3 scripts/seed_listings.py              # pay, refused above MAX_TOTAL_USD
     ONLY=utility,premium python3 scripts/seed_listings.py
+    ROUTES=/work/email/verify,/work/company/enrich python3 scripts/seed_listings.py
 
 Environment: BASE (default https://hubvibe-io.com); HUBVIBE_WALLET_KEY, or
 HUBVIBE_WALLET_FILE (default ~/.hubvibe-wallet-key); MAX_TOTAL_USD (default
-25); ONLY (comma list of utility, standard, advanced, premium); DRY_RUN=1.
+25); ONLY (comma list of utility, standard, advanced, premium); ROUTES (comma list
+of exact route paths); DRY_RUN=1.
 Needs the x402 client (the box's ~/.hubvibe-venv has it).
 """
 
@@ -137,10 +139,12 @@ ROUTES = [
 ]
 
 
-def select(routes, only):
-    """The routes whose tier is in `only` (all when empty)."""
+def select(routes, only, paths=None):
+    """The routes whose tier is in `only` (all when empty), narrowed to the
+    exact route paths in `paths` when given (e.g. the routes a listing lacks)."""
     tiers = {t.strip() for t in (only or "").split(",") if t.strip()}
-    return [r for r in routes if not tiers or r[0] in tiers]
+    wanted = {p.strip() for p in (paths or "").split(",") if p.strip()}
+    return [r for r in routes if (not tiers or r[0] in tiers) and (not wanted or r[1] in wanted)]
 
 
 def plan_total(priced):
@@ -244,7 +248,7 @@ def main() -> int:
     base = os.environ.get("BASE", "https://hubvibe-io.com").rstrip("/")
     cap = float(os.environ.get("MAX_TOTAL_USD", "25"))
     dry = os.environ.get("DRY_RUN") == "1"
-    chosen = select(ROUTES, os.environ.get("ONLY"))
+    chosen = select(ROUTES, os.environ.get("ONLY"), os.environ.get("ROUTES"))
 
     with httpx.Client(timeout=240, headers={"User-Agent": USER_AGENT}) as session:
         priced = []

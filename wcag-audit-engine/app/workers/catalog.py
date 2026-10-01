@@ -66,9 +66,7 @@ def _obj(properties: dict, required: list) -> dict:
 _LANGUAGE = {
     "type": "string", "maxLength": 35,
     "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-    "description": ("Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose "
-                    "field of the answer is written in this language. Default: the "
-                    "language of the material or question."),
+    "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's.",
 }
 _URL_LANG = _obj({"url": _URL["properties"]["url"], "language": _LANGUAGE}, ["url"])
 
@@ -253,11 +251,11 @@ CATALOG = [
         name="chain.network", price_usd=0.02, tier="utility",
         title="Base network state",
         description=(
-            'Base chain status: current block height and gas price (wei and gwei), '
-            'read live from a Base mainnet RPC node. No input needed. Use it to check '
-            'the chain is live, time an on-chain action, or estimate gas before a '
-            'chain.rpc call.'),
-        tags=["base", "blockchain", "rpc", "gas", "network"],
+            'Base network status and gas price: current block height and gas price (wei and '
+            'gwei), live from a Base mainnet RPC node. Use it to check Base is moving, time '
+            'an on-chain action or estimate gas before sending a transaction. Keyless, pay '
+            'per call. No input needed.'),
+        tags=["base", "gas-price", "block-height", "blockchain", "onchain", "rpc", "live"],
         input_schema=_obj({}, []),
         returns="block_number, gas_price_wei, gas_price_gwei.",
         skill="chain.network", max_seconds=30,
@@ -267,11 +265,12 @@ CATALOG = [
         name="chain.address", price_usd=0.05, tier="utility",
         title="Base address report",
         description=(
-            'Base wallet lookup: ETH balance, transaction count (nonce) and whether '
-            'the address is a contract or an ordinary wallet, in one call for one '
-            'Base mainnet address. Input: address. Three RPC reads folded into one '
-            'answer; for a token balance or any other read, use chain.rpc.'),
-        tags=["base", "blockchain", "address", "wallet", "contract"],
+            'Base wallet lookup / address balance: ETH balance, transaction count (nonce) and'
+            ' whether the address is a smart contract or an ordinary wallet (EOA), live from '
+            'Base mainnet in one call. Use it to check a counterparty, deposit address or '
+            'contract before paying it. Input: address (0x...). For token balances or any '
+            'other read use chain.rpc.'),
+        tags=["base", "wallet", "balance", "address-lookup", "onchain", "eoa", "contract"],
         input_schema=_obj(
             {"address": {"type": "string", "description": "0x-prefixed Base address."}},
             ["address"]),
@@ -283,11 +282,11 @@ CATALOG = [
         name="chain.transaction", price_usd=0.05, tier="utility",
         title="Base transaction lookup",
         description=(
-            'Base transaction lookup by hash: sender, recipient, ETH value, block, '
-            'success or failure, gas used and log count, with the receipt folded in. '
-            'Input: the 0x transaction hash. Use chain.rpc for the raw '
-            'eth_getTransactionReceipt output.'),
-        tags=["base", "blockchain", "transaction", "receipt", "onchain"],
+            'Base transaction lookup by hash: sender, recipient, ETH value, block, success or'
+            ' failure, gas used and log count, with the receipt folded in, live from Base '
+            'mainnet. Use it to confirm a payment or transfer landed on-chain. Input: hash '
+            '(the 0x transaction hash). For the raw receipt use chain.rpc.'),
+        tags=["base", "transaction", "tx-lookup", "receipt", "payment-confirmation", "onchain"],
         input_schema=_obj(
             {"hash": {"type": "string", "description": "0x-prefixed transaction hash."}},
             ["hash"]),
@@ -299,11 +298,12 @@ CATALOG = [
         name="market.quote", price_usd=0.02, tier="utility",
         title="Crypto spot quote",
         description=(
-            'Crypto price: live spot price, 24-hour change and 24-hour volume for any '
-            "Coinbase product such as BTC-USD or ETH-USD, from Coinbase's public "
-            'market data. Input: product_id. Use market.ticker for bid and ask from a '
-            'second source, market.rates for a whole exchange-rate table.'),
-        tags=["market", "price", "crypto", "coinbase", "quote"],
+            'Crypto price / live coin quote: spot price, 24-hour change and 24-hour volume '
+            'for Bitcoin, Ethereum, Solana or any Coinbase product (BTC-USD, ETH-USD, '
+            "SOL-USD...), read at call time from Coinbase's public market data. Use it when "
+            'an agent needs a current cryptocurrency price. Input: product_id such as '
+            'BTC-USD. Bid/ask: market.ticker. Whole rate table: market.rates.'),
+        tags=["crypto-price", "bitcoin", "ethereum", "solana", "price", "quote", "market-data", "live"],
         input_schema=_obj(
             {"product_id": {"type": "string", "description": "e.g. BTC-USD."}},
             ["product_id"]),
@@ -315,13 +315,13 @@ CATALOG = [
         name="market.prediction", price_usd=0.05, tier="utility",
         title="Prediction market probabilities",
         description=(
-            'Prediction market odds from Polymarket: live markets and the probability '
-            'each outcome currently implies, as percentages rather than raw prices. '
-            'Search by topic (tickers such as BTC understood) or take the highest-volume '
-            'markets. A topic no open market matches is refused free, never sold empty. '
-            'Input: optional query and limit. Use prediction.market for one market by '
-            'slug, prediction.events for event groupings.'),
-        tags=["prediction", "forecast", "probability", "polymarket", "odds"],
+            'Prediction market odds: live Polymarket markets on any topic (elections, Fed '
+            'rate cuts, crypto, sports, AI, geopolitics) with the probability each outcome '
+            'implies as a percentage, plus volume, liquidity and end date. Search by topic '
+            "words or tickers (BTC, 'fed rate cut') or take the biggest markets. A topic no "
+            'open market matches is refused free, never sold empty. Input: optional query, '
+            'limit. One market by slug: prediction.market.'),
+        tags=["prediction-market", "polymarket", "odds", "probability", "forecast", "elections", "betting-odds"],
         input_schema=_obj({
             "query": {"type": "string", "description": "Topic words to match, e.g. 'fed rate cut' or 'BTC 150k' (optional)."},
             "limit": {"type": "integer", "description": "1-50, default 10."},
@@ -334,12 +334,12 @@ CATALOG = [
         name="extract.page", price_usd=0.10, tier="utility",
         title="Web page extraction",
         description=(
-            'Web page to clean text: fetch any URL in a real browser '
-            '(JavaScript-rendered pages included) and return the readable text, '
-            'title, description and links. Input: url. Use fetch.raw when you need '
-            'the raw HTTP status, headers and body; research.brief when you want a '
-            'question answered from the page.'),
-        tags=["extract", "scrape", "web", "content", "browser"],
+            'Web scraping / web page to clean text: any URL rendered in a real browser '
+            '(JavaScript pages included) and returned as readable text with title, '
+            'description and links. Use it to read an article, docs page or product page '
+            'before summarising or extracting. Input: url. Raw status, headers and body: '
+            'fetch.raw. A question answered from the page: research.brief.'),
+        tags=["web-scraping", "scrape", "extract", "html-to-text", "browser", "reader", "crawl"],
         input_schema=_URL,
         returns="title, description, text, text_chars, links[], javascript_rendered.",
         skill="extract.page", max_seconds=90,
@@ -351,11 +351,12 @@ CATALOG = [
         name="llm.analyze", price_usd=0.25, tier="standard",
         title="Analyse text",
         description=(
-            'Answer a question from text you supply, using Gemini. Grounded in the '
-            'material only: if the text does not contain the answer it says so '
-            'instead of guessing. Input: text and question. Use llm.extract for fixed '
-            'JSON fields, llm.generate for a free-form completion.'),
-        tags=["llm", "analysis", "gemini", "summarize", "reasoning"],
+            'Question answering over your own text: ask a question about material you supply '
+            'and get an answer grounded only in that text (Gemini). If the text does not '
+            'contain the answer it says so instead of guessing. Use it for summaries, Q&A and'
+            ' checks over documents, emails and pages. Input: text, question; optional '
+            'language. Fixed JSON fields: llm.extract.'),
+        tags=["llm", "summarize", "question-answering", "rag", "grounded", "gemini", "document-qa"],
         input_schema=_obj({
             "text": {"type": "string", "description": "Material to analyse."},
             "question": {"type": "string", "description": "What to answer. Optional."},
@@ -369,11 +370,12 @@ CATALOG = [
         name="llm.extract", price_usd=0.25, tier="standard",
         title="Extract fields as JSON",
         description=(
-            'Structured data extraction: pull the fields you name out of text and get '
-            'a JSON object with exactly those keys, null for anything the text does '
-            'not state. Input: text and a list of field names. For extraction from a '
-            'live web page use research.page_facts.'),
-        tags=["extract", "structured", "json", "fields", "parsing"],
+            'Structured data extraction / text to JSON: pull the fields you name out of any '
+            'text into a JSON object with exactly those keys, null where the text does not '
+            'state a value (Gemini, no invented values). Use it to turn emails, invoices, '
+            'pages or documents into clean records. Input: text, fields[]. From a live web '
+            'page: research.page_facts.'),
+        tags=["extraction", "json", "structured-output", "parsing", "llm", "entity-extraction", "gemini"],
         input_schema=_obj({
             "text": {"type": "string"},
             "fields": {"type": "array", "items": {"type": "string"},
@@ -390,12 +392,12 @@ CATALOG = [
         name="data.query", price_usd=0.50, tier="standard",
         title="Run a BigQuery query",
         description=(
-            "BigQuery SQL: run a read-only query, including against Google's public "
-            'datasets, and get columns and rows back as JSON with the bytes '
-            'processed. Every query is dry-run first and refused above the scan '
-            'ceiling, so cost is bounded before it runs. Input: sql, optional '
-            'max_scan_gib. Use data.question to ask in plain language instead.'),
-        tags=["bigquery", "sql", "data", "query", "analytics"],
+            "BigQuery SQL: run a read-only SQL query, including against Google's public "
+            'datasets (Wikipedia, GitHub, blockchains, weather, census and more), and get '
+            'columns and rows back as JSON with the bytes processed. Every query is dry-run '
+            'first and refused above the scan ceiling, so cost is bounded before it runs. '
+            'Input: sql; optional max_scan_gib. Ask in plain English instead: data.question.'),
+        tags=["sql", "bigquery", "database", "public-datasets", "analytics", "data", "query"],
         input_schema=_obj({
             "sql": {"type": "string", "description": "Read-only SELECT or WITH query."},
             "max_scan_gib": {"type": "number", "description": "Optional scan ceiling."},
@@ -408,12 +410,12 @@ CATALOG = [
         name="data.question", price_usd=5.00, tier="advanced",
         title="Answer a question from a dataset",
         description=(
-            'Plain-language question answered over any BigQuery table, including '
-            "Google's public datasets: the SQL is written for you, run under a byte "
-            'ceiling, and the rows read back into a written answer. Input: question '
-            'and table, optional column list. Returns answer, sql, columns and rows. '
-            'Use data.query when you already have the SQL.'),
-        tags=["bigquery", "analysis", "data", "question", "sql"],
+            'Ask a database in plain English (text to SQL): any BigQuery table, including '
+            "Google's public datasets. The SQL is written for you, run under a byte ceiling, "
+            'and the rows are read back into a written answer, returned with the SQL, columns'
+            ' and rows it used. Use it for analytics questions without writing SQL. Input: '
+            'question, table; optional columns.'),
+        tags=["text-to-sql", "analytics", "bigquery", "natural-language-query", "data-analysis", "sql"],
         input_schema=_obj({
             "question": {"type": "string"},
             "table": {"type": "string",
@@ -433,12 +435,13 @@ CATALOG = [
         name="research.brief", price_usd=5.00, tier="advanced",
         title="Research brief on a URL",
         description=(
-            'Answer a question about one web page: the URL is rendered in a real '
-            'browser, its content extracted and analysed, and a written brief '
-            'returned that is grounded in the page only and says when the page does '
-            'not answer. Input: url, optional question. Use research.page_facts for '
-            'fixed JSON fields, research.web when the answer needs a web search.'),
-        tags=["research", "brief", "web", "analysis", "competitive"],
+            'Summarize and analyze a web page: the URL is rendered in a real browser, its '
+            'content extracted, and a written brief answering your question returned, '
+            'grounded in that page only and saying so when the page does not answer. Use it '
+            'for competitor pages, docs, articles and listings. Input: url; optional '
+            'question. Fixed JSON fields: research.page_facts. Needs a web search: '
+            'research.web.'),
+        tags=["summarize", "web-page", "research", "analysis", "browser", "brief", "grounded"],
         input_schema=_obj({
             "url": {"type": "string"},
             "question": {"type": "string", "description": "Optional; defaults to an overview."},
@@ -453,12 +456,12 @@ CATALOG = [
         name="research.page_facts", price_usd=5.00, tier="advanced",
         title="Structured facts from a URL",
         description=(
-            'Structured facts from a web page: name the fields you need (pricing, '
-            'contact, product names, anything) and get exactly those keys back as '
-            'JSON from the rendered page, null where the page does not say. Input: '
-            'url and fields. Built for pipelines that need a fixed shape; use '
-            'research.brief for a written answer.'),
-        tags=["extract", "structured", "web", "facts", "enrichment"],
+            'Structured facts from a web page / scrape to JSON: name the fields you need '
+            '(pricing, plans, contact, product names, anything) and get exactly those keys '
+            'back as JSON from the live page rendered in a real browser, null where the page '
+            'does not say. Use it for price monitoring, lead data and catalog extraction. '
+            'Input: url, fields[].'),
+        tags=["web-scraping", "structured-data", "price-monitoring", "lead-generation", "json", "extraction"],
         input_schema=_obj({
             "url": {"type": "string"},
             "fields": {"type": "array", "items": {"type": "string"}},
@@ -473,11 +476,13 @@ CATALOG = [
         name="market.intel", price_usd=5.00, tier="advanced",
         title="Market intelligence read",
         description=(
-            'Crypto market read in one call: a live Coinbase spot quote and live '
-            'Polymarket probabilities on the same subject, analysed together in a '
-            'written summary. Input: optional product_id, query, question and limit. '
-            'Market data and implied probabilities only, not investment advice.'),
-        tags=["market", "intelligence", "prediction", "crypto", "sentiment"],
+            'Crypto market sentiment in one call: live Coinbase spot price, live Polymarket '
+            'probabilities and recent news headlines (GDELT) on the same subject, analysed '
+            'together in a written summary that says what the numbers do and do not support. '
+            'Use it for a quick read on Bitcoin, Ethereum or any coin. Input: optional '
+            'product_id (BTC-USD...), query, question, limit. Market data only, not '
+            'investment advice.'),
+        tags=["crypto", "sentiment", "market-analysis", "bitcoin", "polymarket", "news", "research"],
         input_schema=_obj({
             "product_id": {"type": "string", "description": "e.g. BTC-USD. Default BTC-USD."},
             "query": {"type": "string", "description": "Prediction-market topic. Optional."},
@@ -495,11 +500,13 @@ CATALOG = [
         name="search.web", price_usd=0.10, tier="utility",
         title="Web search",
         description=(
-            'Web search for agents: a live query on Brave\'s independent web index, answered '
-            'from the current results alone, with the source URLs and titles it was given, '
-            "never the model's own memory. Input: query; optional language. Use "
-            'search.results for the raw result list, research.web for sources read in full.'),
-        tags=["search", "web", "brave", "answer", "current"],
+            "Web search with an answer: real-time search of Brave's independent web index, "
+            'answered from the current results only, with every source URL and title '
+            "returned, never the model's memory. Use it when an agent needs up-to-date "
+            'information, latest news, prices or facts from the web. Input: query; optional '
+            'language. Raw result list (SERP): search.results. Sources read in full with '
+            'citations: research.web.'),
+        tags=["web-search", "search", "internet", "real-time", "brave", "answer", "sources"],
         input_schema=_obj({"query": {"type": "string"}, "language": _LANGUAGE}, ["query"]),
         returns="query, answer, sources[{url,title}], search_queries_used[], model.",
         skill="search.web", max_seconds=60,
@@ -509,12 +516,12 @@ CATALOG = [
         name="llm.generate", price_usd=0.25, tier="standard",
         title="Raw text completion",
         description=(
-            'LLM text generation: a raw completion from your prompt, with optional '
-            'system message, max_tokens and temperature. Gemini by default; optional '
-            'provider and model fields select another configured model. Input: '
-            "prompt. Nothing is prescribed about the answer's shape; use llm.analyze "
-            'for an answer grounded in text you supply.'),
-        tags=["llm", "generate", "completion", "gemini", "claude", "inference"],
+            'LLM text generation / chat completion: a raw completion from your prompt with '
+            'optional system message, max_tokens and temperature; Gemini by default, other '
+            'configured models by provider and model. Use it for drafting, rewriting, '
+            'translation, classification or any prompt, paid per call with no API key or '
+            'account. Input: prompt. Answer grounded in your own text: llm.analyze.'),
+        tags=["llm", "text-generation", "chat-completion", "gemini", "ai", "inference", "prompt"],
         input_schema=_obj({
             "prompt": {"type": "string", "description": "The prompt."},
             "system": {"type": "string", "description": "Optional system message."},
@@ -532,10 +539,11 @@ CATALOG = [
         name="code.execute", price_usd=0.25, tier="standard",
         title="Execute Python",
         description=(
-            "Run Python code in Google's hosted sandbox, not on this service's own "
-            'machines, and get the code, its output and the outcome back. Input: '
-            'code. For questions over BigQuery data use data.query instead.'),
-        tags=["code", "execute", "sandbox", "python", "compute"],
+            "Run Python code in a sandbox: execute Python in Google's hosted sandbox (not on "
+            "this service's machines) and get the code, its printed output and the outcome "
+            'back. Use it for calculations, data transforms and checks an agent should not do'
+            ' in its head. Input: code. Questions over BigQuery data: data.query.'),
+        tags=["python", "code-execution", "sandbox", "compute", "interpreter", "calculation"],
         input_schema=_obj({"code": {"type": "string"}}, ["code"]),
         returns="code, output, outcome, summary, model.",
         skill="code.execute", max_seconds=90,
@@ -545,10 +553,11 @@ CATALOG = [
         name="image.generate", price_usd=0.50, tier="standard",
         title="Generate an image",
         description=(
-            'Image generation: one image from a text prompt with Imagen 4, returned '
-            'as base64-encoded image bytes with its MIME type. Input: prompt, '
+            'AI image generation / text to image: one image from a text prompt with Google '
+            'Imagen 4, returned as base64 image bytes with its MIME type. Use it for '
+            'illustrations, thumbnails, product mockups and social images. Input: prompt; '
             'optional aspect_ratio.'),
-        tags=["image", "generate", "imagen", "media", "visual"],
+        tags=["image-generation", "text-to-image", "imagen", "ai-art", "illustration", "picture"],
         input_schema=_obj({
             "prompt": {"type": "string"},
             "aspect_ratio": {"type": "string",
@@ -562,9 +571,10 @@ CATALOG = [
         name="speech.synthesize", price_usd=0.25, tier="standard",
         title="Text to speech",
         description=(
-            'Text to speech: convert text to spoken MP3 audio with Google Cloud '
-            'Text-to-Speech, returned as base64. Input: text, optional voice name.'),
-        tags=["speech", "tts", "voice", "audio", "media"],
+            'Text to speech (TTS): convert text to natural spoken MP3 audio with Google Cloud'
+            ' Text-to-Speech, returned as base64. Use it for voice replies, narration, audio '
+            'versions of text and accessibility. Input: text; optional voice name.'),
+        tags=["text-to-speech", "tts", "voice", "audio", "speech", "mp3"],
         input_schema=_obj({
             "text": {"type": "string"},
             "voice": {"type": "string", "description": "e.g. en-US-Standard-C. Optional."},
@@ -577,11 +587,12 @@ CATALOG = [
         name="speech.transcribe", price_usd=0.25, tier="standard",
         title="Speech to text",
         description=(
-            'Speech to text: transcribe up to 60 seconds or 10 MB of audio with '
-            'Google Cloud Speech-to-Text and get the transcript with its confidence '
-            'and language. Input: audio_base64, optional language_code. Longer audio '
-            'is refused before payment.'),
-        tags=["speech", "stt", "transcribe", "audio", "media"],
+            'Speech to text / audio transcription: transcribe up to 60 seconds or 10 MB of '
+            'audio with Google Cloud Speech-to-Text and get the transcript with its '
+            'confidence and detected language. Use it for voice notes, call snippets and '
+            'clips. Input: audio_base64; optional language_code. Longer audio is refused '
+            'before payment.'),
+        tags=["speech-to-text", "transcription", "stt", "audio", "voice", "asr"],
         input_schema=_obj({
             "audio_base64": {"type": "string",
                              "description": "Base64-encoded audio, any common format."},
@@ -595,12 +606,12 @@ CATALOG = [
         name="data.forecast", price_usd=10.00, tier="premium",
         title="Forecast a time series",
         description=(
-            "Time-series forecast from a BigQuery table using Google's pretrained "
-            'TimesFM model (AI.FORECAST), no model to train: point it at the table, '
-            'timestamp column and value column and get forecast rows for the horizon '
-            'you set. Input: table, timestamp_col, data_col, optional horizon and '
-            'id_cols.'),
-        tags=["bigquery", "forecast", "timeseries", "timesfm", "data"],
+            "Time-series forecasting: forecast any BigQuery table with Google's pretrained "
+            'TimesFM model (AI.FORECAST), nothing to train. Point it at the table, timestamp '
+            'column and value column and get forecast rows with bounds for the horizon you '
+            'set, per series with id_cols. Use it for sales, traffic, demand or metric '
+            'forecasts. Input: table, timestamp_col, data_col; optional horizon, id_cols.'),
+        tags=["forecasting", "time-series", "prediction", "timesfm", "bigquery", "demand-forecast"],
         input_schema=_obj({
             "table": {"type": "string", "description": "project.dataset.table"},
             "timestamp_col": {"type": "string"},
@@ -618,14 +629,13 @@ CATALOG = [
         name="data.anomalies", price_usd=10.00, tier="premium",
         title="Detect anomalies in a time series",
         description=(
-            'Anomaly detection over a BigQuery time series with AI.DETECT_ANOMALIES '
-            '(TimesFM): score a target table against a history table that shares its '
-            'timestamp and value columns, or give one table and its latest periods '
-            'are scored against its own history. Returns every checked row with its '
-            'bounds, anomaly flag and probability, plus the anomaly count. Input: '
-            'history_table, target_table, timestamp_col, data_col, optional '
-            'target_last, threshold and id_cols.'),
-        tags=["bigquery", "anomaly", "timeseries", "timesfm", "data"],
+            'Anomaly detection on a time series: score recent periods against history with '
+            'BigQuery AI.DETECT_ANOMALIES (TimesFM). Give one table and its latest periods '
+            'are scored against its own history, or a history and a target table. Returns '
+            'every checked row with bounds, anomaly flag and probability, plus the anomaly '
+            'count. Input: history_table, target_table, timestamp_col, data_col; optional '
+            'target_last, threshold, id_cols.'),
+        tags=["anomaly-detection", "outliers", "time-series", "monitoring", "timesfm", "bigquery"],
         input_schema=_obj({
             "history_table": {"type": "string", "description": "project.dataset.table"},
             "target_table": {"type": "string", "description": "project.dataset.table"},
@@ -648,17 +658,14 @@ CATALOG = [
         name="stats.probability", price_usd=0.50, tier="standard",
         title="Predictive probability engine: regression, normal model, p-values",
         description=(
-            "Deterministic statistics over (x, y) points: ordinary least squares "
-            "linear regression with standard errors and confidence intervals, a "
-            "fitted normal distribution with quantiles and probability queries, "
-            "exact Student t and Jarque-Bera p-values validated at your alpha, and "
-            "predictions with prediction intervals. Points come inline or from a "
-            "BigQuery table (two numeric columns; above max_rows the rows are "
-            "chosen by fingerprint, never at random). Pure arithmetic with exactly "
-            "rounded sums: the same input always returns the same numbers, and no "
-            "LLM is anywhere in the path."),
-        tags=["statistics", "regression", "probability", "p-value",
-              "normal-distribution", "prediction", "bigquery", "deterministic"],
+            'Predictive probability and regression engine: least-squares linear regression '
+            'with standard errors, confidence and prediction intervals, a fitted normal '
+            'distribution with quantiles and probability queries (P(y > t)), exact Student t '
+            'and Jarque-Bera p-values. Points inline or from a BigQuery table. Deterministic '
+            'arithmetic, no LLM: the same input always returns the same numbers. Input: '
+            'points or table with x_column, y_column; optional metrics, predict_x, '
+            'probability_queries.'),
+        tags=["statistics", "regression", "probability", "prediction", "confidence-interval", "math", "deterministic"],
         input_schema=_STATS_INPUT,
         returns=("source{}, n, alpha, confidence_level, metrics[], linear_regression{}, "
                  "normal_distribution{}, p_values{}, prediction[], notes[], method."),
@@ -670,11 +677,12 @@ CATALOG = [
         name="verify.claims", price_usd=5.00, tier="advanced",
         title="Verify claims against sources",
         description=(
-            'Fact check: up to 10 claims checked against up to 4 source URLs you '
-            'name; each claim comes back SUPPORTED, CONTRADICTED or UNSUPPORTED with '
-            'the quote the verdict rests on. Input: claims and sources. Use '
-            'research.web when you have a question but no sources yet.'),
-        tags=["verify", "fact-check", "claims", "sources", "research"],
+            'Fact check claims against sources: up to 10 claims checked against up to 4 '
+            'source URLs you name; each comes back SUPPORTED, CONTRADICTED or UNSUPPORTED '
+            'with the exact quote the verdict rests on. Use it to verify AI output, citations'
+            ' or statements before publishing. Input: claims[], sources[]. A question but no '
+            'sources yet: research.web.'),
+        tags=["fact-check", "verification", "claims", "citations", "hallucination-check", "sources"],
         input_schema=_obj({
             "claims": {"type": "array", "items": {"type": "string"}},
             "sources": {"type": "array", "items": {"type": "string"}},
@@ -689,11 +697,12 @@ CATALOG = [
         name="research.web", price_usd=5.00, tier="advanced",
         title="Research brief from live web search",
         description=(
-            'Cited web research: search the live web for your question, read the top '
-            'sources in full, and get a written answer with every claim tied to a '
-            'numbered source. Input: question, optional max_sources. Use search.web '
-            'for a quick grounded answer with links only.'),
-        tags=["research", "search", "web", "citations", "brief"],
+            'Deep web research with citations: search the live web for your question, read '
+            'the top sources in full, and get a written answer with every claim tied to a '
+            'numbered source. Use it when an agent needs a sourced answer, not a list of '
+            'links. Input: question; optional max_sources. Quick answer with links: '
+            'search.web.'),
+        tags=["research", "deep-research", "citations", "web-search", "report", "sources"],
         input_schema=_obj({
             "question": {"type": "string"},
             "max_sources": {"type": "integer", "description": "1-4, default 3."},
@@ -708,11 +717,13 @@ CATALOG = [
         name="research.company", price_usd=10.00, tier="premium",
         title="Research and verify a company",
         description=(
-            'Company research brief from live web sources: what the company does, its '
-            'products and anything notable, every claim cited to a numbered source, '
-            'with thin or conflicting evidence disclosed rather than papered over. '
-            'Input: company name, optional max_sources.'),
-        tags=["research", "company", "kyb", "business-intelligence", "verification"],
+            'Company research report: what a company does, its products and anything notable,'
+            ' from the live web (official site and Wikipedia first) and recent GDELT news, '
+            'every claim cited to a numbered source, thin or conflicting evidence disclosed. '
+            'Use it for due diligence, sales prep and competitor research. Input: company '
+            'name; optional max_sources. Structured firmographics in one cheap call: '
+            'company.enrich.'),
+        tags=["company-research", "due-diligence", "competitor-analysis", "sales-research", "report", "citations"],
         input_schema=_obj({
             "company": {"type": "string"},
             "max_sources": {"type": "integer", "description": "1-4, default 4."},
@@ -727,10 +738,11 @@ CATALOG = [
         name="monitor.snapshot", price_usd=0.50, tier="standard",
         title="Save a monitoring baseline",
         description=(
-            'Website change monitoring, step one: fetch a page and store it as the '
-            'baseline. Input: url. Call monitor.check later to learn whether and how '
-            'it changed.'),
-        tags=["monitor", "baseline", "change-detection", "web"],
+            'Website change monitoring, step one: fetch a page and store it as the baseline '
+            'to compare against later. Use it to watch pricing pages, terms, job boards or '
+            'competitors. Input: url. Then call monitor.check to learn whether and how it '
+            'changed.'),
+        tags=["monitoring", "website-change", "change-detection", "watch", "diff"],
         input_schema=_URL,
         returns="url, title, text_chars, content_hash, note.",
         skill="monitor.snapshot", max_seconds=90,
@@ -740,11 +752,11 @@ CATALOG = [
         name="monitor.check", price_usd=0.50, tier="standard",
         title="Check a page against its baseline",
         description=(
-            'Website change monitoring, step two: re-fetch a page saved with '
-            'monitor.snapshot and get whether it changed, how old the baseline is, '
-            'and a written summary of the differences. Input: url, optional '
-            'language.'),
-        tags=["monitor", "change-detection", "diff", "web"],
+            'Website change detection, step two: re-fetch a page saved with monitor.snapshot '
+            'and get whether it changed, how old the baseline is, and a written summary of '
+            'what changed. Use it to track price changes, terms updates, new job posts or '
+            'competitor moves. Input: url; optional language.'),
+        tags=["monitoring", "change-detection", "website-change", "diff", "alerts"],
         input_schema=_URL_LANG,
         returns="url, title, changed, baseline_age_seconds, change_summary, model.",
         skill="monitor.check", max_seconds=150,
@@ -755,14 +767,13 @@ CATALOG = [
         name="commerce.availability", price_usd=0.50, tier="standard",
         title="Live availability: can this be bought or booked right now?",
         description=(
-            'Live buy/book check on any product or booking page: can it be purchased '
-            'right now, at what price, in which options (sizes, colours, dates, rooms), '
-            'which option matches the variant you name, quantity and ship-to '
-            'eligibility where the page states them, with evidence and a checked_at '
-            'stamp. Read at call time: schema.org JSON-LD, Open Graph and Shopify '
-            'product JSON first; a browser render and Gemini only when the page gives '
-            'machines nothing. Input: url; optional variant, quantity, ship_to, language.'),
-        tags=["commerce", "availability", "stock", "price", "booking", "live", "shopping"],
+            'Product availability and price check: is it in stock and buyable right now, at '
+            'what price, in which options (sizes, colours, dates, rooms), which option '
+            'matches the variant you name, quantity and ship-to eligibility where the page '
+            'states them, with evidence and a checked_at stamp. Reads any product or booking '
+            'page (schema.org, Open Graph, Shopify JSON; a browser only when needed). Input: '
+            'url; optional variant, quantity, ship_to.'),
+        tags=["in-stock", "availability", "price-check", "ecommerce", "shopping", "product", "inventory"],
         input_schema=_obj({
             "url": {"type": "string", "description": "The product, listing or booking page."},
             "variant": {"type": "string", "maxLength": 200,
@@ -786,14 +797,12 @@ CATALOG = [
         name="market.stock", price_usd=0.05, tier="utility",
         title="Live stock quote and daily history",
         description=(
-            'Live equity quote for a US-listed ticker: last price, change, day range, '
-            'volume and market state, plus daily OHLCV history for the range you choose '
-            "(1d to 5y), read at call time from Nasdaq's public data API with Yahoo "
-            'Finance as the fallback. Every answer names the source that answered, the '
-            "source's own timestamp (as_of), its delay in minutes, and when this node "
-            'read it (checked_at). Input: symbol; optional range (default 1mo), '
-            'include_history.'),
-        tags=["market", "stocks", "equities", "quote", "ohlcv", "history", "live"],
+            'Stock price / live stock quote for any US ticker: last price, change, day range,'
+            ' volume and market state, plus daily OHLCV history (1d to 5y), read at call time'
+            " from Nasdaq's public data with Yahoo Finance as fallback. Every answer names "
+            "its source, the source's timestamp, its delay in minutes and when it was read. "
+            'Input: symbol (AAPL, NVDA...); optional range, include_history.'),
+        tags=["stock-price", "stock-quote", "equities", "ohlcv", "market-data", "nasdaq", "ticker"],
         input_schema=_obj({
             "symbol": _SYMBOL,
             "range": {"type": "string", "enum": _RANGES, "description": "History range, default 1mo."},
@@ -809,13 +818,13 @@ CATALOG = [
         name="market.fundamentals", price_usd=0.05, tier="utility",
         title="SEC-filed fundamentals (XBRL company facts)",
         description=(
-            'Company fundamentals as the filer reported them to the SEC: revenue, net '
-            'income, diluted EPS, operating income, assets, liabilities, equity, cash and '
-            'shares outstanding by reporting period (10-K and 10-Q), from EDGAR\'s official '
-            'XBRL company-facts API, read at call time. Name your own XBRL concepts for any '
-            'other line item; restatements resolve to the latest filing. Input: symbol (US '
-            'ticker) or cik; optional concepts, periods, forms.'),
-        tags=["market", "fundamentals", "sec", "edgar", "xbrl", "financials", "earnings"],
+            'SEC filings / company fundamentals: revenue, net income, diluted EPS, operating '
+            'income, assets, liabilities, equity, cash and shares outstanding by quarter and '
+            "year (10-K, 10-Q) as the company reported them to the SEC, from EDGAR's official"
+            ' XBRL API at call time. Name any other XBRL line item; restatements resolve to '
+            'the latest filing. Input: symbol (US ticker) or cik; optional concepts, periods,'
+            ' forms.'),
+        tags=["sec-filings", "fundamentals", "earnings", "financial-statements", "edgar", "xbrl", "10-k"],
         input_schema=dict(_obj({
             "symbol": dict(_SYMBOL, description="US ticker in the SEC's table, e.g. AAPL. Use this OR `cik`."),
             "cik": {"type": ["integer", "string"], "description": "SEC Central Index Key, e.g. 320193."},
@@ -838,13 +847,13 @@ CATALOG = [
         name="market.insiders", price_usd=0.10, tier="utility",
         title="Insider trades from SEC Form 4 filings",
         description=(
-            'What a company\'s officers, directors and 10% owners bought and sold, parsed from the '
-            'Form 4s they filed with the SEC, read at call time from EDGAR. Each trade: insider, '
-            'role, date, code and meaning, shares, price, value, holdings after, 10b5-1 plan flag, '
-            'filing link. Summary: open-market buys vs sells, net shares and dollars, distinct '
-            'insiders. Input: symbol (US ticker) or cik; optional days (default 90), codes such '
-            'as ["P","S"], max_filings.'),
-        tags=["market", "insider", "insiders", "form-4", "sec", "edgar", "stocks", "ownership", "signals"],
+            "Insider trading (SEC Form 4): what a company's officers, directors and 10% "
+            'owners bought and sold, parsed from their Form 4 filings at call time from '
+            'EDGAR. Each trade: insider, role, date, code and meaning, shares, price, value, '
+            'holdings after, 10b5-1 plan flag, filing link. Summary: open-market buys vs '
+            'sells, net shares and dollars. Input: symbol (US ticker) or cik; optional days '
+            '(default 90), codes such as ["P","S"].'),
+        tags=["insider-trading", "form-4", "sec", "insider-buying", "stocks", "edgar", "signals"],
         input_schema=dict(_obj({
             "symbol": dict(_SYMBOL, description="US ticker in the SEC's table, e.g. NVDA. Use this OR `cik`."),
             "cik": {"type": ["integer", "string"], "description": "SEC Central Index Key of the issuer, e.g. 1045810."},
@@ -868,15 +877,13 @@ CATALOG = [
         name="finance.analytics", price_usd=0.50, tier="standard",
         title="Trading mathematics: returns, risk, drawdown, VaR, beta, indicators, options, Kelly",
         description=(
-            'Deterministic trading mathematics over a price series you supply or a ticker '
-            'fetched live: returns and CAGR, annualized volatility, Sharpe and Sortino, '
-            'max drawdown, historical and parametric VaR/CVaR, beta, alpha and correlation '
-            'vs a benchmark, SMA/EMA, RSI, Bollinger bands, Black-Scholes price with Greeks, '
-            'and the Kelly fraction. Exactly rounded sums, every formula named in the '
-            'result, the same input always the same numbers; no LLM in the path. Input: '
-            'prices or symbol, plus options.'),
-        tags=["finance", "quant", "volatility", "sharpe", "drawdown", "var", "beta",
-              "black-scholes", "indicators", "deterministic"],
+            'Trading and portfolio math: returns and CAGR, volatility, Sharpe and Sortino, '
+            'max drawdown, VaR/CVaR, beta, alpha and correlation vs a benchmark, SMA/EMA, '
+            'RSI, Bollinger bands, Black-Scholes option price with Greeks, and the Kelly '
+            'fraction, over prices you send or a ticker fetched live. Deterministic, every '
+            'formula named, no LLM. Input: prices or symbol; optional metrics, benchmark, '
+            'option, kelly.'),
+        tags=["trading", "technical-analysis", "risk", "sharpe-ratio", "rsi", "options-pricing", "portfolio"],
         input_schema=_FINANCE_INPUT,
         returns=("source{}, n, n_returns, periods_per_year, metrics_computed[], returns{}, volatility{}, "
                  "sharpe, sortino, drawdown{}, var{}, beta{}, moving_averages{}, rsi{}, bollinger{}, "
@@ -890,15 +897,13 @@ CATALOG = [
         name="opendata.search", price_usd=0.10, tier="utility",
         title="Search 16 government open-data portals for datasets",
         description=(
-            "Find government datasets across 16 open-data portals in one call: Korea "
-            "(data.go.kr), Japan (e-Gov, Tokyo, BODIK), Hong Kong, Australia, UK, "
-            "Canada, the EU catalog (139,000+ datasets), Germany, Italy, Ireland, "
-            "Switzerland, Netherlands, Israel, Chile. Query in any language, the "
-            "portal's own included; every match comes back with organization, "
-            "update time and download URLs, ready for opendata.table. Portals that "
-            "did not answer are listed, never hidden. Input: query; optional region, "
-            "limit, portals."),
-        tags=["open-data", "datasets", "government", "korea", "japan", "europe", "uk", "canada", "australia", "ckan"],
+            'Government open data search across 16 national portals in one call: Korea '
+            '(data.go.kr), Japan, Hong Kong, Australia, UK, Canada, the EU catalog (139,000+ '
+            'datasets), Germany, Italy, Ireland, Switzerland, Netherlands, Israel and Chile. '
+            'Query in any language; each match returns organization, update time and download'
+            ' URLs ready for opendata.table. Portals that did not answer are listed. Input: '
+            'query; optional region, limit, portals.'),
+        tags=["open-data", "government-data", "datasets", "public-data", "statistics", "data-portal"],
         input_schema=_obj({
             "query": {"type": "string", "minLength": 1, "maxLength": 300,
                       "description": "Words to search for, in any language (인구, 人口, rainfall, Bevölkerung)."},
@@ -919,14 +924,13 @@ CATALOG = [
         name="opendata.table", price_usd=0.10, tier="utility",
         title="Read a government dataset file as JSON rows",
         description=(
-            "Turn one dataset file into JSON rows: a CSV, TSV, XLSX or JSON link from "
-            "any portal, an e-Stat (Japan) file-download link, or a data.go.kr (Korea) "
-            "dataset page, which is resolved to its keyless file first. Encoding is "
-            "detected (Korean CP949, Japanese Shift_JIS, Chinese Big5/GB18030, "
-            "UTF-8/16, Western code pages), the header row found, numbers typed, "
-            "XLSX sheets selectable, large files capped and disclosed. Input: url; "
-            "optional max_rows, sheet, encoding, delimiter."),
-        tags=["open-data", "csv", "xlsx", "table", "rows", "korea", "japan", "encoding", "government"],
+            'Dataset file to JSON rows: a CSV, TSV, XLSX or JSON link from any portal, an '
+            'e-Stat (Japan) download or a data.go.kr (Korea) dataset page. Encoding detected '
+            '(Korean, Japanese, Chinese, UTF and Western code pages), header row found, '
+            'numbers typed, XLSX sheets selectable, large files capped and disclosed. Use it '
+            'after opendata.search or on any data file URL. Input: url; optional max_rows, '
+            'sheet, encoding, delimiter.'),
+        tags=["csv-to-json", "xlsx", "data-parsing", "open-data", "spreadsheet", "dataset"],
         input_schema=_obj({
             "url": {"type": "string", "description": "File link, e-Stat file-download link, or a data.go.kr dataset page."},
             "max_rows": {"type": "integer", "minimum": 1, "maximum": 2000, "description": "Rows to return, default 200."},
@@ -943,14 +947,13 @@ CATALOG = [
         name="search.results", price_usd=0.25, tier="standard",
         title="Web and news results in any language and country (Brave index)",
         description=(
-            "Independent web and news results for a query from Brave's own index, in "
-            "any language and country: title, URL, description, age and extra "
-            "snippets for the web; headline, source and age for news. Use language "
-            "for the search language and interface, country for the market, freshness "
-            "to keep to the last day, week, month or year. Results, not an answer: "
-            "pick what to read next with fetch.raw or extract.page. Input: query; "
-            "optional country, language, count, freshness, news, safesearch."),
-        tags=["search", "web", "news", "serp", "results", "multilingual", "brave", "live"],
+            "Web search API / SERP results: raw web and news results from Brave's independent"
+            ' index in any language and country, with title, URL, description, age and extra '
+            'snippets (headline, source and age for news). Filter by country, language and '
+            'freshness (day, week, month, year). Results, not an answer: pick what to read '
+            'next with extract.page. Input: query; optional country, language, count, '
+            'freshness, news.'),
+        tags=["serp", "web-search-api", "search-results", "news-search", "brave", "multilingual"],
         input_schema=_obj({
             "query": {"type": "string", "minLength": 1, "maxLength": 400, "description": "Words to search for, in any language."},
             "country": {"type": "string", "pattern": "^[A-Za-z]{2}$", "description": "Market, ISO 3166-1 alpha-2 (US, JP, DE). Default: the engine's."},
@@ -971,14 +974,13 @@ CATALOG = [
         name="news.search", price_usd=0.25, tier="standard",
         title="Current news on any topic, in any language",
         description=(
-            "Current news on any topic in any language from the GDELT Project, which "
-            "reads the world's press every 15 minutes: titles matched in their original "
-            "script (半導体, 반도체, tarifs), optionally only articles in one language, "
-            "newest first, with publisher, language and link; a US ticker searches the "
-            "company's name. Window up to 30 days (default 72 hours). Carries GDELT's "
-            "required citation. Input: query and/or symbol; optional language, limit, "
-            "since_hours."),
-        tags=["news", "headlines", "current", "multilingual", "press", "finance", "gdelt", "live"],
+            'News search API: current news on any topic in any language from the GDELT '
+            "Project, which reads the world's press every 15 minutes. Titles matched in their"
+            ' original script, newest first, with publisher, language and link; filter to one'
+            " language; a US stock ticker searches the company's name. Window up to 30 days "
+            '(default 72 hours). Input: query and/or symbol; optional language, limit, '
+            'since_hours.'),
+        tags=["news", "news-api", "headlines", "current-events", "gdelt", "multilingual", "media-monitoring"],
         input_schema=_obj({
             "query": {"type": "string", "minLength": 1, "maxLength": 300,
                       "description": "Topic words in any language (半導体, 반도체, tarifs douaniers)."},
@@ -1001,15 +1003,13 @@ CATALOG = [
         name="data.macro", price_usd=0.10, tier="utility",
         title="Official economic statistics for a country",
         description=(
-            "One official economic series for one country, now: GDP, growth, GDP "
-            "per capita, inflation, unemployment, population, current account, "
-            "reserves, debt, exports, imports, FDI, exchange rate, interest rates, or "
-            "any World Bank indicator code. Annual from the World Bank for 200+ "
-            "economies; monthly from Eurostat for EU inflation and unemployment. "
-            "Returns the series, latest and previous values, the change between them "
-            "and the source's update stamp. Input: indicator, country; optional last, "
-            "frequency."),
-        tags=["macro", "economics", "statistics", "gdp", "inflation", "unemployment", "world-bank", "eurostat", "official"],
+            'Economic data / macro indicators for any country, live: GDP, growth, GDP per '
+            'capita, inflation (CPI), unemployment, population, interest rates, exchange '
+            'rate, debt, trade, FDI or any World Bank indicator code. Annual for 200+ '
+            'economies from the World Bank; monthly EU inflation and unemployment from '
+            'Eurostat. Returns the series, latest and previous values, the change and the '
+            "source's update stamp. Input: indicator, country; optional last, frequency."),
+        tags=["economic-data", "macroeconomics", "gdp", "inflation", "unemployment", "world-bank", "statistics"],
         input_schema=_obj({
             "indicator": {"type": "string", "minLength": 3, "maxLength": 40,
                           "description": ("Alias (gdp_usd, gdp_growth, gdp_per_capita_usd, inflation, unemployment, population, "
@@ -1031,14 +1031,13 @@ CATALOG = [
         name="email.verify", price_usd=0.02, tier="utility",
         title="Verify an email address before you send",
         description=(
-            "Will mail to this address arrive? Checked now at the source: syntax, the "
-            "domain's own DNS (MX, null MX, no such domain) and its own mail server, "
-            "asked whether the mailbox exists and whether it accepts every address "
-            "(catch-all). No message is sent. Flags disposable domains, role accounts "
-            "(info@, sales@), free providers, likely typos (gmial.com) and the mail "
-            "provider. Verdict: deliverable, undeliverable, risky or unknown, with the "
-            "reason. Input: email."),
-        tags=["email", "verification", "validation", "deliverability", "mx", "smtp", "disposable", "leads", "live"],
+            'Email verification / email validation: will mail to this address arrive? Checked'
+            " live at the source: syntax, the domain's DNS (MX, null MX, no such domain) and "
+            'its own mail server, asked whether the mailbox exists and whether it accepts any'
+            ' address (catch-all). No message sent. Flags disposable domains, role accounts '
+            '(info@), free providers and typos (gmial.com). Verdict: deliverable, '
+            'undeliverable, risky or unknown, with the reason. Input: email.'),
+        tags=["email-verification", "email-validation", "deliverability", "disposable-email", "lead-validation", "smtp"],
         input_schema=_obj({
             "email": {"type": "string", "minLength": 3, "maxLength": 320,
                       "description": "One email address, such as jane@example.com."},
@@ -1055,13 +1054,13 @@ CATALOG = [
         name="property.context", price_usd=0.25, tier="standard",
         title="Everything the public record says about a US address",
         description=(
-            "One US address or point, one call: FEMA National Risk Index ratings for "
-            "flooding and 17 other hazards with expected annual loss, tract median home "
-            "value, rent, income, ownership and vacancy (Census ACS), price trend (FHFA), "
-            "fair market rents for the metro and ZIP (HUD), nearby public schools with "
-            "enrollment and ratios (NCES), walkability (EPA) and Superfund sites nearby, "
-            "plus tract, county, ZIP, metro and districts. Input: address or lat and lng."),
-        tags=["real-estate", "property", "address", "flood", "risk", "housing", "rent", "schools", "census", "fema", "hud", "live"],
+            'Real estate data for any US address: FEMA flood and 17 other hazard risk ratings'
+            ' with expected annual loss, median home value, rent, income, ownership and '
+            'vacancy (Census), price trend (FHFA), fair market rents (HUD), nearby public '
+            'schools (NCES), walkability (EPA) and Superfund sites nearby, plus tract, '
+            'county, ZIP and districts, all from federal sources in one call. Input: address,'
+            ' or lat and lng.'),
+        tags=["real-estate", "property-data", "flood-risk", "home-value", "neighborhood", "schools", "census"],
         input_schema=dict(_obj({
             "address": {"type": "string", "minLength": 5, "maxLength": 200,
                         "description": "US street address with city and state or ZIP."},
@@ -1083,14 +1082,13 @@ CATALOG = [
         name="travel.flight_status", price_usd=0.25, tier="standard",
         title="Flight and airport status right now",
         description=(
-            "What is happening at an airport, or to a flight, now. By airport code (IATA "
-            "or ICAO): FAA ground stops, ground delay programs with average and max "
-            "delay, closures and runway configuration (US); the live departure and "
-            "arrival board with gates and status (Norway, Avinor); current METAR and TAF "
-            "(any ICAO airport); aircraft in the air around it. By callsign: that "
-            "aircraft's live position, altitude and speed. Input: airport or callsign; "
-            "optional flight, direction, hours_ahead."),
-        tags=["flights", "flight-status", "airport", "delays", "departures", "arrivals", "aviation", "weather", "live"],
+            'Flight status and airport delays, live: by airport code, FAA ground stops and '
+            'delay programs with average and max delay (US), live departure and arrival '
+            'boards with gates and status (Norway), current METAR and TAF weather (any ICAO '
+            "airport) and aircraft overhead; by callsign, the aircraft's live position, "
+            'altitude and speed. Input: airport (IATA or ICAO) or callsign; optional flight, '
+            'direction, hours_ahead.'),
+        tags=["flight-status", "airport-delays", "flight-tracker", "aviation", "metar", "travel"],
         input_schema=dict(_obj({
             "airport": {"type": "string", "minLength": 3, "maxLength": 4, "description": "IATA (OSL, JFK) or ICAO (ENGM, KJFK) code."},
             "callsign": {"type": "string", "minLength": 2, "maxLength": 8,
@@ -1111,14 +1109,13 @@ CATALOG = [
         name="company.enrich", price_usd=0.05, tier="utility",
         title="Company profile from a domain or a name",
         description=(
-            "Who is this company? From a domain or a name: legal and common name, "
-            "founding date, headcount with its date, industries, headquarters, parent, "
-            "CEO and founders, stock listings, LEI, SEC CIK and registration number, "
-            "legal form and status, official social accounts and logo. Sources: "
-            "Wikidata (CC0), the global LEI register, SEC EDGAR and the company's own "
-            "site (marked self-declared); every field names its source. Input: domain "
-            "or name."),
-        tags=["company", "enrichment", "firmographics", "lei", "leads", "kyb", "wikidata", "sec", "live"],
+            'Company enrichment / firmographics by domain or name: legal and common name, '
+            'founded, headcount with date, industries, headquarters, parent, CEO and '
+            'founders, stock listings, LEI, SEC CIK, registration number, legal form and '
+            'status, official social accounts and logo. Sources: Wikidata, the global LEI '
+            "register, SEC EDGAR and the company's own site; every field names its source. "
+            'Input: domain or name.'),
+        tags=["company-enrichment", "firmographics", "company-data", "lead-enrichment", "b2b", "lei", "org-lookup"],
         input_schema=dict(_obj({
             "domain": {"type": "string", "minLength": 4, "maxLength": 253, "description": "Company domain (stripe.com) or its URL."},
             "name": {"type": "string", "minLength": 2, "maxLength": 120, "description": "Company name (Toyota), instead of a domain."},
@@ -1134,13 +1131,13 @@ CATALOG = [
         name="sanctions.screen", price_usd=0.05, tier="utility",
         title="Screen a name against US, UK and EU sanctions lists",
         description=(
-            "Is this person, company, vessel or aircraft sanctioned? One name screened "
-            "against the OFAC SDN and consolidated lists, the UK Sanctions List and the EU "
-            "financial sanctions list, read from the governments' own files (each list's "
-            "date returned). Fuzzy, word-order-free: aliases and one-letter typos match, a "
-            "different surname does not. Each match gives list, programmes, countries, "
-            "birth dates and UN reference. Optional type, country, birth year. Input: name."),
-        tags=["sanctions", "ofac", "sdn", "aml", "kyc", "kyb", "compliance", "screening", "osint", "live"],
+            'Sanctions screening (AML/KYC): screen a person, company, vessel or aircraft '
+            'against the OFAC SDN and consolidated lists, the UK Sanctions List and the EU '
+            "financial sanctions list, read from the governments' own files with each list's "
+            'date returned. Fuzzy and word-order free: aliases and typos match, a different '
+            'surname does not. Each hit: list, programmes, countries, birth dates, UN '
+            'reference. Input: name; optional type, country, birth_year.'),
+        tags=["sanctions-screening", "aml", "kyc", "ofac", "compliance", "watchlist", "due-diligence"],
         input_schema=_obj({
             "name": {"type": "string", "minLength": 2, "maxLength": 200,
                      "description": "The person, company, vessel or aircraft name, in any word order."},
@@ -1167,13 +1164,12 @@ CATALOG = [
         name="phone.parse", price_usd=0.02, tier="utility",
         title="Phone number intelligence: valid, where, which network, what type",
         description=(
-            "What a phone number itself says, checked against Google's libphonenumber "
-            "numbering plans: valid or not, country and area, the network the range was "
-            "issued to, line type (mobile, fixed, toll-free, VoIP, premium...), time zones "
-            "and E.164, international and national formats. Offline: nothing is dialled "
-            "and the owner is never looked up. Input: number; optional region for a "
-            "national-format number."),
-        tags=["phone", "validation", "carrier", "line-type", "e164", "osint", "kyc", "leads", "live"],
+            'Phone number validation and lookup: valid or not, country and area, the carrier '
+            'the range was issued to, line type (mobile, landline, toll-free, VoIP, premium),'
+            " time zones and E.164, international and national formats, from Google's "
+            'libphonenumber numbering plans. Nothing is dialled and the owner is never looked'
+            ' up. Input: number; optional region for a national-format number.'),
+        tags=["phone-validation", "phone-lookup", "carrier-lookup", "e164", "line-type", "kyc"],
         input_schema=_obj({
             "number": {"type": "string", "minLength": 3, "maxLength": 40,
                        "description": "One phone number, international (+44 20 7946 0958) or national with `region`."},
@@ -1189,12 +1185,12 @@ CATALOG = [
         name="ip.lookup", price_usd=0.02, tier="utility",
         title="IP address lookup: location, network owner, reverse DNS",
         description=(
-            "Where is this IP address and who runs it? City, region, country and "
-            "coordinates, the network's ASN and organisation, its reverse DNS name, and "
-            "whether it is public, private or reserved. IPv4 and IPv6. Location data: "
-            "DB-IP Lite (CC BY 4.0, credited in every answer), updated monthly. Location is "
-            "the network's registered place, never a street address. Input: ip."),
-        tags=["ip", "geolocation", "asn", "network", "reverse-dns", "osint", "fraud", "security", "live"],
+            'IP geolocation / IP address lookup: city, region, country and coordinates, the '
+            "network's ASN and organisation, reverse DNS, and whether the address is public, "
+            'private or reserved. IPv4 and IPv6. Location data from DB-IP Lite (CC BY 4.0, '
+            "credited), updated monthly; location is the network's registered place, never a "
+            'street address. Input: ip.'),
+        tags=["ip-geolocation", "ip-lookup", "asn", "geoip", "fraud-detection", "network"],
         input_schema=_obj({
             "ip": {"type": "string", "minLength": 2, "maxLength": 45, "description": "One IPv4 or IPv6 address, such as 8.8.8.8."},
         }, ["ip"]),
@@ -1207,12 +1203,12 @@ CATALOG = [
         name="domain.dns", price_usd=0.05, tier="utility",
         title="Domain DNS, email security and TLS certificate",
         description=(
-            "A domain's public setup, asked of the source: A, AAAA, CNAME, MX, NS, TXT, CAA "
-            "and SOA records; its SPF and DMARC email policy, parsed; and its HTTPS "
-            "certificate, verified like a browser (issuer, names, expiry, days left, TLS "
-            "version). Flags missing SPF or DMARC, duplicate SPF and a certificate near "
-            "expiry. No WHOIS or third-party data. Input: domain (a URL is accepted)."),
-        tags=["dns", "domain", "mx", "spf", "dmarc", "tls", "certificate", "osint", "security", "live"],
+            'DNS lookup and domain health check: A, AAAA, CNAME, MX, NS, TXT, CAA and SOA '
+            'records asked of the source, SPF and DMARC email policy parsed, and the HTTPS '
+            'certificate verified like a browser (issuer, names, expiry, days left, TLS '
+            'version). Flags missing SPF or DMARC, duplicate SPF and certificates near '
+            'expiry. Input: domain (a URL is accepted).'),
+        tags=["dns-lookup", "domain", "ssl-certificate", "spf", "dmarc", "email-security", "mx-records"],
         input_schema=_obj({
             "domain": {"type": "string", "minLength": 3, "maxLength": 253, "description": "A domain (github.com) or a URL on it."},
             "tls": {"type": "boolean", "description": "Also check the HTTPS certificate. Default true."},
@@ -1228,13 +1224,14 @@ CATALOG = [
         name="identity.check", price_usd=0.10, tier="utility",
         title="Identity check: sanctions, email, phone and IP in one call",
         description=(
-            "Vet a person or company before onboarding, in one call: the name screened "
-            "against the OFAC, UK and EU sanctions lists; the email's mailbox, disposable "
-            "and role checks; the phone's validity, country and line type; the IP's country "
-            "and network. Returns each result, flags (sanctions hit, disposable email, VoIP, "
-            "countries that disagree...) and one risk level: low, review or high. Input: any "
-            "of name, email, phone, ip; optional country, birth_year."),
-        tags=["identity", "kyc", "verification", "sanctions", "email", "phone", "ip", "fraud", "onboarding", "osint"],
+            'Identity verification / KYC check in one call: a name screened against OFAC, UK '
+            "and EU sanctions; an email's mailbox, disposable and role checks; a phone's "
+            "validity, country and line type; an IP's country and network. Returns each "
+            'result, fraud flags (sanctions hit, disposable email, VoIP, countries that '
+            'disagree) and one risk level: low, review or high. Use it before onboarding a '
+            'user or counterparty. Input: any of name, email, phone, ip; optional country, '
+            'birth_year.'),
+        tags=["identity-verification", "kyc", "fraud-detection", "onboarding", "aml", "risk-score", "sanctions"],
         input_schema=dict(_obj({
             "name": {"type": "string", "minLength": 2, "maxLength": 200,
                      "description": "Person or company name to screen against sanctions lists."},
@@ -1260,14 +1257,13 @@ CATALOG = [
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
-            "Can this product ship to me, for how much, and what is the cart total? Any "
-            "Shopify storefront, keyless: the variant goes into a real cart session, the "
-            "store's totals are read, and the store quotes its shipping options to the "
-            "destination. Returns options with prices and days, eligibility (true, false "
-            "with the store's reason, or the address fields still needed), subtotal and "
-            "total before tax. No order placed. Input: url, ship_to{country, province, "
-            "postal_code}; optional variant, quantity."),
-        tags=["commerce", "shipping", "eligibility", "checkout", "cart", "availability", "shopify", "live"],
+            'Shipping cost and delivery check for any Shopify store: the variant goes into a '
+            'real cart session and the store quotes its shipping options to your destination.'
+            " Returns options with prices and days, eligibility (or the store's reason, or "
+            'the address fields still needed), subtotal and total before tax. No order is '
+            'placed. Input: url, ship_to{country, province, postal_code}; optional variant, '
+            'quantity.'),
+        tags=["shipping", "shipping-cost", "shopify", "ecommerce", "checkout", "delivery"],
         input_schema=_obj({
             "url": {"type": "string", "description": "Product page on the store (…/products/<handle>)."},
             "variant": {"type": "string", "minLength": 1, "maxLength": 200,
@@ -1292,14 +1288,13 @@ CATALOG = [
         name="travel.flights", price_usd=0.50, tier="standard",
         title="Live flight offers between two places",
         description=(
-            "Live flight offers from the airlines for a route and date: every offer "
-            "with price, tax, currency, each segment (carrier, flight number, times, "
-            "aircraft), stops, refund and change conditions, emissions and the exact "
-            "time the offer expires. Places are IATA codes or names in any language "
-            "(Tokyo, 東京, Séoul), resolved before the search. One-way or return, up "
-            "to 9 adults plus children by age, any cabin class, sorted by price or "
-            "duration. Input: origin, destination, departure_date or days_ahead."),
-        tags=["travel", "flights", "airfare", "availability", "booking", "airlines", "duffel", "live"],
+            'Flight search / live airfare: offers from the airlines for a route and date with'
+            ' price, tax, currency, each segment (carrier, flight number, times, aircraft), '
+            'stops, refund and change conditions, emissions and when the offer expires. '
+            'Places as IATA codes or names in any language. One-way or return, up to 9 adults'
+            ' plus children, any cabin, sorted by price or duration. Input: origin, '
+            'destination, departure_date or days_ahead.'),
+        tags=["flight-search", "airfare", "flights", "travel", "booking", "airlines"],
         input_schema=_obj({
             "origin": {"type": "string", "minLength": 2, "maxLength": 80,
                        "description": "IATA code (LHR) or a city/airport name in any language."},
@@ -1334,14 +1329,13 @@ CATALOG = [
         name="travel.hotels", price_usd=0.50, tier="standard",
         title="Live hotel availability and room rates",
         description=(
-            "Live hotel availability and room rates for a place and dates, 2M+ properties. "
-            "Give a place in any language (or city + country, a hotel name, or "
-            "coordinates), check-in, nights and guests. Each hotel: stars, rating, address, "
-            "cheapest bookable rate and room options with board, occupancy, total, taxes "
-            "and fees, refundability, cancellation deadlines and the offer id to book. "
-            "Input: place | city+country_code | hotel_name | latitude+longitude; optional "
-            "check_in, nights, adults, children_ages, currency."),
-        tags=["travel", "hotels", "availability", "rates", "booking", "accommodation", "liteapi", "live"],
+            'Hotel search / live room rates for a place and dates across 2M+ properties: '
+            'stars, rating, address, cheapest bookable rate and room options with board, '
+            'occupancy, total, taxes and fees, refundability, cancellation deadlines and the '
+            'offer id to book. Place in any language, city + country, hotel name or '
+            'coordinates. Input: place, city+country_code, hotel_name or latitude+longitude; '
+            'optional check_in, nights, adults, currency.'),
+        tags=["hotel-search", "hotels", "room-rates", "travel", "booking", "accommodation"],
         input_schema=_obj({
             "place": {"type": "string", "minLength": 2, "maxLength": 200,
                       "description": "Free-text place in any language (hotel near Shibuya station Tokyo, 명동 서울)."},
@@ -1375,14 +1369,12 @@ CATALOG = [
         name="traffic.route", price_usd=0.10, tier="utility",
         title="Traffic-aware travel time and distance between two places",
         description=(
-            'Travel time and distance between two places with live traffic, from the '
-            'Google Routes API at call time: duration with traffic, duration without, '
-            "the delay between them, distance, Google's localized texts, route "
-            'description, warnings and advisory. Places are addresses, place names or '
-            '"lat,lng". Input: origin, destination; optional travel_mode (DRIVE, '
-            'TWO_WHEELER, WALK, BICYCLE, TRANSIT), departure_time (RFC 3339, future; '
-            'omit to leave now), traffic (aware, optimal, none).'),
-        tags=["traffic", "routes", "directions", "eta", "google-maps", "travel-time", "live"],
+            'Travel time with live traffic between two places, from the Google Routes API at '
+            'call time: duration with traffic, duration without, the delay, distance, route '
+            "description, warnings and advisories. Places as addresses, names or 'lat,lng'. "
+            'Use it for ETAs, delivery windows and trip planning. Input: origin, destination;'
+            ' optional travel_mode, departure_time, traffic.'),
+        tags=["traffic", "eta", "travel-time", "routing", "commute", "logistics"],
         input_schema={
             "type": "object",
             "properties": {
@@ -1412,14 +1404,12 @@ CATALOG = [
         name="video.youtube", price_usd=0.05, tier="utility",
         title="YouTube search and video statistics, live",
         description=(
-            'Search YouTube or look up videos by id, each with live statistics read at call '
-            'time from the YouTube Data API v3: title, channel, upload time, duration, '
-            "views, likes, comments, live flag and thumbnail. A query runs YouTube's own "
-            'video search (sort by relevance, date, views, rating or title; filter by '
-            'upload date, country, language) plus one details call; video_ids skips it. '
-            'Input: query or video_ids; optional max_results, order, published_after, '
-            'region_code, language.'),
-        tags=["youtube", "video", "search", "social", "live", "statistics"],
+            'YouTube search and video stats, live: search YouTube or look up videos by id, '
+            'each with title, channel, upload time, duration, views, likes, comments, live '
+            'flag and thumbnail from the YouTube Data API at call time. Sort by relevance, '
+            'date, views or rating; filter by upload date, country and language. Input: query'
+            ' or video_ids; optional max_results, order, published_after, region_code.'),
+        tags=["youtube", "video-search", "video-stats", "views", "social-media", "creators"],
         input_schema=dict(_obj({
             "query": {"type": "string", "minLength": 1, "maxLength": 300,
                       "description": "Words to search YouTube for, in any language. Use this OR `video_ids`."},
@@ -1450,13 +1440,12 @@ CATALOG = [
         name="social.bluesky", price_usd=0.05, tier="utility",
         title="Bluesky profile, posts, account search or thread, live",
         description=(
-            'Bluesky, live and keyless from the public AppView: a profile with its '
-            'latest posts (likes, reposts, replies, quotes, repost and reply flags, '
-            'embed type), an account search, or a post thread with its replies. '
-            'Input: mode (profile, search_actors, thread) with actor, query or uri; '
-            'optional posts, limit, depth. Post search is not offered: Bluesky '
-            'refuses it to unauthenticated callers.'),
-        tags=["bluesky", "social", "posts", "profile", "atproto", "keyless", "live"],
+            'Bluesky data, live and keyless: a profile with its latest posts and engagement '
+            '(likes, reposts, replies, quotes), an account search, or a post thread with its '
+            'replies, from the public AppView. Use it for social listening and influencer '
+            'checks on Bluesky. Input: mode (profile, search_actors, thread) with actor, '
+            'query or uri; optional posts, limit, depth.'),
+        tags=["bluesky", "social-media", "social-listening", "posts", "profiles", "atproto"],
         input_schema=_obj({
             "mode": {"type": "string", "enum": ["profile", "search_actors", "thread"],
                      "description": "profile: an account and its latest posts; search_actors: accounts matching a query; thread: a post and its replies."},
@@ -1476,14 +1465,12 @@ CATALOG = [
         name="social.mastodon", price_usd=0.05, tier="utility",
         title="Mastodon hashtag timeline, account, search or trends, live",
         description=(
-            'Mastodon (any public instance, default mastodon.social), live and keyless: '
-            'a hashtag timeline, an account with its latest statuses, an account or '
-            'hashtag search, or the trending hashtags, each status as plain text plus '
-            'its HTML, counts, media, tags and reblog flag. Input: mode (hashtag, '
-            'account, search, trends) with tag, acct or query; optional instance, '
-            'limit, statuses, kind. Status search and the public firehose need a '
-            'token and are not offered.'),
-        tags=["mastodon", "fediverse", "social", "hashtag", "posts", "keyless", "live"],
+            'Mastodon data, live and keyless (any public instance): a hashtag timeline, an '
+            'account with its latest posts, account or hashtag search, or trending hashtags, '
+            'each post with text, counts, media and tags. Use it for social listening and '
+            'trend tracking in the fediverse. Input: mode (hashtag, account, search, trends) '
+            'with tag, acct or query; optional instance, limit.'),
+        tags=["mastodon", "fediverse", "social-media", "trending", "hashtags", "social-listening"],
         input_schema=_obj({
             "mode": {"type": "string", "enum": ["hashtag", "account", "search", "trends"],
                      "description": "hashtag: latest statuses under a tag; account: an account and its statuses; search: accounts or hashtags matching a query; trends: trending hashtags."},
@@ -1504,14 +1491,13 @@ CATALOG = [
         name="social.x_pulse", price_usd=0.50, tier="standard",
         title="X (Twitter) topic pulse: volume and engagement as aggregates",
         description=(
-            'What X (Twitter) is saying about a topic, as numbers only, live: post '
-            'volume per hour or day over the last 1-7 days, and over a sample of recent '
-            'posts the engagement totals, averages and rate (likes, reposts, replies, '
-            'quotes, impressions), language mix, top hashtags and link/media share. '
-            'Aggregates only: no post text, ids, authors or profiles are returned. '
-            'Input: query (X operators allowed); optional days, granularity, sample '
-            '(0-100 posts read), lang, include_retweets.'),
-        tags=["x", "twitter", "social", "engagement", "trend", "volume", "aggregate", "live"],
+            'Twitter / X sentiment and volume for any topic, as numbers, live: post volume '
+            'per hour or day over the last 1-7 days, and over a sample of recent posts the '
+            'engagement totals and rate (likes, reposts, replies, quotes, impressions), '
+            'language mix, top hashtags and link/media share. Aggregates only: no post text '
+            'or authors. Input: query (X operators allowed); optional days, granularity, '
+            'sample, lang.'),
+        tags=["twitter", "x", "social-listening", "trend-analysis", "engagement", "buzz", "social-media"],
         input_schema=_obj({
             "query": {"type": "string", "minLength": 1, "maxLength": 400,
                       "description": "Words or X search operators (\"machine learning\" from:nasa has:links)."},
@@ -1532,11 +1518,12 @@ CATALOG = [
         name="security.mcp_inspect", price_usd=5.00, tier="advanced",
         title="Inspect an MCP endpoint",
         description=(
-            "MCP server security check: probe any MCP endpoint's initialize handshake "
-            'and tools/list and report whether it requires authentication, which '
-            'protocol version it speaks, how many tools it exposes and which are not '
-            'marked read-only. Input: url of the MCP endpoint.'),
-        tags=["security", "mcp", "audit", "inspect", "tools"],
+            "MCP server security scan: probe any MCP endpoint's initialize handshake and "
+            'tools/list and report whether it requires authentication, which protocol version'
+            ' it speaks, how many tools it exposes and which are not marked read-only. Use it'
+            ' before connecting an agent to an unknown MCP server. Input: url of the MCP '
+            'endpoint.'),
+        tags=["mcp", "security", "audit", "agent-safety", "scanner", "tools"],
         input_schema=_URL,
         returns="reachable, requires_auth, protocol_version, tool_count, tools[], tools_without_readonly_annotation[].",
         skill="security.mcp_inspect", max_seconds=45,
@@ -1547,11 +1534,12 @@ CATALOG = [
         name="fetch.raw", price_usd=0.10, tier="utility",
         title="Raw HTTP fetch",
         description=(
-            'Raw HTTP fetch: GET any URL and get exactly what the server sent, status '
-            'code, headers and body, plus the final URL after redirects. Every status '
-            'is a result, so a 404 or 500 from the target is delivered, not failed. '
-            'Input: url. Use extract.page for readable text from a rendered page.'),
-        tags=["fetch", "http", "raw", "status", "headers"],
+            'HTTP fetch / GET any URL: exactly what the server sent, status code, headers and'
+            ' body, plus the final URL after redirects. Every status is a result, so a 404 or'
+            ' 500 from the target is delivered, not failed. Use it for API checks, uptime '
+            'probes and raw HTML. Input: url. Readable text from a rendered page: '
+            'extract.page.'),
+        tags=["http", "fetch", "curl", "headers", "uptime", "raw-html", "proxy"],
         input_schema=_URL,
         returns="url, final_url, status, content_type, bytes, text, truncated, headers{}.",
         skill="fetch.raw", max_seconds=60,
@@ -1561,12 +1549,11 @@ CATALOG = [
         name="chain.rpc", price_usd=0.05, tier="utility",
         title="Base RPC passthrough",
         description=(
-            'Base JSON-RPC passthrough: call any allowlisted read-only method on Base '
-            'mainnet (eth_call, eth_getBalance, eth_getLogs, eth_getBlockByNumber and '
-            'more) with your own params. A JSON-RPC error such as a revert reason '
-            "comes back as the result, since it is the chain's own answer. Input: "
-            'method, optional params.'),
-        tags=["base", "blockchain", "rpc", "jsonrpc", "advanced"],
+            'Base RPC endpoint, pay per call: any allowlisted read-only JSON-RPC method on '
+            'Base mainnet (eth_call, eth_getBalance, eth_getLogs, eth_getBlockByNumber, '
+            'eth_getTransactionReceipt and more) with your own params, no API key. Revert '
+            'reasons come back as the result. Input: method; optional params.'),
+        tags=["rpc", "base", "json-rpc", "eth_call", "onchain", "web3", "node"],
         input_schema=_obj({
             "method": {"type": "string", "description": "e.g. eth_call, eth_getLogs."},
             "params": {"type": "array", "description": "JSON-RPC positional params. Default []."},
@@ -1579,10 +1566,11 @@ CATALOG = [
         name="market.rates", price_usd=0.02, tier="utility",
         title="Currency exchange rates",
         description=(
-            "Currency exchange rates: Coinbase's full rate table for one base "
-            'currency against every crypto and fiat currency it quotes, for example '
-            'USD to BTC, ETH, EUR and GBP. Input: currency code.'),
-        tags=["market", "rates", "currency", "exchange", "coinbase"],
+            "Exchange rates / currency conversion table: Coinbase's full rate table for one "
+            'base currency against every crypto and fiat currency it quotes (USD to BTC, ETH,'
+            ' EUR, GBP, JPY...). Use it to convert amounts between currencies. Input: '
+            'currency code such as USD.'),
+        tags=["exchange-rates", "currency-conversion", "forex", "crypto", "fiat", "rates"],
         input_schema=_obj({"currency": {"type": "string", "description": "e.g. USD, ETH, BTC."}},
                           ["currency"]),
         returns="currency, rates{}.",
@@ -1593,10 +1581,10 @@ CATALOG = [
         name="market.ticker", price_usd=0.02, tier="utility",
         title="Crypto ticker",
         description=(
-            'Crypto ticker: live best bid, best ask, last price and volume for one '
-            "Coinbase product from Coinbase's Exchange data host, an independent "
-            'second source to market.quote. Input: product_id such as BTC-USD.'),
-        tags=["market", "ticker", "bid", "ask", "coinbase"],
+            'Crypto ticker / bid and ask: live best bid, best ask, last price and volume for '
+            "one Coinbase product from Coinbase's Exchange data host, an independent second "
+            'source to market.quote. Input: product_id such as BTC-USD.'),
+        tags=["crypto-ticker", "bid-ask", "order-book", "bitcoin", "market-data", "live"],
         input_schema=_obj({"product_id": {"type": "string", "description": "e.g. BTC-USD."}},
                           ["product_id"]),
         returns="product_id, price, bid, ask, volume, time.",
@@ -1607,10 +1595,10 @@ CATALOG = [
         name="prediction.market", price_usd=0.05, tier="utility",
         title="Prediction market by slug",
         description=(
-            'One Polymarket prediction market by its exact slug, with its question '
-            'and current implied probabilities. Input: slug. Use market.prediction to '
-            'search markets by topic.'),
-        tags=["prediction", "polymarket", "slug", "market", "odds"],
+            "One prediction market by slug: a Polymarket market's question and the current "
+            'probability of each outcome as a percentage. Use it to track a market you '
+            'already know. Input: slug. Search markets by topic: market.prediction.'),
+        tags=["prediction-market", "polymarket", "odds", "probability", "market-lookup"],
         input_schema=_obj({"slug": {"type": "string",
                                     "description": "The market's Polymarket slug."}},
                           ["slug"]),
@@ -1622,10 +1610,10 @@ CATALOG = [
         name="prediction.events", price_usd=0.05, tier="utility",
         title="Prediction market events",
         description=(
-            'Polymarket events, groupings of related prediction markets, ranked by '
-            'trading volume with title, slug, end date and market count. Input: '
-            'optional limit.'),
-        tags=["prediction", "polymarket", "events", "market", "odds"],
+            'Top prediction market events: Polymarket events (groups of related markets) '
+            'ranked by trading volume, with title, slug, end date and market count. Use it to'
+            ' see what the biggest prediction markets are right now. Input: optional limit.'),
+        tags=["prediction-market", "polymarket", "events", "trending", "odds"],
         input_schema=_obj({"limit": {"type": "integer", "description": "1-50, default 10."}}, []),
         returns="events[{id,title,slug,volume,end_date,market_count}], count.",
         skill="prediction.events", max_seconds=20,
@@ -1636,13 +1624,13 @@ CATALOG = [
         name="maps.places", price_usd=0.10, tier="utility",
         title="Find places near a location",
         description=(
-            "Places near a location, anywhere: 'coffee near the Ferry Building, San "
+            "Places near me / local search anywhere: 'coffee near the Ferry Building, San "
             "Francisco', 'ramen near Shibuya Station', 'pharmacy' at coordinates. From "
-            "Overture Maps' open places data (80M+ places, monthly releases): name, "
-            "category, distance, address, website, phone, brand, operating status, "
-            "confidence and source datasets, nearest first; the area widens when nothing "
-            "is close. Input: query; optional near, lat and lng, radius_m, limit."),
-        tags=["maps", "places", "poi", "local", "search", "overture", "geospatial", "live"],
+            'Overture Maps open places data (80M+ places): name, category, distance, address,'
+            ' website, phone, brand, open status and confidence, nearest first; the area '
+            'widens when nothing is close. Input: query; optional near, lat and lng, '
+            'radius_m, limit.'),
+        tags=["places", "local-search", "nearby", "poi", "restaurants", "maps", "business-listings"],
         input_schema=_obj({
             "query": {"type": "string", "minLength": 1, "maxLength": 300,
                       "description": "What and where: 'coffee near the Ferry Building, San Francisco'."},
@@ -1663,10 +1651,11 @@ CATALOG = [
         name="maps.route", price_usd=0.10, tier="utility",
         title="Compute a route",
         description=(
-            'Directions and travel time between two named places through Google Maps '
-            'Grounding Lite. Input: origin, destination, optional travel_mode (DRIVE, '
-            'WALK, BICYCLE or TRANSIT; default DRIVE).'),
-        tags=["maps", "route", "directions", "google", "geospatial"],
+            'Directions between two places: route and travel time by car, walking, bicycle or'
+            ' transit through Google Maps Grounding Lite. Use it for trip planning and ETAs. '
+            'Input: origin, destination; optional travel_mode (DRIVE, WALK, BICYCLE, TRANSIT;'
+            ' default DRIVE).'),
+        tags=["directions", "routing", "maps", "travel-time", "navigation"],
         input_schema=_obj({
             "origin": {"type": "string"},
             "destination": {"type": "string"},
@@ -1680,13 +1669,12 @@ CATALOG = [
         name="maps.weather", price_usd=0.10, tier="utility",
         title="Weather at a location, now and for seven days",
         description=(
-            "Weather anywhere on Earth: current conditions, the next 24 hours and a "
-            "seven-day forecast (temperature, precipitation, wind, humidity, cloud, "
-            "pressure, condition) from MET Norway's forecast model, plus active US "
-            "National Weather Service alerts for US locations. Input: location as a "
-            "place name, US street address or airport code, or lat and lng. Carries "
-            "the sources' required credits."),
-        tags=["weather", "forecast", "alerts", "met-norway", "nws", "geospatial", "live"],
+            'Weather forecast anywhere on Earth: current conditions, the next 24 hours and a '
+            'seven-day forecast (temperature, precipitation, wind, humidity, cloud, pressure,'
+            " condition) from MET Norway's forecast model, plus active US National Weather "
+            'Service alerts for US locations. Input: location as a place name, US street '
+            'address or airport code, or lat and lng.'),
+        tags=["weather", "forecast", "weather-api", "temperature", "rain", "alerts"],
         input_schema=dict(_obj({
             "location": {"type": "string", "minLength": 2, "maxLength": 200,
                          "description": "Place name (Kyoto), US street address, or airport code (JFK)."},
@@ -1704,11 +1692,11 @@ CATALOG = [
         name="video.generate", price_usd=10.00, tier="premium",
         title="Generate a video",
         description=(
-            'Video generation: a short clip from a text prompt with Google Veo, '
-            'returned as base64 video bytes (or a GCS URI when large) with its MIME '
-            'type. Input: prompt, optional aspect_ratio (16:9 or 9:16), '
-            'duration_seconds (4, 6 or 8) and generate_audio.'),
-        tags=["video", "generate", "veo", "media", "visual"],
+            'AI video generation / text to video: a short clip from a text prompt with Google'
+            ' Veo, returned as base64 video bytes (or a GCS URI when large) with its MIME '
+            'type, optionally with generated audio. Input: prompt; optional aspect_ratio '
+            '(16:9 or 9:16), duration_seconds (4, 6 or 8), generate_audio.'),
+        tags=["video-generation", "text-to-video", "veo", "ai-video", "clips"],
         input_schema=_obj({
             "prompt": {"type": "string"},
             "aspect_ratio": {"type": "string", "description": "16:9 or 9:16. Default 16:9."},

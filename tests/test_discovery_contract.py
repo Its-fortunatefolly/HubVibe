@@ -33,7 +33,7 @@ STATIC = REPO_ROOT / "wcag-audit-engine" / "app" / "static"
 ARD_SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "ard-entry.schema.json"
 
 TEST_PAY_TO = "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"
-TITLE = "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents"
+TITLE = "HubVibe: Pay-per-Call Tools for AI Agents: Web Search, Email Verify, KYC, Stocks, Crypto, News, Data"
 
 
 def _load_workers():
@@ -433,7 +433,7 @@ def test_every_402_description_fits_coinbases_500_char_limit(client):
 def test_the_probability_route_is_payable_through_coinbase(client):
     resource = _v2_resource(client.post("/work/stats/probability", json={}))
     assert 0 < len(resource.description) <= 500
-    assert resource.description.startswith("Deterministic statistics")
+    assert resource.description.startswith("Predictive probability and regression engine")
 
 
 def test_the_mcp_paywall_description_fits_the_limit_too(client):

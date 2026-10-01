@@ -73,6 +73,13 @@ def _bigquery_available(monkeypatch):
     monkeypatch.setattr(W.providers.news._Gdelt, "available", lambda self: True)
 
 
+@pytest.fixture(autouse=True)
+def _clock_at_capture(monkeypatch):
+    """The GDELT rows were read on 2026-09-28; the skill keeps only the last
+    72 hours, so the tests read them at that moment, not today."""
+    monkeypatch.setattr(N, "_now_dt", lambda: datetime(2026, 9, 28, 18, 0, tzinfo=timezone.utc))
+
+
 class _Ctx:
     """Answers each step from fixtures; an Exception value is raised."""
 
