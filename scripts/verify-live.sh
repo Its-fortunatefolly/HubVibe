@@ -424,13 +424,40 @@ except Exception:
     sys.exit(1)
 if set(manifest) != set(live):
     sys.exit(1)
+KEEP = ("type", "required", "enum", "const", "items", "properties", "additionalProperties",
+        "anyOf", "oneOf", "allOf", "$schema")
+def compact(schema, depth=2):
+    # tools/list sends output schemas as structure only, two levels deep
+    # (main.compact_schema); the manifest keeps the full schema.
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    for key in KEEP:
+        if key not in schema:
+            continue
+        value = schema[key]
+        if key == "properties" and isinstance(value, dict):
+            if depth <= 1:
+                continue
+            out[key] = {n: compact(v, depth - 1) for n, v in value.items()}
+        elif key in ("items", "additionalProperties") and isinstance(value, dict):
+            out[key] = compact(value, depth - 1) if depth > 1 else {}
+        elif key in ("anyOf", "oneOf", "allOf") and isinstance(value, list):
+            out[key] = [compact(v, depth) for v in value]
+        else:
+            out[key] = value
+    if depth <= 1 and "required" in out and "properties" not in out:
+        out.pop("required")
+    return out
 for name, tool in live.items():
-    for field in ("inputSchema", "outputSchema", "annotations", "title"):
+    for field in ("inputSchema", "annotations", "title"):
         if manifest[name].get(field) != tool.get(field):
             sys.exit(1)
+    if compact(manifest[name].get("outputSchema")) != tool.get("outputSchema"):
+        sys.exit(1)
 sys.exit(0)
 ' "$BASE" 2>/dev/null; then
-  pass "/mcp.json and /mcp advertise identical tool contracts"
+  pass "/mcp.json and /mcp advertise the same tool contracts (live output schemas in compact form)"
 else
   fail "/mcp.json has drifted from /mcp -- the registry points agents at a stale contract"
 fi
