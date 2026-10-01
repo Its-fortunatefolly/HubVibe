@@ -100,7 +100,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.29.2"
+SERVICE_VERSION = "1.30.0"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -156,21 +156,23 @@ async def _lifespan(_app: "FastAPI"):
 # ard.json and (by hand, in the static files) mcp.json and the registry entry.
 # Crawlers scored this node as a five-tool audit service while it sold 37
 # more routes, because each surface carried its own audit-era title.
-SERVICE_TITLE = "HubVibe: Pay-per-Call Data Analysis, Research, Verification and Dev Tools for AI Agents"
+SERVICE_TITLE = "HubVibe: Pay-per-Call Tools for AI Agents: Web Search, Email Verify, KYC, Stocks, Crypto, News, Data"
 
 app = FastAPI(
     lifespan=_lifespan,
     title=SERVICE_TITLE,
     version=SERVICE_VERSION,
     description=(
-        "65 machine-payable dev utilities under /work -- LLM inference, web "
-        "search and page extraction, Base chain reads, market and "
-        "prediction-market data, BigQuery analysis and forecasting, a "
-        "deterministic regression and probability engine, "
-        "image/speech/video generation, sandboxed Python, maps, and cited "
-        "research, verification and company briefs that compose several of "
-        "them in one call -- plus five deterministic site audits: "
-        "accessibility (axe-core), SEO, security headers, performance, and "
+        "63 pay-per-call tools for AI agents under /work -- web search and "
+        "cited research, email verification, company enrichment, identity "
+        "verification (KYC) and sanctions screening, phone/IP/DNS lookups, stock "
+        "prices, SEC filings and insider trades, crypto prices and prediction-market "
+        "odds, news in any language, economic and open data, US real-estate data, "
+        "flight status, places and weather, web scraping, LLM completion and "
+        "extraction, BigQuery SQL and forecasting, a deterministic probability "
+        "engine, image/speech/video generation and sandboxed Python -- plus five "
+        "deterministic site audits: accessibility (axe-core), SEO, security "
+        "headers, performance, and "
         "the $0.15 bundle, at $0.05 per single audit. Every /work route "
         "declares its request schema and a typed 200 response schema with an "
         "example; every delivered job has a receipt at /work/receipts/{id}.\n\n"
@@ -2266,12 +2268,14 @@ async def agent_manifest(request: Request):
         "name": SERVICE_TITLE,
         "base_url": base,
         "description": (
-            "65 machine-payable dev utilities (the `workers` section: LLM "
-            "inference, web search and extraction, Base chain reads, market "
-            "and prediction-market data, BigQuery analysis and forecasting, "
-            "deterministic regression and probability statistics, "
-            "image/speech/video generation, sandboxed Python, maps, cited "
-            "research and verification) and five deterministic site audits "
+            "63 pay-per-call tools for AI agents (the `workers` section: web "
+            "search and cited research, email verification, company enrichment, "
+            "KYC and sanctions screening, phone/IP/DNS lookups, stock prices, SEC "
+            "filings and insider trades, crypto and prediction-market odds, news, "
+            "economic and open data, real-estate data, flight status, places, "
+            "weather, web scraping, LLM, BigQuery SQL and forecasting, probability "
+            "statistics, image/speech/video generation, sandboxed Python) and five "
+            "deterministic site audits "
             "(the `endpoints` section: accessibility via axe-core, SEO, "
             "security headers, performance, bundle). One price per call, "
             "payable by software over HTTP 402 with no account. Every "
@@ -2820,6 +2824,42 @@ _MCP_AUDIT_ANNOTATIONS = {
 }
 
 
+# Words a schema carries for people, not for validation. The live tools/list
+# sends output schemas without them, two levels deep: measured 2026-09-29, the
+# full list was 498 KB (386 KB of it output schemas), about 125k tokens that
+# an agent loads before it can call anything; MCP clients listed our tools
+# 430 times a day and almost never called one. The full schemas stay in
+# /openapi.json, /contracts/{id} and the published manifests.
+_SCHEMA_KEEP = ("type", "required", "enum", "const", "items", "properties", "additionalProperties",
+                "anyOf", "oneOf", "allOf", "$schema")
+
+
+def compact_schema(schema, depth: int = 3):
+    """A JSON Schema reduced to structure: types, required fields, enums and
+    properties down to `depth` levels; no descriptions, examples or formats.
+    Anything the full schema accepts, this one accepts."""
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    for key in _SCHEMA_KEEP:
+        if key not in schema:
+            continue
+        value = schema[key]
+        if key == "properties" and isinstance(value, dict):
+            if depth <= 1:
+                continue
+            out[key] = {name: compact_schema(sub, depth - 1) for name, sub in value.items()}
+        elif key in ("items", "additionalProperties") and isinstance(value, dict):
+            out[key] = compact_schema(value, depth - 1) if depth > 1 else {}
+        elif key in ("anyOf", "oneOf", "allOf") and isinstance(value, list):
+            out[key] = [compact_schema(v, depth) for v in value]
+        else:
+            out[key] = value
+    if depth <= 1 and "required" in out and "properties" not in out:
+        out.pop("required")  # required names without their properties say nothing a validator can use
+    return out
+
+
 def _mcp_tools() -> list:
     """Tool list, derived from the same catalog the REST routes and the agent
     manifest use, so a tool can never advertise a price the route won't
@@ -3131,7 +3171,9 @@ async def mcp_streamable_http(
         return {"jsonrpc": "2.0", "id": request_id, "result": {}}
 
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": _mcp_tools()}}
+        return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": [
+            dict(tool, outputSchema=compact_schema(tool["outputSchema"], 2)) if tool.get("outputSchema") else tool
+            for tool in _mcp_tools()]}}
 
     if method == "tools/call":
         return await _mcp_dispatch_tool_call(payload, request, x_api_key, x_payment, authorization)
@@ -3405,10 +3447,13 @@ def _a2a_card() -> dict:
         base_url=PUBLIC_BASE_URL, name="HubVibe",
         description=(
             f"{SERVICE_TITLE}. Pay-per-call skills for agents: web search and cited "
-            "research, LLM completion and extraction, crypto prices and Base on-chain "
-            "reads, prediction markets, BigQuery SQL and forecasting, deterministic "
-            "statistics, image, speech and video generation, sandboxed Python, maps "
-            "and weather, and rule-based site audits (WCAG, SEO, security headers, "
+            "research, email verification, company enrichment, KYC and sanctions "
+            "screening, phone/IP/DNS lookups, stock prices, SEC filings and insider "
+            "trades, crypto prices and prediction markets, news in any language, "
+            "economic data, real-estate data, flight status, places and weather, LLM "
+            "completion and extraction, BigQuery SQL and forecasting, image, speech "
+            "and video generation, sandboxed Python, and rule-based site audits "
+            "(WCAG, SEO, security headers, "
             "performance). One price per call, no account; a delivered job carries "
             "a receipt. Name a skill in a data part: {\"skill\": <id>, "
             "\"arguments\": {...}}."

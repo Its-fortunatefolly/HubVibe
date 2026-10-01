@@ -405,7 +405,8 @@ def test_the_mcp_tool_is_listed_from_the_catalog_row(app_module, client):
     assert "p-values" in tool["description"]
     assert tool["inputSchema"]["oneOf"] == worker.input_schema["oneOf"]
     assert tool["inputSchema"]["properties"] == worker.input_schema["properties"]
-    assert tool["outputSchema"] == W.catalog.response_schema(worker)
+    # tools/list carries the compact form (structure only); the full schema is in the manifests.
+    assert tool["outputSchema"] == app_module.compact_schema(W.catalog.response_schema(worker), 2)
     assert tool["annotations"]["readOnlyHint"] is True
     assert tool["annotations"]["destructiveHint"] is False
     jsonschema.validate(W.catalog.example_for(worker), tool["inputSchema"])
@@ -413,7 +414,8 @@ def test_the_mcp_tool_is_listed_from_the_catalog_row(app_module, client):
     manifest = client.get("/mcp.json").json()
     served = next(t for t in manifest["tools"] if t["name"] == TOOL)
     assert served["httpEndpoint"] == {"method": "POST", "path": PATH, "price_usd": 0.50}
-    assert served["outputSchema"] == tool["outputSchema"]
+    # The manifest keeps the full schema; the live tools/list sends its compact form.
+    assert served["outputSchema"] == W.catalog.response_schema(worker)
     card = next(e for e in client.get("/.well-known/ard.json").json()["entries"]
                 if e["identifier"].endswith(":mcp:hubvibe"))
     assert TOOL in card["capabilities"]

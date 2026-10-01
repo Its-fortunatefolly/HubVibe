@@ -673,7 +673,7 @@
     {
       "name": "hubvibe_predictive_probability_engine",
       "title": "Predictive probability engine: regression, normal model, p-values",
-      "description": "Deterministic statistics over (x, y) points: ordinary least squares linear regression with standard errors and confidence intervals, a fitted normal distribution with quantiles and probability queries, exact Student t and Jarque-Bera p-values validated at your alpha, and predictions with prediction intervals. Points come inline or from a BigQuery table (two numeric columns; above max_rows the rows are chosen by fingerprint, never at random). Pure arithmetic with exactly rounded sums: the same input always returns the same numbers, and no LLM is anywhere in the path. $0.50 per call. Returns: source{}, n, alpha, confidence_level, metrics[], linear_regression{}, normal_distribution{}, p_values{}, prediction[], notes[], method.",
+      "description": "Predictive probability and regression engine: least-squares linear regression with standard errors, confidence and prediction intervals, a fitted normal distribution with quantiles and probability queries (P(y > t)), exact Student t and Jarque-Bera p-values. Points inline or from a BigQuery table. Deterministic arithmetic, no LLM: the same input always returns the same numbers. Input: points or table with x_column, y_column; optional metrics, predict_x, probability_queries. $0.50 per call. Returns: source{}, n, alpha, confidence_level, metrics[], linear_regression{}, normal_distribution{}, p_values{}, prediction[], notes[], method.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1846,7 +1846,7 @@
     {
       "name": "hubvibe_chain_network",
       "title": "Base network state",
-      "description": "Base chain status: current block height and gas price (wei and gwei), read live from a Base mainnet RPC node. No input needed. Use it to check the chain is live, time an on-chain action, or estimate gas before a chain.rpc call. $0.02 per call. Returns: block_number, gas_price_wei, gas_price_gwei.",
+      "description": "Base network status and gas price: current block height and gas price (wei and gwei), live from a Base mainnet RPC node. Use it to check Base is moving, time an on-chain action or estimate gas before sending a transaction. Keyless, pay per call. No input needed. $0.02 per call. Returns: block_number, gas_price_wei, gas_price_gwei.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2091,7 +2091,7 @@
     {
       "name": "hubvibe_chain_address",
       "title": "Base address report",
-      "description": "Base wallet lookup: ETH balance, transaction count (nonce) and whether the address is a contract or an ordinary wallet, in one call for one Base mainnet address. Input: address. Three RPC reads folded into one answer; for a token balance or any other read, use chain.rpc. $0.05 per call. Returns: balance_wei, balance_eth, transaction_count, is_contract, code_size_bytes.",
+      "description": "Base wallet lookup / address balance: ETH balance, transaction count (nonce) and whether the address is a smart contract or an ordinary wallet (EOA), live from Base mainnet in one call. Use it to check a counterparty, deposit address or contract before paying it. Input: address (0x...). For token balances or any other read use chain.rpc. $0.05 per call. Returns: balance_wei, balance_eth, transaction_count, is_contract, code_size_bytes.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2366,7 +2366,7 @@
     {
       "name": "hubvibe_chain_transaction",
       "title": "Base transaction lookup",
-      "description": "Base transaction lookup by hash: sender, recipient, ETH value, block, success or failure, gas used and log count, with the receipt folded in. Input: the 0x transaction hash. Use chain.rpc for the raw eth_getTransactionReceipt output. $0.05 per call. Returns: from, to, value_eth, block_number, status, gas_used, log_count.",
+      "description": "Base transaction lookup by hash: sender, recipient, ETH value, block, success or failure, gas used and log count, with the receipt folded in, live from Base mainnet. Use it to confirm a payment or transfer landed on-chain. Input: hash (the 0x transaction hash). For the raw receipt use chain.rpc. $0.05 per call. Returns: from, to, value_eth, block_number, status, gas_used, log_count.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2685,7 +2685,7 @@
     {
       "name": "hubvibe_market_quote",
       "title": "Crypto spot quote",
-      "description": "Crypto price: live spot price, 24-hour change and 24-hour volume for any Coinbase product such as BTC-USD or ETH-USD, from Coinbase's public market data. Input: product_id. Use market.ticker for bid and ask from a second source, market.rates for a whole exchange-rate table. $0.02 per call. Returns: price, price_change_24h_pct, volume_24h, base/quote currency.",
+      "description": "Crypto price / live coin quote: spot price, 24-hour change and 24-hour volume for Bitcoin, Ethereum, Solana or any Coinbase product (BTC-USD, ETH-USD, SOL-USD...), read at call time from Coinbase's public market data. Use it when an agent needs a current cryptocurrency price. Input: product_id such as BTC-USD. Bid/ask: market.ticker. Whole rate table: market.rates. $0.02 per call. Returns: price, price_change_24h_pct, volume_24h, base/quote currency.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2979,7 +2979,7 @@
     {
       "name": "hubvibe_market_prediction",
       "title": "Prediction market probabilities",
-      "description": "Prediction market odds from Polymarket: live markets and the probability each outcome currently implies, as percentages rather than raw prices. Search by topic (tickers such as BTC understood) or take the highest-volume markets. A topic no open market matches is refused free, never sold empty. Input: optional query and limit. Use prediction.market for one market by slug, prediction.events for event groupings. $0.05 per call. Returns: markets[] with question, implied_probabilities[], volume, end_date.",
+      "description": "Prediction market odds: live Polymarket markets on any topic (elections, Fed rate cuts, crypto, sports, AI, geopolitics) with the probability each outcome implies as a percentage, plus volume, liquidity and end date. Search by topic words or tickers (BTC, 'fed rate cut') or take the biggest markets. A topic no open market matches is refused free, never sold empty. Input: optional query, limit. One market by slug: prediction.market. $0.05 per call. Returns: markets[] with question, implied_probabilities[], volume, end_date.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3358,7 +3358,7 @@
     {
       "name": "hubvibe_extract_page",
       "title": "Web page extraction",
-      "description": "Web page to clean text: fetch any URL in a real browser (JavaScript-rendered pages included) and return the readable text, title, description and links. Input: url. Use fetch.raw when you need the raw HTTP status, headers and body; research.brief when you want a question answered from the page. $0.10 per call. Returns: title, description, text, text_chars, links[], javascript_rendered.",
+      "description": "Web scraping / web page to clean text: any URL rendered in a real browser (JavaScript pages included) and returned as readable text with title, description and links. Use it to read an article, docs page or product page before summarising or extracting. Input: url. Raw status, headers and body: fetch.raw. A question answered from the page: research.brief. $0.10 per call. Returns: title, description, text, text_chars, links[], javascript_rendered.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3685,7 +3685,7 @@
     {
       "name": "hubvibe_llm_analyze",
       "title": "Analyse text",
-      "description": "Answer a question from text you supply, using Gemini. Grounded in the material only: if the text does not contain the answer it says so instead of guessing. Input: text and question. Use llm.extract for fixed JSON fields, llm.generate for a free-form completion. $0.25 per call. Returns: answer, model, tokens{prompt,output}.",
+      "description": "Question answering over your own text: ask a question about material you supply and get an answer grounded only in that text (Gemini). If the text does not contain the answer it says so instead of guessing. Use it for summaries, Q&A and checks over documents, emails and pages. Input: text, question; optional language. Fixed JSON fields: llm.extract. $0.25 per call. Returns: answer, model, tokens{prompt,output}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3702,7 +3702,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -3967,7 +3967,7 @@
     {
       "name": "hubvibe_llm_extract",
       "title": "Extract fields as JSON",
-      "description": "Structured data extraction: pull the fields you name out of text and get a JSON object with exactly those keys, null for anything the text does not state. Input: text and a list of field names. For extraction from a live web page use research.page_facts. $0.25 per call. Returns: fields{} with one key per requested field.",
+      "description": "Structured data extraction / text to JSON: pull the fields you name out of any text into a JSON object with exactly those keys, null where the text does not state a value (Gemini, no invented values). Use it to turn emails, invoices, pages or documents into clean records. Input: text, fields[]. From a live web page: research.page_facts. $0.25 per call. Returns: fields{} with one key per requested field.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -3986,7 +3986,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -4242,7 +4242,7 @@
     {
       "name": "hubvibe_data_query",
       "title": "Run a BigQuery query",
-      "description": "BigQuery SQL: run a read-only query, including against Google's public datasets, and get columns and rows back as JSON with the bytes processed. Every query is dry-run first and refused above the scan ceiling, so cost is bounded before it runs. Input: sql, optional max_scan_gib. Use data.question to ask in plain language instead. $0.50 per call. Returns: columns[], rows[], row_count, gib_processed, cache_hit.",
+      "description": "BigQuery SQL: run a read-only SQL query, including against Google's public datasets (Wikipedia, GitHub, blockchains, weather, census and more), and get columns and rows back as JSON with the bytes processed. Every query is dry-run first and refused above the scan ceiling, so cost is bounded before it runs. Input: sql; optional max_scan_gib. Ask in plain English instead: data.question. $0.50 per call. Returns: columns[], rows[], row_count, gib_processed, cache_hit.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -4559,7 +4559,7 @@
     {
       "name": "hubvibe_data_question",
       "title": "Answer a question from a dataset",
-      "description": "Plain-language question answered over any BigQuery table, including Google's public datasets: the SQL is written for you, run under a byte ceiling, and the rows read back into a written answer. Input: question and table, optional column list. Returns answer, sql, columns and rows. Use data.query when you already have the SQL. $5.00 per call. Returns: answer, sql, columns[], rows[], gib_processed.",
+      "description": "Ask a database in plain English (text to SQL): any BigQuery table, including Google's public datasets. The SQL is written for you, run under a byte ceiling, and the rows are read back into a written answer, returned with the SQL, columns and rows it used. Use it for analytics questions without writing SQL. Input: question, table; optional columns. $5.00 per call. Returns: answer, sql, columns[], rows[], gib_processed.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -4582,7 +4582,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -4891,7 +4891,7 @@
     {
       "name": "hubvibe_research_brief",
       "title": "Research brief on a URL",
-      "description": "Answer a question about one web page: the URL is rendered in a real browser, its content extracted and analysed, and a written brief returned that is grounded in the page only and says when the page does not answer. Input: url, optional question. Use research.page_facts for fixed JSON fields, research.web when the answer needs a web search. $5.00 per call. Returns: brief, title, final_url, source{}, model.",
+      "description": "Summarize and analyze a web page: the URL is rendered in a real browser, its content extracted, and a written brief answering your question returned, grounded in that page only and saying so when the page does not answer. Use it for competitor pages, docs, articles and listings. Input: url; optional question. Fixed JSON fields: research.page_facts. Needs a web search: research.web. $5.00 per call. Returns: brief, title, final_url, source{}, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -4907,7 +4907,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -5200,7 +5200,7 @@
     {
       "name": "hubvibe_research_page_facts",
       "title": "Structured facts from a URL",
-      "description": "Structured facts from a web page: name the fields you need (pricing, contact, product names, anything) and get exactly those keys back as JSON from the rendered page, null where the page does not say. Input: url and fields. Built for pipelines that need a fixed shape; use research.brief for a written answer. $5.00 per call. Returns: fields{} with one key per requested field, plus title and final_url.",
+      "description": "Structured facts from a web page / scrape to JSON: name the fields you need (pricing, plans, contact, product names, anything) and get exactly those keys back as JSON from the live page rendered in a real browser, null where the page does not say. Use it for price monitoring, lead data and catalog extraction. Input: url, fields[]. $5.00 per call. Returns: fields{} with one key per requested field, plus title and final_url.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -5218,7 +5218,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -5477,7 +5477,7 @@
     {
       "name": "hubvibe_market_intel",
       "title": "Market intelligence read",
-      "description": "Crypto market read in one call: a live Coinbase spot quote and live Polymarket probabilities on the same subject, analysed together in a written summary. Input: optional product_id, query, question and limit. Market data and implied probabilities only, not investment advice. $5.00 per call. Returns: spot{}, prediction_markets[], news[], news_note, analysis, disclaimer.",
+      "description": "Crypto market sentiment in one call: live Coinbase spot price, live Polymarket probabilities and recent news headlines (GDELT) on the same subject, analysed together in a written summary that says what the numbers do and do not support. Use it for a quick read on Bitcoin, Ethereum or any coin. Input: optional product_id (BTC-USD...), query, question, limit. Market data only, not investment advice. $5.00 per call. Returns: spot{}, prediction_markets[], news[], news_note, analysis, disclaimer.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -5501,7 +5501,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [],
@@ -6008,7 +6008,7 @@
     {
       "name": "hubvibe_search_web",
       "title": "Web search",
-      "description": "Web search for agents: a live query on Brave's independent web index, answered from the current results alone, with the source URLs and titles it was given, never the model's own memory. Input: query; optional language. Use search.results for the raw result list, research.web for sources read in full. $0.10 per call. Returns: query, answer, sources[{url,title}], search_queries_used[], model.",
+      "description": "Web search with an answer: real-time search of Brave's independent web index, answered from the current results only, with every source URL and title returned, never the model's memory. Use it when an agent needs up-to-date information, latest news, prices or facts from the web. Input: query; optional language. Raw result list (SERP): search.results. Sources read in full with citations: research.web. $0.10 per call. Returns: query, answer, sources[{url,title}], search_queries_used[], model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -6020,7 +6020,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -6299,7 +6299,7 @@
     {
       "name": "hubvibe_llm_generate",
       "title": "Raw text completion",
-      "description": "LLM text generation: a raw completion from your prompt, with optional system message, max_tokens and temperature. Gemini by default; optional provider and model fields select another configured model. Input: prompt. Nothing is prescribed about the answer's shape; use llm.analyze for an answer grounded in text you supply. $0.25 per call. Returns: text, model, provider, finish_reason, usage{input_tokens,output_tokens}.",
+      "description": "LLM text generation / chat completion: a raw completion from your prompt with optional system message, max_tokens and temperature; Gemini by default, other configured models by provider and model. Use it for drafting, rewriting, translation, classification or any prompt, paid per call with no API key or account. Input: prompt. Answer grounded in your own text: llm.analyze. $0.25 per call. Returns: text, model, provider, finish_reason, usage{input_tokens,output_tokens}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -6332,7 +6332,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -6599,7 +6599,7 @@
     {
       "name": "hubvibe_code_execute",
       "title": "Execute Python",
-      "description": "Run Python code in Google's hosted sandbox, not on this service's own machines, and get the code, its output and the outcome back. Input: code. For questions over BigQuery data use data.query instead. $0.25 per call. Returns: code, output, outcome, summary, model.",
+      "description": "Run Python code in a sandbox: execute Python in Google's hosted sandbox (not on this service's machines) and get the code, its printed output and the outcome back. Use it for calculations, data transforms and checks an agent should not do in its head. Input: code. Questions over BigQuery data: data.query. $0.25 per call. Returns: code, output, outcome, summary, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -6861,7 +6861,7 @@
     {
       "name": "hubvibe_image_generate",
       "title": "Generate an image",
-      "description": "Image generation: one image from a text prompt with Imagen 4, returned as base64-encoded image bytes with its MIME type. Input: prompt, optional aspect_ratio. $0.50 per call. Returns: prompt, aspect_ratio, image_base64, mime_type, model.",
+      "description": "AI image generation / text to image: one image from a text prompt with Google Imagen 4, returned as base64 image bytes with its MIME type. Use it for illustrations, thumbnails, product mockups and social images. Input: prompt; optional aspect_ratio. $0.50 per call. Returns: prompt, aspect_ratio, image_base64, mime_type, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -7125,7 +7125,7 @@
     {
       "name": "hubvibe_speech_synthesize",
       "title": "Text to speech",
-      "description": "Text to speech: convert text to spoken MP3 audio with Google Cloud Text-to-Speech, returned as base64. Input: text, optional voice name. $0.25 per call. Returns: text_chars, voice, audio_base64, mime_type.",
+      "description": "Text to speech (TTS): convert text to natural spoken MP3 audio with Google Cloud Text-to-Speech, returned as base64. Use it for voice replies, narration, audio versions of text and accessibility. Input: text; optional voice name. $0.25 per call. Returns: text_chars, voice, audio_base64, mime_type.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -7381,7 +7381,7 @@
     {
       "name": "hubvibe_speech_transcribe",
       "title": "Speech to text",
-      "description": "Speech to text: transcribe up to 60 seconds or 10 MB of audio with Google Cloud Speech-to-Text and get the transcript with its confidence and language. Input: audio_base64, optional language_code. Longer audio is refused before payment. $0.25 per call. Returns: transcript, language_code, confidence, model.",
+      "description": "Speech to text / audio transcription: transcribe up to 60 seconds or 10 MB of audio with Google Cloud Speech-to-Text and get the transcript with its confidence and detected language. Use it for voice notes, call snippets and clips. Input: audio_base64; optional language_code. Longer audio is refused before payment. $0.25 per call. Returns: transcript, language_code, confidence, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -7640,7 +7640,7 @@
     {
       "name": "hubvibe_data_forecast",
       "title": "Forecast a time series",
-      "description": "Time-series forecast from a BigQuery table using Google's pretrained TimesFM model (AI.FORECAST), no model to train: point it at the table, timestamp column and value column and get forecast rows for the horizon you set. Input: table, timestamp_col, data_col, optional horizon and id_cols. $10.00 per call. Returns: table, timestamp_col, data_col, horizon, columns[], rows[], row_count, gib_processed.",
+      "description": "Time-series forecasting: forecast any BigQuery table with Google's pretrained TimesFM model (AI.FORECAST), nothing to train. Point it at the table, timestamp column and value column and get forecast rows with bounds for the horizon you set, per series with id_cols. Use it for sales, traffic, demand or metric forecasts. Input: table, timestamp_col, data_col; optional horizon, id_cols. $10.00 per call. Returns: table, timestamp_col, data_col, horizon, columns[], rows[], row_count, gib_processed.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -7984,7 +7984,7 @@
     {
       "name": "hubvibe_data_anomalies",
       "title": "Detect anomalies in a time series",
-      "description": "Anomaly detection over a BigQuery time series with AI.DETECT_ANOMALIES (TimesFM): score a target table against a history table that shares its timestamp and value columns, or give one table and its latest periods are scored against its own history. Returns every checked row with its bounds, anomaly flag and probability, plus the anomaly count. Input: history_table, target_table, timestamp_col, data_col, optional target_last, threshold and id_cols. $10.00 per call. Returns: history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, mode, target_periods, columns[], rows[], row_count, anomaly_count, gib_processed.",
+      "description": "Anomaly detection on a time series: score recent periods against history with BigQuery AI.DETECT_ANOMALIES (TimesFM). Give one table and its latest periods are scored against its own history, or a history and a target table. Returns every checked row with bounds, anomaly flag and probability, plus the anomaly count. Input: history_table, target_table, timestamp_col, data_col; optional target_last, threshold, id_cols. $10.00 per call. Returns: history_table, target_table, timestamp_col, data_col, anomaly_prob_threshold, mode, target_periods, columns[], rows[], row_count, anomaly_count, gib_processed.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -8380,7 +8380,7 @@
     {
       "name": "hubvibe_verify_claims",
       "title": "Verify claims against sources",
-      "description": "Fact check: up to 10 claims checked against up to 4 source URLs you name; each claim comes back SUPPORTED, CONTRADICTED or UNSUPPORTED with the quote the verdict rests on. Input: claims and sources. Use research.web when you have a question but no sources yet. $5.00 per call. Returns: claims[], verdicts[{claim,verdict,quote,source_n}], sources_read[], sources_unread[], model.",
+      "description": "Fact check claims against sources: up to 10 claims checked against up to 4 source URLs you name; each comes back SUPPORTED, CONTRADICTED or UNSUPPORTED with the exact quote the verdict rests on. Use it to verify AI output, citations or statements before publishing. Input: claims[], sources[]. A question but no sources yet: research.web. $5.00 per call. Returns: claims[], verdicts[{claim,verdict,quote,source_n}], sources_read[], sources_unread[], model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -8401,7 +8401,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -8760,7 +8760,7 @@
     {
       "name": "hubvibe_research_web",
       "title": "Research brief from live web search",
-      "description": "Cited web research: search the live web for your question, read the top sources in full, and get a written answer with every claim tied to a numbered source. Input: question, optional max_sources. Use search.web for a quick grounded answer with links only. $5.00 per call. Returns: question, answer, sources[{n,url,title}], partial[], model.",
+      "description": "Deep web research with citations: search the live web for your question, read the top sources in full, and get a written answer with every claim tied to a numbered source. Use it when an agent needs a sourced answer, not a list of links. Input: question; optional max_sources. Quick answer with links: search.web. $5.00 per call. Returns: question, answer, sources[{n,url,title}], partial[], model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -8776,7 +8776,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -9079,7 +9079,7 @@
     {
       "name": "hubvibe_research_company",
       "title": "Research and verify a company",
-      "description": "Company research brief from live web sources: what the company does, its products and anything notable, every claim cited to a numbered source, with thin or conflicting evidence disclosed rather than papered over. Input: company name, optional max_sources. $10.00 per call. Returns: company, report, sources[{n,url,title}], partial[], news[], news_note, model.",
+      "description": "Company research report: what a company does, its products and anything notable, from the live web (official site and Wikipedia first) and recent GDELT news, every claim cited to a numbered source, thin or conflicting evidence disclosed. Use it for due diligence, sales prep and competitor research. Input: company name; optional max_sources. Structured firmographics in one cheap call: company.enrich. $10.00 per call. Returns: company, report, sources[{n,url,title}], partial[], news[], news_note, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -9095,7 +9095,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -9463,7 +9463,7 @@
     {
       "name": "hubvibe_monitor_snapshot",
       "title": "Save a monitoring baseline",
-      "description": "Website change monitoring, step one: fetch a page and store it as the baseline. Input: url. Call monitor.check later to learn whether and how it changed. $0.50 per call. Returns: url, title, text_chars, content_hash, note.",
+      "description": "Website change monitoring, step one: fetch a page and store it as the baseline to compare against later. Use it to watch pricing pages, terms, job boards or competitors. Input: url. Then call monitor.check to learn whether and how it changed. $0.50 per call. Returns: url, title, text_chars, content_hash, note.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -9726,7 +9726,7 @@
     {
       "name": "hubvibe_monitor_check",
       "title": "Check a page against its baseline",
-      "description": "Website change monitoring, step two: re-fetch a page saved with monitor.snapshot and get whether it changed, how old the baseline is, and a written summary of the differences. Input: url, optional language. $0.50 per call. Returns: url, title, changed, baseline_age_seconds, change_summary, model.",
+      "description": "Website change detection, step two: re-fetch a page saved with monitor.snapshot and get whether it changed, how old the baseline is, and a written summary of what changed. Use it to track price changes, terms updates, new job posts or competitor moves. Input: url; optional language. $0.50 per call. Returns: url, title, changed, baseline_age_seconds, change_summary, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -9739,7 +9739,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -9996,7 +9996,7 @@
     {
       "name": "hubvibe_commerce_availability",
       "title": "Live availability: can this be bought or booked right now?",
-      "description": "Live buy/book check on any product or booking page: can it be purchased right now, at what price, in which options (sizes, colours, dates, rooms), which option matches the variant you name, quantity and ship-to eligibility where the page states them, with evidence and a checked_at stamp. Read at call time: schema.org JSON-LD, Open Graph and Shopify product JSON first; a browser render and Gemini only when the page gives machines nothing. Input: url; optional variant, quantity, ship_to, language. $0.50 per call. Returns: available, availability, price, currency, options[], matched_option, quantity_ok, ship_to_ok, shipping, eligibility_notes[], evidence[], source, confidence, checked_at.",
+      "description": "Product availability and price check: is it in stock and buyable right now, at what price, in which options (sizes, colours, dates, rooms), which option matches the variant you name, quantity and ship-to eligibility where the page states them, with evidence and a checked_at stamp. Reads any product or booking page (schema.org, Open Graph, Shopify JSON; a browser only when needed). Input: url; optional variant, quantity, ship_to. $0.50 per call. Returns: available, availability, price, currency, options[], matched_option, quantity_ok, ship_to_ok, shipping, eligibility_notes[], evidence[], source, confidence, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -10026,7 +10026,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           }
         },
         "required": [
@@ -10665,7 +10665,7 @@
     {
       "name": "hubvibe_market_stock",
       "title": "Live stock quote and daily history",
-      "description": "Live equity quote for a US-listed ticker: last price, change, day range, volume and market state, plus daily OHLCV history for the range you choose (1d to 5y), read at call time from Nasdaq's public data API with Yahoo Finance as the fallback. Every answer names the source that answered, the source's own timestamp (as_of), its delay in minutes, and when this node read it (checked_at). Input: symbol; optional range (default 1mo), include_history. $0.05 per call. Returns: symbol, name, exchange, currency, price, change, change_pct, previous_close, day_high, day_low, volume, market_state, as_of, delayed_minutes, history[], history_rows, source, checked_at.",
+      "description": "Stock price / live stock quote for any US ticker: last price, change, day range, volume and market state, plus daily OHLCV history (1d to 5y), read at call time from Nasdaq's public data with Yahoo Finance as fallback. Every answer names its source, the source's timestamp, its delay in minutes and when it was read. Input: symbol (AAPL, NVDA...); optional range, include_history. $0.05 per call. Returns: symbol, name, exchange, currency, price, change, change_pct, previous_close, day_high, day_low, volume, market_state, as_of, delayed_minutes, history[], history_rows, source, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -11163,7 +11163,7 @@
     {
       "name": "hubvibe_market_fundamentals",
       "title": "SEC-filed fundamentals (XBRL company facts)",
-      "description": "Company fundamentals as the filer reported them to the SEC: revenue, net income, diluted EPS, operating income, assets, liabilities, equity, cash and shares outstanding by reporting period (10-K and 10-Q), from EDGAR's official XBRL company-facts API, read at call time. Name your own XBRL concepts for any other line item; restatements resolve to the latest filing. Input: symbol (US ticker) or cik; optional concepts, periods, forms. $0.05 per call. Returns: symbol, cik, entity_name, concepts{name: {concept, taxonomy, label, unit, values[]}}, concepts_missing[], periods, forms, as_of, source, checked_at.",
+      "description": "SEC filings / company fundamentals: revenue, net income, diluted EPS, operating income, assets, liabilities, equity, cash and shares outstanding by quarter and year (10-K, 10-Q) as the company reported them to the SEC, from EDGAR's official XBRL API at call time. Name any other XBRL line item; restatements resolve to the latest filing. Input: symbol (US ticker) or cik; optional concepts, periods, forms. $0.05 per call. Returns: symbol, cik, entity_name, concepts{name: {concept, taxonomy, label, unit, values[]}}, concepts_missing[], periods, forms, as_of, source, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -11702,7 +11702,7 @@
     {
       "name": "hubvibe_market_insiders",
       "title": "Insider trades from SEC Form 4 filings",
-      "description": "What a company's officers, directors and 10% owners bought and sold, parsed from the Form 4s they filed with the SEC, read at call time from EDGAR. Each trade: insider, role, date, code and meaning, shares, price, value, holdings after, 10b5-1 plan flag, filing link. Summary: open-market buys vs sells, net shares and dollars, distinct insiders. Input: symbol (US ticker) or cik; optional days (default 90), codes such as [\"P\",\"S\"], max_filings. $0.10 per call. Returns: symbol, cik, issuer_name, window, codes, filings_read, transactions[] (insider, role, date, code, code_meaning, shares, price, value, shares_after, rule_10b5_1, filing_url), transaction_count, summary, as_of, notes[], source, checked_at.",
+      "description": "Insider trading (SEC Form 4): what a company's officers, directors and 10% owners bought and sold, parsed from their Form 4 filings at call time from EDGAR. Each trade: insider, role, date, code and meaning, shares, price, value, holdings after, 10b5-1 plan flag, filing link. Summary: open-market buys vs sells, net shares and dollars. Input: symbol (US ticker) or cik; optional days (default 90), codes such as [\"P\",\"S\"]. $0.10 per call. Returns: symbol, cik, issuer_name, window, codes, filings_read, transactions[] (insider, role, date, code, code_meaning, shares, price, value, shares_after, rule_10b5_1, filing_url), transaction_count, summary, as_of, notes[], source, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -12444,7 +12444,7 @@
     {
       "name": "hubvibe_finance_analytics",
       "title": "Trading mathematics: returns, risk, drawdown, VaR, beta, indicators, options, Kelly",
-      "description": "Deterministic trading mathematics over a price series you supply or a ticker fetched live: returns and CAGR, annualized volatility, Sharpe and Sortino, max drawdown, historical and parametric VaR/CVaR, beta, alpha and correlation vs a benchmark, SMA/EMA, RSI, Bollinger bands, Black-Scholes price with Greeks, and the Kelly fraction. Exactly rounded sums, every formula named in the result, the same input always the same numbers; no LLM in the path. Input: prices or symbol, plus options. $0.50 per call. Returns: source{}, n, n_returns, periods_per_year, metrics_computed[], returns{}, volatility{}, sharpe, sortino, drawdown{}, var{}, beta{}, moving_averages{}, rsi{}, bollinger{}, black_scholes{}, kelly{}, notes[], method, as_of, checked_at.",
+      "description": "Trading and portfolio math: returns and CAGR, volatility, Sharpe and Sortino, max drawdown, VaR/CVaR, beta, alpha and correlation vs a benchmark, SMA/EMA, RSI, Bollinger bands, Black-Scholes option price with Greeks, and the Kelly fraction, over prices you send or a ticker fetched live. Deterministic, every formula named, no LLM. Input: prices or symbol; optional metrics, benchmark, option, kelly. $0.50 per call. Returns: source{}, n, n_returns, periods_per_year, metrics_computed[], returns{}, volatility{}, sharpe, sortino, drawdown{}, var{}, beta{}, moving_averages{}, rsi{}, bollinger{}, black_scholes{}, kelly{}, notes[], method, as_of, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -13837,7 +13837,7 @@
     {
       "name": "hubvibe_opendata_search",
       "title": "Search 16 government open-data portals for datasets",
-      "description": "Find government datasets across 16 open-data portals in one call: Korea (data.go.kr), Japan (e-Gov, Tokyo, BODIK), Hong Kong, Australia, UK, Canada, the EU catalog (139,000+ datasets), Germany, Italy, Ireland, Switzerland, Netherlands, Israel, Chile. Query in any language, the portal's own included; every match comes back with organization, update time and download URLs, ready for opendata.table. Portals that did not answer are listed, never hidden. Input: query; optional region, limit, portals. $0.10 per call. Returns: query, region, portals_searched[], portals_ok[], portals_failed[], total_matches{}, results[{portal, title, description, organization, landing_url, resources[{url, format}]...}], result_count, checked_at.",
+      "description": "Government open data search across 16 national portals in one call: Korea (data.go.kr), Japan, Hong Kong, Australia, UK, Canada, the EU catalog (139,000+ datasets), Germany, Italy, Ireland, Switzerland, Netherlands, Israel and Chile. Query in any language; each match returns organization, update time and download URLs ready for opendata.table. Portals that did not answer are listed. Input: query; optional region, limit, portals. $0.10 per call. Returns: query, region, portals_searched[], portals_ok[], portals_failed[], total_matches{}, results[{portal, title, description, organization, landing_url, resources[{url, format}]...}], result_count, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -14420,7 +14420,7 @@
     {
       "name": "hubvibe_opendata_table",
       "title": "Read a government dataset file as JSON rows",
-      "description": "Turn one dataset file into JSON rows: a CSV, TSV, XLSX or JSON link from any portal, an e-Stat (Japan) file-download link, or a data.go.kr (Korea) dataset page, which is resolved to its keyless file first. Encoding is detected (Korean CP949, Japanese Shift_JIS, Chinese Big5/GB18030, UTF-8/16, Western code pages), the header row found, numbers typed, XLSX sheets selectable, large files capped and disclosed. Input: url; optional max_rows, sheet, encoding, delimiter. $0.10 per call. Returns: source_url, resolved_from, file_url, final_url, filename, content_type, bytes, format, encoding, sheet, sheets[], columns[], column_count, rows[{...}], row_count, total_rows, truncated, notes[], checked_at.",
+      "description": "Dataset file to JSON rows: a CSV, TSV, XLSX or JSON link from any portal, an e-Stat (Japan) download or a data.go.kr (Korea) dataset page. Encoding detected (Korean, Japanese, Chinese, UTF and Western code pages), header row found, numbers typed, XLSX sheets selectable, large files capped and disclosed. Use it after opendata.search or on any data file URL. Input: url; optional max_rows, sheet, encoding, delimiter. $0.10 per call. Returns: source_url, resolved_from, file_url, final_url, filename, content_type, bytes, format, encoding, sheet, sheets[], columns[], column_count, rows[{...}], row_count, total_rows, truncated, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -14880,7 +14880,7 @@
     {
       "name": "hubvibe_search_results",
       "title": "Web and news results in any language and country (Brave index)",
-      "description": "Independent web and news results for a query from Brave's own index, in any language and country: title, URL, description, age and extra snippets for the web; headline, source and age for news. Use language for the search language and interface, country for the market, freshness to keep to the last day, week, month or year. Results, not an answer: pick what to read next with fetch.raw or extract.page. Input: query; optional country, language, count, freshness, news, safesearch. $0.25 per call. Returns: query, country, language, freshness, web[{title, url, description, age, page_age, language, site_name, hostname, extra_snippets[]}], web_count, news[{title, url, description, age, page_age, source, breaking}], news_count, more_results_available, source, notes[], checked_at.",
+      "description": "Web search API / SERP results: raw web and news results from Brave's independent index in any language and country, with title, URL, description, age and extra snippets (headline, source and age for news). Filter by country, language and freshness (day, week, month, year). Results, not an answer: pick what to read next with extract.page. Input: query; optional country, language, count, freshness, news. $0.25 per call. Returns: query, country, language, freshness, web[{title, url, description, age, page_age, language, site_name, hostname, extra_snippets[]}], web_count, news[{title, url, description, age, page_age, source, breaking}], news_count, more_results_available, source, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -14900,7 +14900,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           },
           "count": {
             "type": "integer",
@@ -15435,7 +15435,7 @@
     {
       "name": "hubvibe_news_search",
       "title": "Current news on any topic, in any language",
-      "description": "Current news on any topic in any language from the GDELT Project, which reads the world's press every 15 minutes: titles matched in their original script (半導体, 반도체, tarifs), optionally only articles in one language, newest first, with publisher, language and link; a US ticker searches the company's name. Window up to 30 days (default 72 hours). Carries GDELT's required citation. Input: query and/or symbol; optional language, limit, since_hours. $0.25 per call. Returns: query, symbol, language, edition{}, sources_searched[], sources_ok[], sources_failed[], articles[{title, url, source_name, source_url, published_at, summary, feed}], article_count, limit, since_hours, notes[], checked_at.",
+      "description": "News search API: current news on any topic in any language from the GDELT Project, which reads the world's press every 15 minutes. Titles matched in their original script, newest first, with publisher, language and link; filter to one language; a US stock ticker searches the company's name. Window up to 30 days (default 72 hours). Input: query and/or symbol; optional language, limit, since_hours. $0.25 per call. Returns: query, symbol, language, edition{}, sources_searched[], sources_ok[], sources_failed[], articles[{title, url, source_name, source_url, published_at, summary, feed}], article_count, limit, since_hours, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -15455,7 +15455,7 @@
             "type": "string",
             "maxLength": 35,
             "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
-            "description": "Optional BCP-47 language tag (en, ja, pt-BR, zh-Hant): every prose field of the answer is written in this language. Default: the language of the material or question."
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
           },
           "region": {
             "type": "string",
@@ -15956,7 +15956,7 @@
     {
       "name": "hubvibe_data_macro",
       "title": "Official economic statistics for a country",
-      "description": "One official economic series for one country, now: GDP, growth, GDP per capita, inflation, unemployment, population, current account, reserves, debt, exports, imports, FDI, exchange rate, interest rates, or any World Bank indicator code. Annual from the World Bank for 200+ economies; monthly from Eurostat for EU inflation and unemployment. Returns the series, latest and previous values, the change between them and the source's update stamp. Input: indicator, country; optional last, frequency. $0.10 per call. Returns: indicator{alias, code, name, unit}, country{code, name}, frequency, source, observations[{period, value}], observation_count, latest{}, previous{}, change{absolute, pct}, as_of, source_url, notes[], checked_at.",
+      "description": "Economic data / macro indicators for any country, live: GDP, growth, GDP per capita, inflation (CPI), unemployment, population, interest rates, exchange rate, debt, trade, FDI or any World Bank indicator code. Annual for 200+ economies from the World Bank; monthly EU inflation and unemployment from Eurostat. Returns the series, latest and previous values, the change and the source's update stamp. Input: indicator, country; optional last, frequency. $0.10 per call. Returns: indicator{alias, code, name, unit}, country{code, name}, frequency, source, observations[{period, value}], observation_count, latest{}, previous{}, change{absolute, pct}, as_of, source_url, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -16479,7 +16479,7 @@
     {
       "name": "hubvibe_email_verify",
       "title": "Verify an email address before you send",
-      "description": "Will mail to this address arrive? Checked now at the source: syntax, the domain's own DNS (MX, null MX, no such domain) and its own mail server, asked whether the mailbox exists and whether it accepts every address (catch-all). No message is sent. Flags disposable domains, role accounts (info@, sales@), free providers, likely typos (gmial.com) and the mail provider. Verdict: deliverable, undeliverable, risky or unknown, with the reason. Input: email. $0.02 per call. Returns: email, normalized, local_part, domain, domain_ascii, verdict, reason, syntax_valid, domain_exists, accepts_mail, mx[{host, priority}], mail_provider, mailbox{checked, exists, catch_all, smtp_code, smtp_message, mx_host}, disposable, role_account, free_provider, did_you_mean, disposable_list_as_of, notes[], checked_at.",
+      "description": "Email verification / email validation: will mail to this address arrive? Checked live at the source: syntax, the domain's DNS (MX, null MX, no such domain) and its own mail server, asked whether the mailbox exists and whether it accepts any address (catch-all). No message sent. Flags disposable domains, role accounts (info@), free providers and typos (gmial.com). Verdict: deliverable, undeliverable, risky or unknown, with the reason. Input: email. $0.02 per call. Returns: email, normalized, local_part, domain, domain_ascii, verdict, reason, syntax_valid, domain_exists, accepts_mail, mx[{host, priority}], mail_provider, mailbox{checked, exists, catch_all, smtp_code, smtp_message, mx_host}, disposable, role_account, free_provider, did_you_mean, disposable_list_as_of, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -16999,7 +16999,7 @@
     {
       "name": "hubvibe_property_context",
       "title": "Everything the public record says about a US address",
-      "description": "One US address or point, one call: FEMA National Risk Index ratings for flooding and 17 other hazards with expected annual loss, tract median home value, rent, income, ownership and vacancy (Census ACS), price trend (FHFA), fair market rents for the metro and ZIP (HUD), nearby public schools with enrollment and ratios (NCES), walkability (EPA) and Superfund sites nearby, plus tract, county, ZIP, metro and districts. Input: address or lat and lng. $0.25 per call. Returns: input{}, matched_address, lat, lng, geography{state, county, tract, zip, metro, congressional_district, school_district...}, flood{zone, special_flood_hazard_area...}, hazard_risk{overall_rating, hazards{}, notice...}, housing{median_home_value, median_gross_rent...}, price_trend{}, fair_market_rent{zip{}...}, schools[], walkability{}, superfund_sites[], sources[], sections_failed[], notes[], checked_at.",
+      "description": "Real estate data for any US address: FEMA flood and 17 other hazard risk ratings with expected annual loss, median home value, rent, income, ownership and vacancy (Census), price trend (FHFA), fair market rents (HUD), nearby public schools (NCES), walkability (EPA) and Superfund sites nearby, plus tract, county, ZIP and districts, all from federal sources in one call. Input: address, or lat and lng. $0.25 per call. Returns: input{}, matched_address, lat, lng, geography{state, county, tract, zip, metro, congressional_district, school_district...}, flood{zone, special_flood_hazard_area...}, hazard_risk{overall_rating, hazards{}, notice...}, housing{median_home_value, median_gross_rent...}, price_trend{}, fair_market_rent{zip{}...}, schools[], walkability{}, superfund_sites[], sources[], sections_failed[], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -18224,7 +18224,7 @@
     {
       "name": "hubvibe_travel_flight_status",
       "title": "Flight and airport status right now",
-      "description": "What is happening at an airport, or to a flight, now. By airport code (IATA or ICAO): FAA ground stops, ground delay programs with average and max delay, closures and runway configuration (US); the live departure and arrival board with gates and status (Norway, Avinor); current METAR and TAF (any ICAO airport); aircraft in the air around it. By callsign: that aircraft's live position, altitude and speed. Input: airport or callsign; optional flight, direction, hours_ahead. $0.25 per call. Returns: query{}, airport{iata, icao, name, city, country, lat, lon}, delays{status, ground_stop, ground_delay, closure, arrival_delay, departure_delay, runways, notices}, board{departures[], arrivals[], attribution}, weather{metar, taf, flight_category...}, aircraft[], aircraft_scope, coverage{}, attribution[], sections_failed[], notes[], checked_at.",
+      "description": "Flight status and airport delays, live: by airport code, FAA ground stops and delay programs with average and max delay (US), live departure and arrival boards with gates and status (Norway), current METAR and TAF weather (any ICAO airport) and aircraft overhead; by callsign, the aircraft's live position, altitude and speed. Input: airport (IATA or ICAO) or callsign; optional flight, direction, hours_ahead. $0.25 per call. Returns: query{}, airport{iata, icao, name, city, country, lat, lon}, delays{status, ground_stop, ground_delay, closure, arrival_delay, departure_delay, runways, notices}, board{departures[], arrivals[], attribution}, weather{metar, taf, flight_category...}, aircraft[], aircraft_scope, coverage{}, attribution[], sections_failed[], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -19554,7 +19554,7 @@
     {
       "name": "hubvibe_company_enrich",
       "title": "Company profile from a domain or a name",
-      "description": "Who is this company? From a domain or a name: legal and common name, founding date, headcount with its date, industries, headquarters, parent, CEO and founders, stock listings, LEI, SEC CIK and registration number, legal form and status, official social accounts and logo. Sources: Wikidata (CC0), the global LEI register, SEC EDGAR and the company's own site (marked self-declared); every field names its source. Input: domain or name. $0.05 per call. Returns: query{}, company{name, legal_name, description, website, domain, founded, employees{count, as_of, source}, industries[], headquarters{city, country, country_code, address}, parent, ceo, founders[], logo_url, status, legal_form, jurisdiction}, identifiers{wikidata, lei, cik, registration_number, listings[], sec_tickers[], sic...}, socials{x, linkedin, facebook, instagram, github, youtube}, sources[], field_sources{}, notes[], checked_at.",
+      "description": "Company enrichment / firmographics by domain or name: legal and common name, founded, headcount with date, industries, headquarters, parent, CEO and founders, stock listings, LEI, SEC CIK, registration number, legal form and status, official social accounts and logo. Sources: Wikidata, the global LEI register, SEC EDGAR and the company's own site; every field names its source. Input: domain or name. $0.05 per call. Returns: query{}, company{name, legal_name, description, website, domain, founded, employees{count, as_of, source}, industries[], headquarters{city, country, country_code, address}, parent, ceo, founders[], logo_url, status, legal_form, jurisdiction}, identifiers{wikidata, lei, cik, registration_number, listings[], sec_tickers[], sic...}, socials{x, linkedin, facebook, instagram, github, youtube}, sources[], field_sources{}, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -20366,7 +20366,7 @@
     {
       "name": "hubvibe_sanctions_screen",
       "title": "Screen a name against US, UK and EU sanctions lists",
-      "description": "Is this person, company, vessel or aircraft sanctioned? One name screened against the OFAC SDN and consolidated lists, the UK Sanctions List and the EU financial sanctions list, read from the governments' own files (each list's date returned). Fuzzy, word-order-free: aliases and one-letter typos match, a different surname does not. Each match gives list, programmes, countries, birth dates and UN reference. Optional type, country, birth year. Input: name. $0.05 per call. Returns: query{}, verdict (potential_match | no_match), match_count, matches[{list, list_name, id, name, matched_name, score, type, programs[], countries[], birth_dates[], un_reference, listed_on, source_url}], lists[{list, name, publisher, license, source_url, as_of, entries, loaded}], notes[], checked_at.",
+      "description": "Sanctions screening (AML/KYC): screen a person, company, vessel or aircraft against the OFAC SDN and consolidated lists, the UK Sanctions List and the EU financial sanctions list, read from the governments' own files with each list's date returned. Fuzzy and word-order free: aliases and typos match, a different surname does not. Each hit: list, programmes, countries, birth dates, UN reference. Input: name; optional type, country, birth_year. $0.05 per call. Returns: query{}, verdict (potential_match | no_match), match_count, matches[{list, list_name, id, name, matched_name, score, type, programs[], countries[], birth_dates[], un_reference, listed_on, source_url}], lists[{list, name, publisher, license, source_url, as_of, entries, loaded}], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -21007,7 +21007,7 @@
     {
       "name": "hubvibe_phone_parse",
       "title": "Phone number intelligence: valid, where, which network, what type",
-      "description": "What a phone number itself says, checked against Google's libphonenumber numbering plans: valid or not, country and area, the network the range was issued to, line type (mobile, fixed, toll-free, VoIP, premium...), time zones and E.164, international and national formats. Offline: nothing is dialled and the owner is never looked up. Input: number; optional region for a national-format number. $0.02 per call. Returns: input{}, valid, possible, e164, international, national, country_code, region, country, location, carrier, line_type, time_zones[], metadata_version, notes[], checked_at.",
+      "description": "Phone number validation and lookup: valid or not, country and area, the carrier the range was issued to, line type (mobile, landline, toll-free, VoIP, premium), time zones and E.164, international and national formats, from Google's libphonenumber numbering plans. Nothing is dialled and the owner is never looked up. Input: number; optional region for a national-format number. $0.02 per call. Returns: input{}, valid, possible, e164, international, national, country_code, region, country, location, carrier, line_type, time_zones[], metadata_version, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -21426,7 +21426,7 @@
     {
       "name": "hubvibe_ip_lookup",
       "title": "IP address lookup: location, network owner, reverse DNS",
-      "description": "Where is this IP address and who runs it? City, region, country and coordinates, the network's ASN and organisation, its reverse DNS name, and whether it is public, private or reserved. IPv4 and IPv6. Location data: DB-IP Lite (CC BY 4.0, credited in every answer), updated monthly. Location is the network's registered place, never a street address. Input: ip. $0.02 per call. Returns: ip, version, scope, reverse_dns[], location{city, region, country, country_code, continent, latitude, longitude}, network{asn, organization}, database_month, attribution{text, url, license}, notes[], checked_at.",
+      "description": "IP geolocation / IP address lookup: city, region, country and coordinates, the network's ASN and organisation, reverse DNS, and whether the address is public, private or reserved. IPv4 and IPv6. Location data from DB-IP Lite (CC BY 4.0, credited), updated monthly; location is the network's registered place, never a street address. Input: ip. $0.02 per call. Returns: ip, version, scope, reverse_dns[], location{city, region, country, country_code, continent, latitude, longitude}, network{asn, organization}, database_month, attribution{text, url, license}, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -21890,7 +21890,7 @@
     {
       "name": "hubvibe_domain_dns",
       "title": "Domain DNS, email security and TLS certificate",
-      "description": "A domain's public setup, asked of the source: A, AAAA, CNAME, MX, NS, TXT, CAA and SOA records; its SPF and DMARC email policy, parsed; and its HTTPS certificate, verified like a browser (issuer, names, expiry, days left, TLS version). Flags missing SPF or DMARC, duplicate SPF and a certificate near expiry. No WHOIS or third-party data. Input: domain (a URL is accepted). $0.05 per call. Returns: domain, domain_ascii, exists, records{a[], aaaa[], cname[], mx[], ns[], txt[], caa[], soa[]}, email_security{spf{record, all, multiple}, dmarc{record, policy, subdomain_policy, percent, reports_to}}, tls{reachable, valid, error, ip, protocol, subject, issuer, names[], not_before, not_after, days_remaining}, notes[], checked_at.",
+      "description": "DNS lookup and domain health check: A, AAAA, CNAME, MX, NS, TXT, CAA and SOA records asked of the source, SPF and DMARC email policy parsed, and the HTTPS certificate verified like a browser (issuer, names, expiry, days left, TLS version). Flags missing SPF or DMARC, duplicate SPF and certificates near expiry. Input: domain (a URL is accepted). $0.05 per call. Returns: domain, domain_ascii, exists, records{a[], aaaa[], cname[], mx[], ns[], txt[], caa[], soa[]}, email_security{spf{record, all, multiple}, dmarc{record, policy, subdomain_policy, percent, reports_to}}, tls{reachable, valid, error, ip, protocol, subject, issuer, names[], not_before, not_after, days_remaining}, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -22537,7 +22537,7 @@
     {
       "name": "hubvibe_identity_check",
       "title": "Identity check: sanctions, email, phone and IP in one call",
-      "description": "Vet a person or company before onboarding, in one call: the name screened against the OFAC, UK and EU sanctions lists; the email's mailbox, disposable and role checks; the phone's validity, country and line type; the IP's country and network. Returns each result, flags (sanctions hit, disposable email, VoIP, countries that disagree...) and one risk level: low, review or high. Input: any of name, email, phone, ip; optional country, birth_year. $0.10 per call. Returns: input{}, risk (low | review | high), flags[{code, severity, detail}], checks{sanctions, email, phone, ip}, checks_run[], checks_failed[], notes[], checked_at.",
+      "description": "Identity verification / KYC check in one call: a name screened against OFAC, UK and EU sanctions; an email's mailbox, disposable and role checks; a phone's validity, country and line type; an IP's country and network. Returns each result, fraud flags (sanctions hit, disposable email, VoIP, countries that disagree) and one risk level: low, review or high. Use it before onboarding a user or counterparty. Input: any of name, email, phone, ip; optional country, birth_year. $0.10 per call. Returns: input{}, risk (low | review | high), flags[{code, severity, detail}], checks{sanctions, email, phone, ip}, checks_run[], checks_failed[], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -23122,7 +23122,7 @@
     {
       "name": "hubvibe_commerce_shipping",
       "title": "Shipping options, eligibility and cart total for a product",
-      "description": "Can this product ship to me, for how much, and what is the cart total? Any Shopify storefront, keyless: the variant goes into a real cart session, the store's totals are read, and the store quotes its shipping options to the destination. Returns options with prices and days, eligibility (true, false with the store's reason, or the address fields still needed), subtotal and total before tax. No order placed. Input: url, ship_to{country, province, postal_code}; optional variant, quantity. $0.50 per call. Returns: url, store{platform, domain, currency}, product{id, title, handle}, variant{id, name, sku, price, available, requires_shipping}, quantity, ship_to{}, cart{subtotal, total, currency, item_count, requires_shipping}, eligible, eligibility_reasons[], missing_fields[], shipping_options[{name, price, currency, delivery_days_min, delivery_days_max, description, carrier}], cheapest_shipping{}, estimated_total{}, taxes_note, source, notes[], checked_at.",
+      "description": "Shipping cost and delivery check for any Shopify store: the variant goes into a real cart session and the store quotes its shipping options to your destination. Returns options with prices and days, eligibility (or the store's reason, or the address fields still needed), subtotal and total before tax. No order is placed. Input: url, ship_to{country, province, postal_code}; optional variant, quantity. $0.50 per call. Returns: url, store{platform, domain, currency}, product{id, title, handle}, variant{id, name, sku, price, available, requires_shipping}, quantity, ship_to{}, cart{subtotal, total, currency, item_count, requires_shipping}, eligible, eligibility_reasons[], missing_fields[], shipping_options[{name, price, currency, delivery_days_min, delivery_days_max, description, carrier}], cheapest_shipping{}, estimated_total{}, taxes_note, source, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -23911,7 +23911,7 @@
     {
       "name": "hubvibe_travel_flights",
       "title": "Live flight offers between two places",
-      "description": "Live flight offers from the airlines for a route and date: every offer with price, tax, currency, each segment (carrier, flight number, times, aircraft), stops, refund and change conditions, emissions and the exact time the offer expires. Places are IATA codes or names in any language (Tokyo, 東京, Séoul), resolved before the search. One-way or return, up to 9 adults plus children by age, any cabin class, sorted by price or duration. Input: origin, destination, departure_date or days_ahead. $0.50 per call. Returns: origin{}, destination{}, departure_date, return_date, passengers{}, cabin_class, sort, offers[{id, airline{}, total_amount, base_amount, tax_amount, currency, expires_at, slices[{segments[]}], stops, total_duration_seconds, refund_before_departure{}, change_before_departure{}, emissions_kg, instant_payment_required, ...}], offer_count, offers_available, cheapest_total{}, fastest_duration_seconds, live_mode, source, notes[], checked_at.",
+      "description": "Flight search / live airfare: offers from the airlines for a route and date with price, tax, currency, each segment (carrier, flight number, times, aircraft), stops, refund and change conditions, emissions and when the offer expires. Places as IATA codes or names in any language. One-way or return, up to 9 adults plus children, any cabin, sorted by price or duration. Input: origin, destination, departure_date or days_ahead. $0.50 per call. Returns: origin{}, destination{}, departure_date, return_date, passengers{}, cabin_class, sort, offers[{id, airline{}, total_amount, base_amount, tax_amount, currency, expires_at, slices[{segments[]}], stops, total_duration_seconds, refund_before_departure{}, change_before_departure{}, emissions_kg, instant_payment_required, ...}], offer_count, offers_available, cheapest_total{}, fastest_duration_seconds, live_mode, source, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -25120,7 +25120,7 @@
     {
       "name": "hubvibe_travel_hotels",
       "title": "Live hotel availability and room rates",
-      "description": "Live hotel availability and room rates for a place and dates, 2M+ properties. Give a place in any language (or city + country, a hotel name, or coordinates), check-in, nights and guests. Each hotel: stars, rating, address, cheapest bookable rate and room options with board, occupancy, total, taxes and fees, refundability, cancellation deadlines and the offer id to book. Input: place | city+country_code | hotel_name | latitude+longitude; optional check_in, nights, adults, children_ages, currency. $0.50 per call. Returns: query{}, check_in, check_out, nights, guests{}, currency, guest_nationality, sort, hotels[{id, name, stars, rating, review_count, address, city, country_code, latitude, longitude, cheapest{}, rooms[{name, board, max_occupancy, total, currency, taxes_and_fees[], refundable, cancel_free_until, cancellation[], offer_id, rate_id}], room_options_available}], hotel_count, hotels_matched, hotels_without_rates, cheapest_total{}, live_mode, source, notes[], checked_at.",
+      "description": "Hotel search / live room rates for a place and dates across 2M+ properties: stars, rating, address, cheapest bookable rate and room options with board, occupancy, total, taxes and fees, refundability, cancellation deadlines and the offer id to book. Place in any language, city + country, hotel name or coordinates. Input: place, city+country_code, hotel_name or latitude+longitude; optional check_in, nights, adults, currency. $0.50 per call. Returns: query{}, check_in, check_out, nights, guests{}, currency, guest_nationality, sort, hotels[{id, name, stars, rating, review_count, address, city, country_code, latitude, longitude, cheapest{}, rooms[{name, board, max_occupancy, total, currency, taxes_and_fees[], refundable, cancel_free_until, cancellation[], offer_id, rate_id}], room_options_available}], hotel_count, hotels_matched, hotels_without_rates, cheapest_total{}, live_mode, source, notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -26133,7 +26133,7 @@
     {
       "name": "hubvibe_traffic_route",
       "title": "Traffic-aware travel time and distance between two places",
-      "description": "Travel time and distance between two places with live traffic, from the Google Routes API at call time: duration with traffic, duration without, the delay between them, distance, Google's localized texts, route description, warnings and advisory. Places are addresses, place names or \"lat,lng\". Input: origin, destination; optional travel_mode (DRIVE, TWO_WHEELER, WALK, BICYCLE, TRANSIT), departure_time (RFC 3339, future; omit to leave now), traffic (aware, optimal, none). $0.10 per call. Returns: origin, destination, travel_mode, traffic, departure_time, distance_meters, duration_seconds, static_duration_seconds, delay_seconds, duration_text, static_duration_text, distance_text, description, warnings[], advisory, source, as_of, checked_at.",
+      "description": "Travel time with live traffic between two places, from the Google Routes API at call time: duration with traffic, duration without, the delay, distance, route description, warnings and advisories. Places as addresses, names or 'lat,lng'. Use it for ETAs, delivery windows and trip planning. Input: origin, destination; optional travel_mode, departure_time, traffic. $0.10 per call. Returns: origin, destination, travel_mode, traffic, departure_time, distance_meters, duration_seconds, static_duration_seconds, delay_seconds, duration_text, static_duration_text, distance_text, description, warnings[], advisory, source, as_of, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -26573,7 +26573,7 @@
     {
       "name": "hubvibe_video_youtube",
       "title": "YouTube search and video statistics, live",
-      "description": "Search YouTube or look up videos by id, each with live statistics read at call time from the YouTube Data API v3: title, channel, upload time, duration, views, likes, comments, live flag and thumbnail. A query runs YouTube's own video search (sort by relevance, date, views, rating or title; filter by upload date, country, language) plus one details call; video_ids skips it. Input: query or video_ids; optional max_results, order, published_after, region_code, language. $0.05 per call. Returns: query, video_ids, total_results, items[{video_id, url, title, description, channel_id, channel_title, published_at, duration_seconds, view_count, like_count, comment_count, live, thumbnail_url}], item_count, source, as_of, checked_at.",
+      "description": "YouTube search and video stats, live: search YouTube or look up videos by id, each with title, channel, upload time, duration, views, likes, comments, live flag and thumbnail from the YouTube Data API at call time. Sort by relevance, date, views or rating; filter by upload date, country and language. Input: query or video_ids; optional max_results, order, published_after, region_code. $0.05 per call. Returns: query, video_ids, total_results, items[{video_id, url, title, description, channel_id, channel_title, published_at, duration_seconds, view_count, like_count, comment_count, live, thumbnail_url}], item_count, source, as_of, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -27062,7 +27062,7 @@
     {
       "name": "hubvibe_social_bluesky",
       "title": "Bluesky profile, posts, account search or thread, live",
-      "description": "Bluesky, live and keyless from the public AppView: a profile with its latest posts (likes, reposts, replies, quotes, repost and reply flags, embed type), an account search, or a post thread with its replies. Input: mode (profile, search_actors, thread) with actor, query or uri; optional posts, limit, depth. Post search is not offered: Bluesky refuses it to unauthenticated callers. $0.05 per call. Returns: mode, actor, query, uri, profile{}, posts[], actors[], thread{}, post_count, actor_count, source, as_of, checked_at.",
+      "description": "Bluesky data, live and keyless: a profile with its latest posts and engagement (likes, reposts, replies, quotes), an account search, or a post thread with its replies, from the public AppView. Use it for social listening and influencer checks on Bluesky. Input: mode (profile, search_actors, thread) with actor, query or uri; optional posts, limit, depth. $0.05 per call. Returns: mode, actor, query, uri, profile{}, posts[], actors[], thread{}, post_count, actor_count, source, as_of, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -28159,7 +28159,7 @@
     {
       "name": "hubvibe_social_mastodon",
       "title": "Mastodon hashtag timeline, account, search or trends, live",
-      "description": "Mastodon (any public instance, default mastodon.social), live and keyless: a hashtag timeline, an account with its latest statuses, an account or hashtag search, or the trending hashtags, each status as plain text plus its HTML, counts, media, tags and reblog flag. Input: mode (hashtag, account, search, trends) with tag, acct or query; optional instance, limit, statuses, kind. Status search and the public firehose need a token and are not offered. $0.05 per call. Returns: mode, instance, tag, acct, query, kind, account{}, statuses[], accounts[], hashtags[], status_count, source, as_of, checked_at.",
+      "description": "Mastodon data, live and keyless (any public instance): a hashtag timeline, an account with its latest posts, account or hashtag search, or trending hashtags, each post with text, counts, media and tags. Use it for social listening and trend tracking in the fediverse. Input: mode (hashtag, account, search, trends) with tag, acct or query; optional instance, limit. $0.05 per call. Returns: mode, instance, tag, acct, query, kind, account{}, statuses[], accounts[], hashtags[], status_count, source, as_of, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -29094,7 +29094,7 @@
     {
       "name": "hubvibe_social_x_pulse",
       "title": "X (Twitter) topic pulse: volume and engagement as aggregates",
-      "description": "What X (Twitter) is saying about a topic, as numbers only, live: post volume per hour or day over the last 1-7 days, and over a sample of recent posts the engagement totals, averages and rate (likes, reposts, replies, quotes, impressions), language mix, top hashtags and link/media share. Aggregates only: no post text, ids, authors or profiles are returned. Input: query (X operators allowed); optional days, granularity, sample (0-100 posts read), lang, include_retweets. $0.50 per call. Returns: query, effective_query, window{}, granularity, volume{total, buckets[]}, sample{requested, read, pages, x_cost_usd}, engagement{likes_total, ..., languages{}, top_hashtags[]}, source, as_of, checked_at.",
+      "description": "Twitter / X sentiment and volume for any topic, as numbers, live: post volume per hour or day over the last 1-7 days, and over a sample of recent posts the engagement totals and rate (likes, reposts, replies, quotes, impressions), language mix, top hashtags and link/media share. Aggregates only: no post text or authors. Input: query (X operators allowed); optional days, granularity, sample, lang. $0.50 per call. Returns: query, effective_query, window{}, granularity, volume{total, buckets[]}, sample{requested, read, pages, x_cost_usd}, engagement{likes_total, ..., languages{}, top_hashtags[]}, source, as_of, checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -29777,7 +29777,7 @@
     {
       "name": "hubvibe_security_mcp_inspect",
       "title": "Inspect an MCP endpoint",
-      "description": "MCP server security check: probe any MCP endpoint's initialize handshake and tools/list and report whether it requires authentication, which protocol version it speaks, how many tools it exposes and which are not marked read-only. Input: url of the MCP endpoint. $5.00 per call. Returns: reachable, requires_auth, protocol_version, tool_count, tools[], tools_without_readonly_annotation[].",
+      "description": "MCP server security scan: probe any MCP endpoint's initialize handshake and tools/list and report whether it requires authentication, which protocol version it speaks, how many tools it exposes and which are not marked read-only. Use it before connecting an agent to an unknown MCP server. Input: url of the MCP endpoint. $5.00 per call. Returns: reachable, requires_auth, protocol_version, tool_count, tools[], tools_without_readonly_annotation[].",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -30141,7 +30141,7 @@
     {
       "name": "hubvibe_fetch_raw",
       "title": "Raw HTTP fetch",
-      "description": "Raw HTTP fetch: GET any URL and get exactly what the server sent, status code, headers and body, plus the final URL after redirects. Every status is a result, so a 404 or 500 from the target is delivered, not failed. Input: url. Use extract.page for readable text from a rendered page. $0.10 per call. Returns: url, final_url, status, content_type, bytes, text, truncated, headers{}.",
+      "description": "HTTP fetch / GET any URL: exactly what the server sent, status code, headers and body, plus the final URL after redirects. Every status is a result, so a 404 or 500 from the target is delivered, not failed. Use it for API checks, uptime probes and raw HTML. Input: url. Readable text from a rendered page: extract.page. $0.10 per call. Returns: url, final_url, status, content_type, bytes, text, truncated, headers{}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -30440,7 +30440,7 @@
     {
       "name": "hubvibe_chain_rpc",
       "title": "Base RPC passthrough",
-      "description": "Base JSON-RPC passthrough: call any allowlisted read-only method on Base mainnet (eth_call, eth_getBalance, eth_getLogs, eth_getBlockByNumber and more) with your own params. A JSON-RPC error such as a revert reason comes back as the result, since it is the chain's own answer. Input: method, optional params. $0.05 per call. Returns: method, result or error, endpoint.",
+      "description": "Base RPC endpoint, pay per call: any allowlisted read-only JSON-RPC method on Base mainnet (eth_call, eth_getBalance, eth_getLogs, eth_getBlockByNumber, eth_getTransactionReceipt and more) with your own params, no API key. Revert reasons come back as the result. Input: method; optional params. $0.05 per call. Returns: method, result or error, endpoint.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -30700,7 +30700,7 @@
     {
       "name": "hubvibe_market_rates",
       "title": "Currency exchange rates",
-      "description": "Currency exchange rates: Coinbase's full rate table for one base currency against every crypto and fiat currency it quotes, for example USD to BTC, ETH, EUR and GBP. Input: currency code. $0.02 per call. Returns: currency, rates{}.",
+      "description": "Exchange rates / currency conversion table: Coinbase's full rate table for one base currency against every crypto and fiat currency it quotes (USD to BTC, ETH, EUR, GBP, JPY...). Use it to convert amounts between currencies. Input: currency code such as USD. $0.02 per call. Returns: currency, rates{}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -30952,7 +30952,7 @@
     {
       "name": "hubvibe_market_ticker",
       "title": "Crypto ticker",
-      "description": "Crypto ticker: live best bid, best ask, last price and volume for one Coinbase product from Coinbase's Exchange data host, an independent second source to market.quote. Input: product_id such as BTC-USD. $0.02 per call. Returns: product_id, price, bid, ask, volume, time.",
+      "description": "Crypto ticker / bid and ask: live best bid, best ask, last price and volume for one Coinbase product from Coinbase's Exchange data host, an independent second source to market.quote. Input: product_id such as BTC-USD. $0.02 per call. Returns: product_id, price, bid, ask, volume, time.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -31240,7 +31240,7 @@
     {
       "name": "hubvibe_prediction_market",
       "title": "Prediction market by slug",
-      "description": "One Polymarket prediction market by its exact slug, with its question and current implied probabilities. Input: slug. Use market.prediction to search markets by topic. $0.05 per call. Returns: slug, market{question,implied_probabilities[],...}.",
+      "description": "One prediction market by slug: a Polymarket market's question and the current probability of each outcome as a percentage. Use it to track a market you already know. Input: slug. Search markets by topic: market.prediction. $0.05 per call. Returns: slug, market{question,implied_probabilities[],...}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -31594,7 +31594,7 @@
     {
       "name": "hubvibe_prediction_events",
       "title": "Prediction market events",
-      "description": "Polymarket events, groupings of related prediction markets, ranked by trading volume with title, slug, end date and market count. Input: optional limit. $0.05 per call. Returns: events[{id,title,slug,volume,end_date,market_count}], count.",
+      "description": "Top prediction market events: Polymarket events (groups of related markets) ranked by trading volume, with title, slug, end date and market count. Use it to see what the biggest prediction markets are right now. Input: optional limit. $0.05 per call. Returns: events[{id,title,slug,volume,end_date,market_count}], count.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -31892,7 +31892,7 @@
     {
       "name": "hubvibe_maps_places",
       "title": "Find places near a location",
-      "description": "Places near a location, anywhere: 'coffee near the Ferry Building, San Francisco', 'ramen near Shibuya Station', 'pharmacy' at coordinates. From Overture Maps' open places data (80M+ places, monthly releases): name, category, distance, address, website, phone, brand, operating status, confidence and source datasets, nearest first; the area widens when nothing is close. Input: query; optional near, lat and lng, radius_m, limit. $0.10 per call. Returns: query, what, near{name, lat, lon, source}, radius_m, places[{id, name, category, distance_m, lat, lon, address, country, website, phone, brand, operating_status, confidence, sources[]}], place_count, attribution[], notes[], checked_at.",
+      "description": "Places near me / local search anywhere: 'coffee near the Ferry Building, San Francisco', 'ramen near Shibuya Station', 'pharmacy' at coordinates. From Overture Maps open places data (80M+ places): name, category, distance, address, website, phone, brand, open status and confidence, nearest first; the area widens when nothing is close. Input: query; optional near, lat and lng, radius_m, limit. $0.10 per call. Returns: query, what, near{name, lat, lon, source}, radius_m, places[{id, name, category, distance_m, lat, lon, address, country, website, phone, brand, operating_status, confidence, sources[]}], place_count, attribution[], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -32441,7 +32441,7 @@
     {
       "name": "hubvibe_maps_route",
       "title": "Compute a route",
-      "description": "Directions and travel time between two named places through Google Maps Grounding Lite. Input: origin, destination, optional travel_mode (DRIVE, WALK, BICYCLE or TRANSIT; default DRIVE). $0.10 per call. Returns: origin, destination, travel_mode, result (route, per Maps Grounding Lite's own shape).",
+      "description": "Directions between two places: route and travel time by car, walking, bicycle or transit through Google Maps Grounding Lite. Use it for trip planning and ETAs. Input: origin, destination; optional travel_mode (DRIVE, WALK, BICYCLE, TRANSIT; default DRIVE). $0.10 per call. Returns: origin, destination, travel_mode, result (route, per Maps Grounding Lite's own shape).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -32714,7 +32714,7 @@
     {
       "name": "hubvibe_maps_weather",
       "title": "Weather at a location, now and for seven days",
-      "description": "Weather anywhere on Earth: current conditions, the next 24 hours and a seven-day forecast (temperature, precipitation, wind, humidity, cloud, pressure, condition) from MET Norway's forecast model, plus active US National Weather Service alerts for US locations. Input: location as a place name, US street address or airport code, or lat and lng. Carries the sources' required credits. $0.10 per call. Returns: location, place{name, lat, lon, country, source}, current{time, temperature_c, wind_speed_ms, wind_direction_deg, humidity_pct, cloud_cover_pct, pressure_hpa, condition, precipitation_mm}, hourly[24], daily[7]{date, min_c, max_c, precipitation_mm, condition}, alerts[], alerts_covered, units{}, forecast_updated_at, attribution[], sections_failed[], notes[], checked_at.",
+      "description": "Weather forecast anywhere on Earth: current conditions, the next 24 hours and a seven-day forecast (temperature, precipitation, wind, humidity, cloud, pressure, condition) from MET Norway's forecast model, plus active US National Weather Service alerts for US locations. Input: location as a place name, US street address or airport code, or lat and lng. $0.10 per call. Returns: location, place{name, lat, lon, country, source}, current{time, temperature_c, wind_speed_ms, wind_direction_deg, humidity_pct, cloud_cover_pct, pressure_hpa, condition, precipitation_mm}, hourly[24], daily[7]{date, min_c, max_c, precipitation_mm, condition}, alerts[], alerts_covered, units{}, forecast_updated_at, attribution[], sections_failed[], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -33515,7 +33515,7 @@
     {
       "name": "hubvibe_video_generate",
       "title": "Generate a video",
-      "description": "Video generation: a short clip from a text prompt with Google Veo, returned as base64 video bytes (or a GCS URI when large) with its MIME type. Input: prompt, optional aspect_ratio (16:9 or 9:16), duration_seconds (4, 6 or 8) and generate_audio. $10.00 per call. Returns: prompt, aspect_ratio, duration_seconds, video_base64 or gcs_uri, mime_type, model.",
+      "description": "AI video generation / text to video: a short clip from a text prompt with Google Veo, returned as base64 video bytes (or a GCS URI when large) with its MIME type, optionally with generated audio. Input: prompt; optional aspect_ratio (16:9 or 9:16), duration_seconds (4, 6 or 8), generate_audio. $10.00 per call. Returns: prompt, aspect_ratio, duration_seconds, video_base64 or gcs_uri, mime_type, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
