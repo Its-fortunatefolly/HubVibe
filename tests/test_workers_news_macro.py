@@ -77,7 +77,11 @@ def _bigquery_available(monkeypatch):
 def _clock_at_capture(monkeypatch):
     """The GDELT rows were read on 2026-09-28; the skill keeps only the last
     72 hours, so the tests read them at that moment, not today."""
-    monkeypatch.setattr(N, "_now_dt", lambda: datetime(2026, 9, 28, 18, 0, tzinfo=timezone.utc))
+    _pin_clock(monkeypatch, N)
+
+
+def _pin_clock(monkeypatch, news_module):
+    monkeypatch.setattr(news_module, "_now_dt", lambda: datetime(2026, 9, 28, 18, 0, tzinfo=timezone.utc))
 
 
 class _Ctx:
@@ -293,6 +297,11 @@ def client(app_module):
 
 
 def _serve_from_fixtures(monkeypatch):
+    # app_module may have rebound W to the workers package main.py loaded:
+    # a different module object from N whenever an earlier test file cleared
+    # the cached wcag_audit_engine_* modules (test_keystore_sqlite does), and
+    # then the autouse clock pin above does not reach it. Pin this one too.
+    _pin_clock(monkeypatch, W.skills.news)
     gdelt = _gdelt()
     wb = _wb_value()
 
