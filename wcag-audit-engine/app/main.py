@@ -101,7 +101,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.31.0"
+SERVICE_VERSION = "1.31.1"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -159,10 +159,15 @@ async def _lifespan(_app: "FastAPI"):
 # more routes, because each surface carried its own audit-era title.
 SERVICE_TITLE = "HubVibe: Pay-per-Call Tools for AI Agents: Web Search, Email Verify, KYC, Stocks, Crypto, News, Data"
 
+# openapi.json's info.contact. Discovery registries read it to reach the
+# operator, and MPPScan verifies who owns an origin through it.
+CONTACT_EMAIL = os.environ.get("HUBVIBE_CONTACT_EMAIL", "Hubvibe@hubvibe-io.com")
+
 app = FastAPI(
     lifespan=_lifespan,
     title=SERVICE_TITLE,
     version=SERVICE_VERSION,
+    contact={"name": "HubVibe", "url": PUBLIC_BASE_URL, "email": CONTACT_EMAIL},
     description=(
         "63 pay-per-call tools for AI agents under /work -- web search and "
         "cited research, email verification, company enrichment, identity "
@@ -2124,6 +2129,309 @@ _CATALOG_ALIASES = {"/audit": "/audit/wcag"}
 _openapi_default = app.openapi
 
 
+def _payment_protocols(offers: list) -> list:
+    """`x-payment-info.protocols` as @agentcash/discovery reads them.
+
+    x402 as {"x402": {}}, each MPP method as {"mpp": {method, intent,
+    currency}} -- the canonical shapes its validator checks for. Built from
+    the offers, so the protocols can never name a rail the offers left out.
+    x402 first, the order this list has always had.
+    """
+    protocols = []
+    for offer in offers:
+        if offer["method"] == "x402":
+            protocols.insert(0, {"x402": {}})
+        else:
+            protocols.append({"mpp": {"method": offer["method"],
+                                      "intent": offer["intent"],
+                                      "currency": offer["currency"]}})
+    return protocols
+
+
+def _component_refs(node, kind: str):
+    """Names of every #/components/<kind>/<name> a node points at, including
+    a discriminator's mapping values."""
+    prefix = f"#/components/{kind}/"
+    stack = [node]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            ref = item.get("$ref")
+            if isinstance(ref, str) and ref.startswith(prefix):
+                yield ref[len(prefix):].split("/", 1)[0]
+            mapping = (item.get("discriminator") or {}).get("mapping") if isinstance(item.get("discriminator"), dict) else None
+            for target in (mapping or {}).values():
+                if isinstance(target, str) and target.startswith(prefix):
+                    yield target[len(prefix):].split("/", 1)[0]
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+
+
+def _drop_unreferenced_components(doc: dict) -> None:
+    """Remove the schemas and tags that only the unlisted routes used.
+
+    Walks $refs from the listed paths and from every non-schema component,
+    transitively, so a schema reached only through another schema
+    (HTTPValidationError -> ValidationError) stays.
+    """
+    components = doc.get("components", {})
+    schemas = components.get("schemas", {})
+    if schemas:
+        roots = [doc.get("paths", {})] + [v for k, v in components.items() if k != "schemas"]
+        keep: set = set()
+        pending = [name for root in roots for name in _component_refs(root, "schemas")]
+        while pending:
+            name = pending.pop()
+            if name in schemas and name not in keep:
+                keep.add(name)
+                pending.extend(_component_refs(schemas[name], "schemas"))
+        components["schemas"] = {k: v for k, v in schemas.items() if k in keep}
+    used_tags = {
+        tag
+        for item in doc.get("paths", {}).values()
+        for operation in item.values()
+        for tag in operation.get("tags", [])
+    }
+    tags = [t for t in doc.get("tags", []) if t.get("name") in used_tags]
+    if tags:
+        doc["tags"] = tags
+    else:
+        doc.pop("tags", None)
+
+
+# Schema keywords whose values are themselves schemas. Everything else in a
+# schema (example, default, enum, const, description) is data, and a $ref
+# put there would be read as the literal value.
+_SUBSCHEMA_MAPS = ("properties", "patternProperties", "$defs", "dependentSchemas")
+_SUBSCHEMA_ONE = ("items", "additionalProperties", "not", "contains", "if", "then",
+                  "else", "propertyNames", "unevaluatedItems", "unevaluatedProperties")
+_SUBSCHEMA_LISTS = ("anyOf", "oneOf", "allOf", "prefixItems")
+
+# A schema block this size or larger that appears twice is defined once;
+# below it the pointer saves too little to be worth the indirection. A
+# repeated response object or header is always shared once it is bigger
+# than the pointer that replaces it.
+_SHARED_SCHEMA_MIN_BYTES = 200
+_SHARED_OBJECT_MIN_BYTES = 80
+
+
+def _subschema_slots(schema: dict, hint: str):
+    """(container, key, subschema, name hint) for each DIRECT subschema.
+
+    Direct children only: the caller recurses. Yielding grandchildren here
+    as well visited every node once per ancestor, which both multiplied the
+    work and made a block that occurs once look repeated.
+    """
+    for keyword in _SUBSCHEMA_MAPS:
+        children = schema.get(keyword)
+        if isinstance(children, dict):
+            for name, sub in children.items():
+                if isinstance(sub, dict):
+                    yield children, name, sub, name
+    for keyword in _SUBSCHEMA_ONE:
+        sub = schema.get(keyword)
+        if isinstance(sub, dict):
+            yield schema, keyword, sub, f"{hint}_item" if keyword == "items" else hint
+    for keyword in _SUBSCHEMA_LISTS:
+        children = schema.get(keyword)
+        if isinstance(children, list):
+            for index, sub in enumerate(children):
+                if isinstance(sub, dict):
+                    yield children, index, sub, hint
+
+
+def _canonical(node) -> str:
+    import json
+
+    return json.dumps(node, sort_keys=True, separators=(",", ":"))
+
+
+def _component_name(hint: str, body: str, taken) -> str:
+    import hashlib
+    import re
+
+    base = "".join(part[:1].upper() + part[1:] for part in re.split(r"[^A-Za-z0-9]+", hint) if part)
+    base = base or "Shared"
+    if base not in taken:
+        return base
+    return f"{base}_{hashlib.sha256(body.encode()).hexdigest()[:8]}"
+
+
+def _share_objects(containers: list, kind: str, components: dict, hint_of) -> None:
+    """Share identical response objects or parameters across operations.
+
+    containers: (mapping or list, key) slots whose values are candidates.
+    """
+    groups: dict = {}
+    for container, key in containers:
+        value = container[key]
+        if isinstance(value, dict) and "$ref" not in value:
+            body = _canonical(value)
+            if len(body) >= _SHARED_OBJECT_MIN_BYTES:
+                groups.setdefault(body, []).append((container, key))
+    shared = components.get(kind, {})
+    for body in sorted(groups, key=lambda b: (-len(b), b)):
+        slots = groups[body]
+        if len(slots) < 2:
+            continue
+        first_container, first_key = slots[0]
+        name = _component_name(hint_of(first_key, first_container[first_key]), body, shared)
+        shared[name] = first_container[first_key]
+        for container, key in slots:
+            container[key] = {"$ref": f"#/components/{kind}/{name}"}
+    if shared:
+        components[kind] = shared
+
+
+def _share_repeated_blocks(doc: dict) -> None:
+    """Define every repeated block once and point to it.
+
+    The paid routes share their envelope: the same provenance and
+    attribution response schemas, the same optional `language` input, the
+    same credential headers and error responses. Inlined, those copies were
+    about a quarter of the document. Each now lives once under components
+    and every route points at it. MPPScan/x402scan's parser resolves an
+    operation's local refs before reading it (resolveRefs in
+    @agentcash/discovery), and mppx dereferences #/components/... itself,
+    so what they read is the same as before.
+
+    Schemas go largest first, so a repeated envelope is shared whole rather
+    than piece by piece. The first copy is moved into components and stays
+    live, so its own inner blocks can still be shared; the other copies are
+    gone. A block identical to a schema already under components (FastAPI's
+    AuditRequest and friends) points at that one.
+    """
+    paths = doc.get("paths", {})
+    components = doc.setdefault("components", {})
+    shared = components.setdefault("schemas", {})
+    operations = [paths[p][m] for p in sorted(paths) for m in sorted(paths[p])]
+
+    slots: list = []  # (container, key, schema, hint, parent slot, candidate)
+
+    def visit(container, key, schema, hint, parent, candidate=True):
+        index = len(slots)
+        slots.append((container, key, schema, hint, parent, candidate))
+        for child in _subschema_slots(schema, hint):
+            visit(child[0], child[1], child[2], child[3], index)
+
+    for operation in operations:
+        for media in operation.get("requestBody", {}).get("content", {}).values():
+            if isinstance(media.get("schema"), dict):
+                visit(media, "schema", media["schema"], "request", None)
+        for status, response in sorted(operation.get("responses", {}).items()):
+            for media in (response.get("content") or {}).values():
+                if isinstance(media.get("schema"), dict):
+                    visit(media, "schema", media["schema"], f"response_{status}", None)
+    existing = {}
+    for name in sorted(shared):
+        existing.setdefault(_canonical(shared[name]), name)
+        visit(shared, name, shared[name], name, None, candidate=False)
+
+    groups: dict = {}
+    for index, (_, _, schema, _, _, candidate) in enumerate(slots):
+        if not candidate or set(schema) == {"$ref"}:
+            continue
+        body = _canonical(schema)
+        if len(body) >= _SHARED_SCHEMA_MIN_BYTES:
+            groups.setdefault(body, []).append(index)
+
+    replaced: set = set()
+
+    def live(index):
+        while index is not None:
+            if index in replaced:
+                return False
+            index = slots[index][4]
+        return True
+
+    for body in sorted(groups, key=lambda b: (-len(b), b)):
+        copies = [i for i in groups[body] if live(i)]
+        if body in existing:
+            name = existing[body]
+        elif len(copies) >= 2:
+            hints = [slots[i][3] for i in copies]
+            name = _component_name(max(set(hints), key=lambda h: (hints.count(h), h)), body, shared)
+            shared[name] = slots[copies[0]][2]
+            replaced.update(copies[1:])
+        else:
+            continue
+        for i in copies:
+            container, key = slots[i][0], slots[i][1]
+            container[key] = {"$ref": f"#/components/schemas/{name}"}
+        if body in existing:
+            replaced.update(copies)
+
+    _share_objects(
+        [(op["responses"], status) for op in operations for status in sorted(op.get("responses", {}))],
+        "responses", components,
+        lambda status, response: f"{response.get('description', '')} {status}",
+    )
+    _share_objects(
+        [(op["parameters"], i) for op in operations for i in range(len(op.get("parameters", [])))],
+        "parameters", components,
+        lambda _, param: str(param.get("name", "")),
+    )
+    if not shared:
+        components.pop("schemas", None)
+    if not components:
+        doc.pop("components", None)
+
+
+# How each rail is paid, for the guidance below. A method missing here is
+# still named, just without the detail.
+_RAIL_GUIDANCE = {
+    "x402": ("x402 (USDC; sign an EIP-3009 authorization for the amount to the 402's payTo "
+             "and send it as PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1))"),
+    "tempo": "MPP tempo (USDC on Tempo; send Authorization: Payment)",
+    "evm": "MPP evm (USDC on Base; send Authorization: Payment)",
+    "stripe": "MPP stripe (card; send Authorization: Payment)",
+}
+
+
+def _agent_guidance(entries: list, methods: list) -> str:
+    """info.x-guidance: how an agent buys from this node, in one read.
+
+    MPPScan and x402scan hand this text to agents with the listing, whole
+    when it is under ~1,000 tokens, so it stays short and names only the
+    rails this deployment offers right now.
+    """
+    prices = [e["price_usd"] for e in entries]
+    # x402 first, as in every operation's protocols list.
+    rails = "; ".join(_RAIL_GUIDANCE.get(m, m) for m in sorted(methods, key=lambda m: m != "x402"))
+    text = (
+        f"HubVibe sells {len(entries)} tools to AI agents, one POST route each, "
+        f"priced per call in USD (${min(prices):.2f} to ${max(prices):.2f}; each "
+        "operation's x-payment-info.price). No account and no subscription.\n"
+        "To buy: POST the JSON body the operation's requestBody schema describes "
+        "(every operation carries an example). Unpaid, the route answers HTTP 402 "
+        "with the price and a payment challenge for each rail its "
+        f"x-payment-info.protocols lists. Rails: {rails}. Pay with any one and "
+        "resend the same request with the credential. A /work 200 also carries "
+        "a receipt id (GET /work/receipts/{receipt_id}).\n"
+        "Not billed: a 429 (the rate limit is checked before payment), a call that "
+        "produced no result (an MPP tempo or evm credential from one can be "
+        "presented again while its challenge is valid), or a /work result that "
+        "fails its published 200 schema (HTTP 502, contract_mismatch).\n"
+        "Before paying, GET /contracts/{capability} returns the exact terms under "
+        "a contract_hash (GET /contracts lists all); send it as "
+        "X-HubVibe-Contract and the node refuses payment if the terms changed.\n"
+    )
+    if solana_hash_verifier.configured():
+        text += (
+            "Prepaid: a USDC transfer on Solana buys an X-API-Key "
+            "(POST /pay/solana/challenge, then /pay/solana/redeem).\n"
+        )
+    text += (
+        "The same tools are MCP tools at /mcp"
+        + (" (x402 over MCP)" if "x402" in methods else "")
+        + " and A2A skills at /a2a. Request examples: each operation here, "
+        "/.well-known/agent.json and /contracts/{capability}. Catalog: GET /work "
+        "and /llms.txt."
+    )
+    return text
+
+
 def _openapi_with_payment_info() -> dict:
     """The OpenAPI document, annotated the way MPP tooling reads it.
 
@@ -2135,86 +2443,134 @@ def _openapi_with_payment_info() -> dict:
     and skipped every challenge and payment check. A tollbooth whose own
     directory says "no tolls here".
 
-    Annotated per request rather than cached: the offers are gated on which
-    rails can settle (and at what amount), and a cached copy would freeze a
-    rail decision past a config change. The base document IS cached by
-    FastAPI; only the annotation is recomputed, on a copy, so repeated calls
-    cannot accumulate onto the cached base.
+    The offers are gated on which rails can settle (and at what amount), so
+    they are worked out on every call. Everything the document is built
+    from -- each route's catalog row, its live offers, the Solana top-up
+    switch -- forms the cache key; the same inputs return the document built
+    last time, and any change rebuilds it. Building it (de-duplication
+    included) is what took the time; working out the offers is cheap. The
+    base document IS cached by FastAPI and is copied before annotation, so
+    repeated builds cannot accumulate onto it. Callers only read the result
+    (FastAPI copies it before adding a server; /.well-known/x402 reads it).
 
     Paths are relative in `x-service-info.docs` so a self-hosted copy cannot
     hand its clients the production endpoints -- same rule as /mcp.json.
-    """
-    import copy
 
-    doc = copy.deepcopy(_openapi_default())
-    reverse_aliases: dict = {}
-    for alias, target in _CATALOG_ALIASES.items():
-        reverse_aliases.setdefault(target, []).append(alias)
+    The document lists what is for sale and nothing else: an operation is
+    in it only when it carries a price. Registries read every operation
+    here; ones without x-payment-info drew 31 "no auth mode" warnings from
+    MPPScan, were probed and skipped by x402scan, and the /audit alias was a
+    second copy of /audit/wcag. Those routes keep working; agents reach the
+    utility ones through info.x-guidance, agent.json and llms.txt. A deploy
+    with no payment rail publishes no operations at all.
+    """
+    import json
+
+    priced = []
     for entry in _CATALOG + _worker_discovery_entries():
-        offers = list(
-            mpp_payments.discovery_offers(entry["price_usd"], description=entry["description"])
-        )
-        protocols = ["mpp"] if offers else []
+        # No description on the offers: the operation already carries it,
+        # and repeated on every offer it was the same text two or three
+        # times per route.
+        offers = list(mpp_payments.discovery_offers(entry["price_usd"]))
         # The x402 rail, too. On an x402-only deploy the MPP offers are empty
         # and every paid route used to read as free here while the 402,
         # agent.json, llms.txt and mcp.json all priced it.
         x402_offer = x402_payments.discovery_offer(f"${entry['price_usd']:.2f}")
         if x402_offer:
             offers.append(x402_offer)
-            protocols.insert(0, "x402")
-        if not offers:
+        priced.append((entry, offers))
+    key = json.dumps([priced, solana_hash_verifier.configured()], sort_keys=True, default=repr)
+    if _OPENAPI_BUILT.get("key") != key:
+        _OPENAPI_BUILT.update(key=key, doc=_build_openapi(priced))
+    return _OPENAPI_BUILT["doc"]
+
+
+# The last document built and the inputs it was built from.
+_OPENAPI_BUILT: dict = {}
+
+
+def _build_openapi(priced: list) -> dict:
+    import copy
+
+    doc = copy.deepcopy(_openapi_default())
+    products: dict = {}
+    sold: list = []
+    methods: list = []
+    for entry, offers in priced:
+        operation = doc.get("paths", {}).get(entry["path"], {}).get("post")
+        if operation is None or not offers:
             continue
-        for path in (entry["path"], *reverse_aliases.get(entry["path"], [])):
-            operation = doc.get("paths", {}).get(path, {}).get("post")
-            if operation is None:
-                continue
-            operation["x-payment-info"] = {
-                "offers": offers,
-                # x402scan's OpenAPI discovery reads these two (its
-                # docs/DISCOVERY.md); mppx ignores fields next to `offers`.
-                "protocols": protocols,
-                "price": {"mode": "fixed", "currency": "USD",
-                          "amount": f"{entry['price_usd']:.2f}"},
+        products[entry["path"]] = {"post": operation}
+        sold.append(entry)
+        for offer in offers:
+            if offer["method"] not in methods:
+                methods.append(offer["method"])
+        operation["x-payment-info"] = {
+            # mppx reads `offers` and ignores the two keys beside it; it
+            # rejects only its own flat fields (amount, method, ...) mixed
+            # in with `offers`.
+            "offers": offers,
+            # x402scan and MPPScan (one parser, @agentcash/discovery) read
+            # these two. Its strict schema wants every protocol as an object,
+            # and when that fails its fallback understands only a flat
+            # string price -- so the plain ["x402", "mpp"] this used to
+            # carry threw away the price along with the protocols, and both
+            # listed all 69 paid routes as having no price.
+            "protocols": _payment_protocols(offers),
+            "price": {"mode": "fixed", "currency": "USD",
+                      "amount": f"{entry['price_usd']:.2f}"},
+        }
+        if entry.get("buyer_note"):
+            # Workers above the x402 clients' $1 default cap: see
+            # workers.catalog.buyer_note. A standard extension key, kept
+            # out of x-payment-info so mppx's offer validation is untouched.
+            operation["x-buyer-note"] = entry["buyer_note"]
+        # The discovery spec requires a declared 402 on any operation
+        # carrying x-payment-info; mppx validate fails the document
+        # without it ("Operation with x-payment-info MUST have a 402
+        # response").
+        operation.setdefault("responses", {}).setdefault(
+            "402", {"description": "Payment Required"}
+        )
+        # A concrete example, because the reference validator (and any
+        # client that probes for a challenge) derives its probe body
+        # from here: with only a schema to go on it generates a guess,
+        # and against the html-or-url anyOf that guess fails validation
+        # -- the probe gets 422 forever and the route reads as broken
+        # when it is merely under-documented. A worker's own catalog
+        # example, even {} for one with no required field; a bare url for
+        # the audits, which have none.
+        json_content = (
+            operation.get("requestBody", {})
+            .get("content", {})
+            .get("application/json")
+        )
+        if json_content is None and entry.get("input_schema") is not None:
+            # Worker handlers read their body by hand, so FastAPI documents
+            # none, and a request generator reading this spec would send
+            # nothing. Their catalog schema IS the contract; publish it --
+            # a copy, because _share_repeated_blocks rewrites the document
+            # in place and the catalog's own schema validates every request.
+            operation["requestBody"] = {
+                "required": True,
+                "content": {"application/json": {"schema": copy.deepcopy(entry["input_schema"])}},
             }
-            if entry.get("buyer_note"):
-                # Workers above the x402 clients' $1 default cap: see
-                # workers.catalog.buyer_note. A standard extension key, kept
-                # out of x-payment-info so mppx's offer validation is untouched.
-                operation["x-buyer-note"] = entry["buyer_note"]
-            # The discovery spec requires a declared 402 on any operation
-            # carrying x-payment-info; mppx validate fails the document
-            # without it ("Operation with x-payment-info MUST have a 402
-            # response").
-            operation.setdefault("responses", {}).setdefault(
-                "402", {"description": "Payment Required"}
+            json_content = operation["requestBody"]["content"]["application/json"]
+        if json_content is not None:
+            example = entry.get("input_example")
+            json_content.setdefault(
+                "example", example if example is not None else {"url": "https://example.com"}
             )
-            # A concrete example, because the reference validator (and any
-            # client that probes for a challenge) derives its probe body
-            # from here: with only a schema to go on it generates a guess,
-            # and against the html-or-url anyOf that guess fails validation
-            # -- the probe gets 422 forever and the route reads as broken
-            # when it is merely under-documented. A bare url satisfies
-            # every paid route's schema.
-            json_content = (
-                operation.get("requestBody", {})
-                .get("content", {})
-                .get("application/json")
-            )
-            if json_content is None and entry.get("input_schema") is not None:
-                # Worker handlers read their body by hand, so FastAPI documents
-                # none, and a request generator reading this spec would send
-                # nothing. Their catalog schema IS the contract; publish it.
-                operation["requestBody"] = {
-                    "required": True,
-                    "content": {"application/json": {"schema": entry["input_schema"]}},
-                }
-                json_content = operation["requestBody"]["content"]["application/json"]
-            if json_content is not None:
-                json_content.setdefault(
-                    "example", entry.get("input_example") or {"url": "https://example.com"}
-                )
+    doc["paths"] = products
+    _drop_unreferenced_components(doc)
+    _share_repeated_blocks(doc)
+    if methods:
+        doc["info"]["x-guidance"] = _agent_guidance(sold, methods)
     doc["x-service-info"] = {
-        "categories": ["accessibility", "seo", "security", "performance"],
+        # mpp.dev's category vocabulary (schemas/services.ts CATEGORIES),
+        # the five this catalog sells most into; draft-payment-discovery-01
+        # asks registries to keep a service to five.
+        "categories": ["data", "search", "ai", "web", "blockchain"],
         "docs": {
             "apiReference": "/docs",
             "homepage": "/",

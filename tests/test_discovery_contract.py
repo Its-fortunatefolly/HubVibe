@@ -23,6 +23,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 from fastapi.testclient import TestClient
+from openapi_refs import resolved
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAIN_PATH = REPO_ROOT / "wcag-audit-engine" / "app" / "main.py"
@@ -147,7 +148,7 @@ def test_openapi_documents_every_work_200_with_the_routes_schema_and_example(cli
     live = W.catalog.live()
     assert live
     for worker in live:
-        content = doc["paths"][worker.path]["post"]["responses"]["200"]["content"]["application/json"]
+        content = resolved(doc, doc["paths"][worker.path]["post"]["responses"]["200"]["content"]["application/json"])
         assert content["schema"] == W.catalog.response_schema(worker), worker.path
         assert content["schema"]["properties"]["result"] == worker.output_schema, worker.path
         # FastAPI serialises the document with exclude_none, so a null-valued

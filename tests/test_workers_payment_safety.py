@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from openapi_refs import resolved
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAIN_PATH = REPO_ROOT / "wcag-audit-engine" / "app" / "main.py"
@@ -445,7 +446,7 @@ def test_openapi_marks_every_live_worker_route_payable(client):
         operation = doc["paths"][worker.path]["post"]
         assert operation.get("x-payment-info", {}).get("offers"), worker.path
         assert "402" in operation["responses"], worker.path
-        body = operation["requestBody"]["content"]["application/json"]
+        body = resolved(doc, operation["requestBody"]["content"]["application/json"])
         assert body["schema"] == worker.input_schema, worker.path
         assert set(worker.input_schema.get("required") or []) <= set(body["example"]), worker.path
 

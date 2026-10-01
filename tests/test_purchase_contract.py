@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from openapi_refs import resolved
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAIN_PATH = REPO_ROOT / "wcag-audit-engine" / "app" / "workers" / ".." / "main.py"
@@ -145,7 +146,7 @@ def test_the_contract_carries_the_schemas_every_other_surface_publishes(app_modu
     assert contract["input_schema"] == worker.input_schema
     openapi = client.get("/openapi.json").json()
     op = openapi["paths"]["/work/stats/probability"]["post"]
-    assert op["requestBody"]["content"]["application/json"]["schema"] == contract["input_schema"]
+    assert resolved(openapi, op["requestBody"]["content"]["application/json"]["schema"]) == contract["input_schema"]
     assert op["x-payment-info"]["price"]["amount"] == "0.50" and contract["price"]["usd"] == 0.50
     card = client.get("/.well-known/agent-card.json").json()
     skill = next(s for s in card["skills"] if s["id"] == contract["capability"]["a2a_skill"])

@@ -17,8 +17,9 @@ Base URL: https://hubvibe-io.com
 Machine-readable discovery:
 - /.well-known/agent.json -- full manifest: pricing, live payment rails,
   rate limits, per-endpoint examples
-- /openapi.json -- OpenAPI 3.1 spec for all routes, with a response schema
-  and example on every /work route
+- /openapi.json -- OpenAPI 3.1 spec for every paid route: price, payment
+  rails, request schema and example, and a response schema on every /work
+  route
 - /.well-known/ard.json -- Agentic Resource Discovery manifest: one entry
   per audit and per worker with capabilities and representative queries
 - /mcp -- live MCP endpoint (Streamable HTTP, JSON-RPC). Discovery via

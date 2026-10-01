@@ -2,7 +2,7 @@
   "mcpVersion": "2025-06-18",
   "name": "hubvibe",
   "description": "HubVibe: Pay-per-Call Tools for AI Agents: Web Search, Email Verify, KYC, Stocks, Crypto, News, Data. One tool per job, priced per call, no account or API key: web search and deep research with citations, email verification, company enrichment, identity verification (KYC) and sanctions screening, phone, IP and DNS lookups, stock prices, SEC filings and insider trades, crypto prices and prediction-market odds, news in any language, economic data, US real-estate data, flight status, places and weather, web scraping, LLM completion and extraction, BigQuery SQL and forecasting, a deterministic predictive probability engine, image, speech and video generation, sandboxed Python, and five site audits (accessibility, SEO, security headers, performance). Tool names: hubvibe_<group>_<name> (research.brief is hubvibe_research_brief), audit_<name>. Every tool states its price; a call that produced no result is never billed. The same catalog is served as plain HTTP routes with request and response schemas in /openapi.json, /.well-known/agent.json and /.well-known/ard.json, and as A2A skills at /.well-known/agent-card.json.",
-  "version": "1.31.0",
+  "version": "1.31.1",
   "websiteUrl": "https://hubvibe-io.com/",
   "documentationUrl": "https://hubvibe-io.com/.well-known/agent.json",
   "repository": {
