@@ -845,7 +845,11 @@ def test_openapi_marks_every_paid_route_with_x_payment_info(monkeypatch):
     challenge suite -- this node's own directory said "no tolls here"."""
     module, doc = _openapi_with_tempo(monkeypatch)
 
-    paid_paths = [e["path"] for e in module._CATALOG] + list(module._CATALOG_ALIASES)
+    paid_paths = [e["path"] for e in module._CATALOG]
+    # The /audit alias still answers, but a registry would list it as a
+    # second copy of /audit/wcag; the document carries the route once.
+    for alias in module._CATALOG_ALIASES:
+        assert alias not in doc["paths"]
     for path in paid_paths:
         operation = doc["paths"][path]["post"]
         info = operation.get("x-payment-info")
@@ -867,10 +871,292 @@ def test_openapi_marks_every_paid_route_with_x_payment_info(monkeypatch):
 
     # x402scan reads `protocols` and a fixed USD `price` from the same object.
     info = doc["paths"]["/audit/bundle"]["post"]["x-payment-info"]
-    assert "mpp" in info["protocols"]
+    assert {"mpp": {"method": "tempo", "intent": "charge",
+                    "currency": bundle[0]["currency"]}} in info["protocols"]
     assert info["price"] == {"mode": "fixed", "currency": "USD", "amount": "0.15"}
 
     assert "docs" in doc["x-service-info"]
+
+
+def _agentcash_payment_info(info):
+    """@agentcash/discovery 1.7.5's reading of one x-payment-info (MPPScan
+    and x402scan both run it): resolvePaymentInfo in src/core/payment-info.ts.
+
+    The strict schema is tried first -- price {mode, amount, currency?} and
+    protocols an array of OBJECTS. When that fails its fallback understands
+    only a flat string `price` (or pricingMode/minPrice/maxPrice/intent),
+    so a price object next to string protocols resolves to nothing at all:
+    no price, no protocols. Returns (price, protocol names) or None."""
+    price, protocols = info.get("price"), info.get("protocols")
+    strict = (
+        isinstance(price, dict)
+        and price.get("mode") == "fixed"
+        and isinstance(price.get("amount"), str)
+        and (price.get("currency") is None
+             or (len(price["currency"]) == 3 and price["currency"].isupper()))
+        and isinstance(protocols, list)
+        and all(isinstance(p, dict) for p in protocols)
+    )
+    if not strict:
+        return None
+    names = []
+    for p in protocols:
+        names.append("x402" if "x402" in p else "mpp" if "mpp" in p else next(iter(p), ""))
+    return price, [n for n in names if n]
+
+
+def test_openapi_payment_info_parses_as_mppscan_reads_it(monkeypatch):
+    """MPPScan reported every paid route as having no price and no
+    protocols while each one carried both: `protocols` was ["x402", "mpp"],
+    and its parser drops the whole object when any protocol is a string.
+    Every paid operation must survive its strict schema, with each MPP
+    protocol complete (its L2_MPP_MALFORMED check) and x402 an object (its
+    L2_X402_MALFORMED check)."""
+    module, doc = _openapi_with_tempo(monkeypatch)
+    paid = 0
+    for path, item in doc["paths"].items():
+        info = item["post"].get("x-payment-info")
+        if info is None:
+            continue
+        paid += 1
+        parsed = _agentcash_payment_info(info)
+        assert parsed is not None, f"{path}: MPPScan would read no price"
+        price, names = parsed
+        assert price["currency"] == "USD" and float(price["amount"]) > 0
+        assert "mpp" in names, path
+        for protocol in info["protocols"]:
+            if "mpp" in protocol:
+                mpp = protocol["mpp"]
+                assert all(isinstance(mpp[k], str) and mpp[k] for k in ("method", "intent", "currency"))
+            if "x402" in protocol:
+                assert isinstance(protocol["x402"], dict)
+        # Never a protocol the offers do not back.
+        offered = {o["method"] for o in info["offers"]}
+        assert {p["mpp"]["method"] for p in info["protocols"] if "mpp" in p} <= offered
+        assert any("x402" in p for p in info["protocols"]) == ("x402" in offered)
+        # mppx: `offers` may not sit next to its own flat fields.
+        assert not {"amount", "currency", "description", "intent", "method"} & set(info)
+    assert paid == len(doc["paths"]) > 0
+
+
+def test_openapi_lists_only_what_is_for_sale(monkeypatch):
+    """A registry lists every operation in the document, and one without a
+    price is listed as free. MPPScan counted 31: health checks, robots.txt,
+    the billing plumbing, GET /work. The document carries the paid routes
+    only; the others still answer."""
+    from fastapi.testclient import TestClient
+
+    module, doc = _openapi_with_tempo(monkeypatch)
+    for path, item in doc["paths"].items():
+        assert list(item) == ["post"], path
+        assert "x-payment-info" in item["post"], f"{path} would be listed as free"
+    for path in ("/healthz", "/robots.txt", "/work", "/mcp", "/a2a", "/billing/checkout",
+                 "/contracts", "/pay/solana/challenge", "/"):
+        assert path not in doc["paths"], path
+    client = TestClient(module.app)
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/llms.txt").status_code == 200
+
+
+def test_openapi_refs_all_resolve_after_pruning(monkeypatch):
+    """Dropping the unlisted routes drops the schemas only they used, and
+    the shared blocks move under components. Every $ref left must resolve,
+    or the document fails to parse anywhere."""
+    _, doc = _openapi_with_tempo(monkeypatch)
+    refs, stack = set(), [doc]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if isinstance(node.get("$ref"), str):
+                refs.add(node["$ref"])
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    assert refs
+    for ref in refs:
+        kind, _, name = ref.removeprefix("#/components/").partition("/")
+        assert ref.startswith("#/components/") and kind in ("schemas", "parameters", "responses"), ref
+        assert name in doc["components"][kind], f"dangling {ref}"
+    used = {t for item in doc["paths"].values() for op in item.values() for t in op.get("tags", [])}
+    assert {t["name"] for t in doc.get("tags", [])} <= used
+
+
+def test_openapi_defines_each_repeated_block_once(monkeypatch):
+    """Inlined, the envelope every paid route shares (provenance and
+    attribution schemas, the language input, the credential headers, the
+    error responses) was about a quarter of the document. No schema block of
+    200 bytes or more, no response object and no header may appear twice;
+    and resolved, every route still carries the full envelope."""
+    import json as _json
+    from openapi_refs import resolved
+
+    _, doc = _openapi_with_tempo(monkeypatch)
+    canon = lambda node: _json.dumps(node, sort_keys=True, separators=(",", ":"))  # noqa: E731
+    seen: dict = {}
+
+    def schema(node, where):
+        if not isinstance(node, dict):
+            return
+        if set(node) != {"$ref"} and len(canon(node)) >= 200:
+            seen.setdefault(canon(node), []).append(where)
+        for keyword in ("properties", "patternProperties", "$defs"):
+            for name, sub in (node.get(keyword) or {}).items():
+                schema(sub, f"{where}/{keyword}/{name}")
+        for keyword in ("items", "additionalProperties", "not"):
+            schema(node.get(keyword), f"{where}/{keyword}")
+        for keyword in ("anyOf", "oneOf", "allOf", "prefixItems"):
+            for i, sub in enumerate(node.get(keyword) or []):
+                schema(sub, f"{where}/{keyword}/{i}")
+
+    objects: dict = {}
+    for path, item in doc["paths"].items():
+        op = item["post"]
+        for media in op.get("requestBody", {}).get("content", {}).values():
+            schema(media.get("schema"), f"{path}/request")
+        for status, response in op.get("responses", {}).items():
+            if "$ref" not in response:
+                objects.setdefault(canon(response), []).append(f"{path}/{status}")
+            for media in (response.get("content") or {}).values():
+                schema(media.get("schema"), f"{path}/{status}")
+        for param in op.get("parameters", []):
+            assert "$ref" in param, f"{path} inlines a header the other routes share"
+    for name, sub in doc.get("components", {}).get("schemas", {}).items():
+        schema(sub, f"components/{name}")
+    repeated = {where[0]: len(where) for where in seen.values() if len(where) > 1}
+    assert not repeated, f"schema blocks still repeated: {repeated}"
+    repeated = {where[0]: len(where) for body, where in objects.items() if len(where) > 1 and len(body) >= 80}
+    assert not repeated, f"response objects still repeated: {repeated}"
+
+    work = [p for p in doc["paths"] if p.startswith("/work/")]
+    assert work
+    for path in work:
+        op = resolved(doc, doc["paths"][path]["post"])
+        body = op["responses"]["200"]["content"]["application/json"]["schema"]
+        assert {"provenance", "attribution", "result"} <= set(body["properties"]), path
+        assert {"x-api-key", "x-payment", "authorization"} <= {p["name"].lower() for p in op["parameters"]}, path
+    # The offers no longer repeat the route's description or the x402 note.
+    for item in doc["paths"].values():
+        assert all("description" not in o and "detail" not in o for o in item["post"]["x-payment-info"]["offers"])
+
+
+def test_openapi_is_rebuilt_only_when_its_inputs_change(monkeypatch):
+    """Building the document (de-duplication included) is the expensive
+    part, so the same inputs return the document built last time; a rail
+    change rebuilds it."""
+    module, _ = _openapi_with_tempo(monkeypatch)
+    first = module.app.openapi()
+    assert module.app.openapi() is first
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    assert module.app.openapi() is not first
+
+
+def test_every_shared_block_is_used_more_than_once(monkeypatch):
+    """A block moved under components must be pointed at from at least two
+    places; one used once is indirection, not de-duplication. Components
+    FastAPI generated itself are exempt."""
+    module, doc = _openapi_with_tempo(monkeypatch)
+    fastapi_own = set(module._openapi_default().get("components", {}).get("schemas", {}))
+    counts: dict = {}
+    stack = [doc]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str):
+                counts[ref] = counts.get(ref, 0) + 1
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    for kind, items in doc.get("components", {}).items():
+        for name in items:
+            if kind == "schemas" and name in fastapi_own:
+                continue
+            assert counts.get(f"#/components/{kind}/{name}", 0) >= 2, f"{kind}/{name} is used once"
+
+
+def test_openapi_is_rebuilt_only_when_its_inputs_change(monkeypatch):
+    """Building the document (de-duplication included) is the expensive
+    part, so the same inputs return the document built last time; a rail
+    change rebuilds it."""
+    module, _ = _openapi_with_tempo(monkeypatch)
+    first = module.app.openapi()
+    assert module.app.openapi() is first
+    monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
+    assert module.app.openapi() is not first
+
+
+def test_every_shared_block_is_used_more_than_once(monkeypatch):
+    """A block moved under components must be pointed at from at least two
+    places; one used once is indirection, not de-duplication. Components
+    FastAPI generated itself are exempt."""
+    module, doc = _openapi_with_tempo(monkeypatch)
+    fastapi_own = set(module._openapi_default().get("components", {}).get("schemas", {}))
+    counts: dict = {}
+    stack = [doc]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str):
+                counts[ref] = counts.get(ref, 0) + 1
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    for kind, items in doc.get("components", {}).items():
+        for name in items:
+            if kind == "schemas" and name in fastapi_own:
+                continue
+            assert counts.get(f"#/components/{kind}/{name}", 0) >= 2, f"{kind}/{name} is used once"
+
+
+def test_building_openapi_leaves_the_catalog_untouched(monkeypatch):
+    """The document is rewritten in place to share repeated blocks. The
+    catalog's own schemas validate every request and feed the MCP tools,
+    contracts and agent.json; a $ref written into one of them would break
+    all of those. Build the document twice and compare."""
+    import copy as _copy
+    from fastapi.testclient import TestClient
+
+    module, first = _openapi_with_tempo(monkeypatch)
+    live = module.workers.catalog.live()
+    before = {w.name: (_copy.deepcopy(w.input_schema), _copy.deepcopy(w.output_schema)) for w in live}
+    second = TestClient(module.app).get("/openapi.json").json()
+    assert first == second
+    for w in live:
+        assert (w.input_schema, w.output_schema) == before[w.name], w.name
+        assert "$ref" not in str(w.input_schema), w.name
+
+
+def test_openapi_examples_are_valid_requests(monkeypatch):
+    """An agent copies the example. Routes with no required field published
+    {"url": ...}, which their additionalProperties: false schema rejects."""
+    import jsonschema
+    from openapi_refs import resolved
+
+    _, doc = _openapi_with_tempo(monkeypatch)
+    checked = 0
+    for path, item in doc["paths"].items():
+        body = resolved(doc, item["post"]["requestBody"]["content"]["application/json"])
+        errors = list(jsonschema.Draft202012Validator(body["schema"]).iter_errors(body["example"]))
+        assert not errors, f"{path}: {errors[0].message}"
+        checked += 1
+    assert checked == len(doc["paths"]) > 0
+
+
+def test_openapi_carries_contact_and_agent_guidance(monkeypatch):
+    """MPPScan's audit: info.contact (how it verifies the origin's owner)
+    and info.x-guidance (handed to agents whole under ~1,000 tokens; it
+    warns past 4,000 characters). The guidance names only offered rails."""
+    module, doc = _openapi_with_tempo(monkeypatch)
+    contact = doc["info"]["contact"]
+    assert contact["email"] == module.CONTACT_EMAIL
+    assert contact["url"].rstrip("/") == module.PUBLIC_BASE_URL.rstrip("/")
+    guidance = doc["info"]["x-guidance"]
+    assert 0 < len(guidance) < 4000
+    assert f"sells {len(doc['paths'])} tools" in guidance
+    assert "MPP tempo" in guidance
+    assert "MPP stripe" not in guidance  # no Stripe rail in this config
+    assert "x-payment-info.price" in guidance and "/contracts/{capability}" in guidance
 
 
 def test_openapi_carries_no_x_payment_info_when_no_mpp_rail_exists(monkeypatch):
@@ -880,9 +1166,10 @@ def test_openapi_carries_no_x_payment_info_when_no_mpp_rail_exists(monkeypatch):
 
     module = _load_main(monkeypatch)  # no Stripe, no tempo
     doc = TestClient(module.app).get("/openapi.json").json()
-    for path_item in doc["paths"].values():
-        for operation in path_item.values():
-            assert "x-payment-info" not in operation
+    # Nothing is priced, so nothing is listed -- an unpriced operation would
+    # read as free to a registry -- and no buying instructions either.
+    assert doc["paths"] == {}
+    assert "x-guidance" not in doc["info"]
 
 
 def test_well_known_x402_lists_exactly_the_paid_routes(monkeypatch):
@@ -913,7 +1200,8 @@ def test_openapi_annotation_follows_a_rail_change(monkeypatch):
 
     monkeypatch.setattr(module.mpp_payments, "tempo_configured", lambda: False)
     doc = TestClient(module.app).get("/openapi.json").json()
-    assert "x-payment-info" not in doc["paths"]["/audit/wcag"]["post"]
+    # Unpriced, it is not for sale, so it is not listed at all.
+    assert "/audit/wcag" not in doc["paths"]
 
 
 def test_agent_manifest_lists_all_five_audit_routes(monkeypatch):
@@ -4390,7 +4678,7 @@ def test_openapi_prices_the_x402_rail(monkeypatch, load_main_fresh):
     module = load_main_fresh("wcag_main_openapi_x402")
     doc = TestClient(module.app).get("/openapi.json").json()
 
-    for path, amount in (("/audit/wcag", "50000"), ("/audit/bundle", "150000"), ("/audit", "50000")):
+    for path, amount in (("/audit/wcag", "50000"), ("/audit/bundle", "150000")):
         operation = doc["paths"][path]["post"]
         offers = operation["x-payment-info"]["offers"]
         x402 = [o for o in offers if o["method"] == "x402"]
@@ -4398,6 +4686,8 @@ def test_openapi_prices_the_x402_rail(monkeypatch, load_main_fresh):
         assert x402[0]["amount"] == amount
         assert x402[0]["payTo"] == _X402_TEST_PAY_TO
         assert "402" in operation["responses"]
+        # MPPScan/x402scan read the rail from `protocols`, as an object.
+        assert operation["x-payment-info"]["protocols"][0] == {"x402": {}}
 
 
 def test_a_body_with_nothing_to_audit_is_refused_before_payment(monkeypatch):

@@ -166,7 +166,7 @@ def build_manifest(
             "type": TYPE_OPENAPI,
             "url": f"{base}/openapi.json",
             "description": (
-                "OpenAPI 3.1 for every route on the node. Each paid route "
+                "OpenAPI 3.1 for every paid route on the node. Each route "
                 "declares x-payment-info, a request example and a 200 response "
                 "schema with example; every /work route's result keys are "
                 "typed there."),

@@ -646,11 +646,6 @@ def discovery_offer(price: Optional[str] = None) -> dict:
         "currency": "USDC",
         "payTo": _PAY_TO_ADDRESS,
         "x402Versions": versions,
-        "detail": (
-            "Sign an EIP-3009 USDC authorization for `amount` to `payTo` and "
-            "send it as PAYMENT-SIGNATURE (v2) or X-PAYMENT (v1); the 402 "
-            "carries the full challenge."
-        ),
     }
 
 
