@@ -26,6 +26,14 @@
 		output stdout
 		format json
 	}
+	# Compression for any client that asks for it (Accept-Encoding). The
+	# discovery documents (openapi.json, mcp.json, agent.json, ard.json)
+	# are hundreds of KB of JSON each and went out uncompressed, about a
+	# second per fetch for an agent. Caddy's default match covers
+	# application/json and text/*, leaves bodies under 512 bytes alone, and
+	# streams text/event-stream as it is written. Headers are untouched, so
+	# every 402's WWW-Authenticate and PAYMENT-REQUIRED arrive as before.
+	encode zstd gzip
 	reverse_proxy hubvibe:8080
 }
 

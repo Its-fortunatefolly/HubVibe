@@ -258,6 +258,9 @@ def test_caddy_serves_www_as_a_redirect_and_caps_request_bodies():
     assert re.search(r"redir\s+https://\{\$DOMAIN\}\{uri\}\s+permanent", www.group(1))
     assert "reverse_proxy" not in www.group(1), "www must redirect, not serve a second identity"
     assert re.search(r"request_body\s*\{\s*max_size\s+4MB", apex.group(1))
+    # The discovery documents are hundreds of KB of JSON; uncompressed they
+    # cost an agent about a second per fetch.
+    assert re.search(r"^\s*encode\s+zstd\s+gzip\s*$", apex.group(1), re.M)
 
     caddy = os.environ.get("CADDY_BIN") or shutil.which("caddy")
     if caddy:
