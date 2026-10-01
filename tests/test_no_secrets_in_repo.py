@@ -51,6 +51,10 @@ ALLOWED = {
     # A settled HubVibe sale on Base (public), chain.transaction's example.
     # wcag-audit-engine/app/workers/catalog.py
     "0x9e61e3fce3efad669a236b8d6a0351162c572808026d1a5ffdededd31caad113",
+    # EIP-3009 AuthorizationUsed(address,bytes32) event topic0 -- a public
+    # constant of USDC's contract, how a batched x402 settle is recognised.
+    # wcag-audit-engine/app/purchase_reconcile.py
+    "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5",
 }
 
 # Identifiers that are not credentials but should not sit in a public repo.
