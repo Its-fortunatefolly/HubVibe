@@ -360,7 +360,7 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
     auth, err = await asyncio.get_running_loop().run_in_executor(
         _executor, lambda: _authorize(
             x_api_key, x_payment, authorization, request,
-            price_usd=worker.price_usd))
+            price_usd=worker.price_usd, product=worker.name, route=worker.path, body=payload))
     if err is not None:
         return err
     if sink is not None:
@@ -368,6 +368,11 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
 
     call_id = uuid.uuid4().hex
     payer = _payer_of(auth)
+    sale = getattr(auth, "sale", None)
+    if isinstance(sale, dict):
+        # The core's purchase book keys this call's row on these.
+        sale.update(call_id=call_id, receipt_id=ledger.receipt_id_for(call_id),
+                    idempotency_key=idempotency_key)
 
     # Duplicate protection. A "done" key returns the stored result and
     # NEVER calls _bill -- so the second payment stays verified but

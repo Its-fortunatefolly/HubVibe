@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 try:
     from . import (a2a, ard, audits, billing, browser_pool, mpp_payments,
-                   purchase, solana_hash_verifier, x402_payments)
+                   purchase, purchase_book, solana_hash_verifier, x402_payments)
 except ImportError:
     # Loaded directly by file path (e.g. by tooling/tests) rather than as
     # part of the `app` package -- fall back to loading each sibling module
@@ -53,6 +53,7 @@ except ImportError:
     billing = _load_sibling_module("billing")  # type: ignore
     mpp_payments = _load_sibling_module("mpp_payments")  # type: ignore
     x402_payments = _load_sibling_module("x402_payments")  # type: ignore
+    purchase_book = _load_sibling_module("purchase_book")  # type: ignore
     ard = _load_sibling_module("ard")  # type: ignore
     solana_hash_verifier = _load_sibling_module("solana_hash_verifier")  # type: ignore
     a2a = _load_sibling_module("a2a")  # type: ignore
@@ -100,7 +101,7 @@ PUBLIC_BASE_URL = os.environ.get(
 # reading a version that names the wrong build. Kept in step with
 # server.json (the official registry's copy) by a test, since that file is
 # outside the container's build context and cannot be read at runtime.
-SERVICE_VERSION = "1.30.0"
+SERVICE_VERSION = "1.31.0"
 
 # The revenue counter in the log -- "x402 SETTLED ..." -- is an INFO line.
 # Python's root logger defaults to WARNING and uvicorn configures only its
@@ -652,6 +653,14 @@ class AuthContext:
         # 402 the caller started from (see _settlement_refused).
         "challenge_host",
         "challenge_path",
+        # This call's purchase-book entry (who asked, from where, for what),
+        # opened at the gate and written once the sale is final. See
+        # app/purchase_book.py.
+        "sale",
+        # A Stripe MPP top-up bought with this call: how many cents and the
+        # PaymentIntent, so the book can record the credit bought.
+        "topup_cents",
+        "topup_ref",
     )
 
     def __init__(
@@ -667,6 +676,8 @@ class AuthContext:
         mpp_credential: Optional[str] = None,
         challenge_host: Optional[str] = None,
         challenge_path: Optional[str] = None,
+        topup_cents: int = 0,
+        topup_ref: Optional[str] = None,
     ):
         self.stripe_billable = stripe_billable
         self.customer_id = customer_id
@@ -681,6 +692,9 @@ class AuthContext:
         self.mpp_credential = mpp_credential
         self.challenge_host = challenge_host
         self.challenge_path = challenge_path
+        self.topup_cents = topup_cents
+        self.topup_ref = topup_ref
+        self.sale = None
 
 
 def _worker_input_example(worker) -> dict:
@@ -1147,6 +1161,8 @@ def _authenticate(
                     # it bought.
                     prepaid_key=key,
                     prepaid_cents=call_cents if key else 0,
+                    topup_cents=bought_cents,
+                    topup_ref=(mpp_payments.settlement_for(credential) or {}).get("tx_hash"),
                 )
         if credential and mpp_payments.verify_and_settle_sync(credential, realm=host):
             # Already charged/settled (Stripe PaymentIntent or on-chain
@@ -1175,12 +1191,51 @@ def _authenticate(
     return _payment_required_response(host=host, price_usd=price_usd, path=path)
 
 
+def _product_for_path(path: Optional[str]) -> Optional[str]:
+    """The product name the purchase book files a route under."""
+    resolved = _CATALOG_ALIASES.get(path, path) if path else None
+    if resolved and resolved.startswith("/audit"):
+        name = resolved.rstrip("/").rsplit("/", 1)[-1]
+        return "audit." + ("wcag" if name == "audit" else name)
+    if resolved and workers is not None:
+        worker = workers.catalog.get(resolved)
+        return worker.name if worker is not None else None
+    return None
+
+
+def _open_sale(auth, request, *, price_usd, product=None, route=None, body=None) -> None:
+    """Start this call's purchase-book entry: who asked, from where, for
+    what. Never raises -- a sale is never refused over bookkeeping."""
+    try:
+        if getattr(auth, "payment_method", None) == "internal":
+            return
+        path = route or request.url.path
+        auth.sale = purchase_book.open_sale(request, price_usd=price_usd, route=path,
+                                            product=product or _product_for_path(path), body=body)
+        if auth.payment_method == "mpp-topup":
+            purchase_book.record_mpp_topup(auth)  # the credit is already bought
+    except Exception:
+        logging.getLogger("hubvibe.purchases").exception("purchase book: sale not opened")
+
+
+def _book(auth, outcome: Optional[str] = None, note: Optional[str] = None) -> None:
+    """Write this call's purchase-book row. Never raises."""
+    try:
+        purchase_book.record_call(auth, outcome=outcome, note=note)
+    except Exception:
+        logging.getLogger("hubvibe.purchases").exception("purchase book: row not written")
+
+
 def _authorize_and_rate_limit(
     x_api_key: Optional[str],
     x_payment: Optional[str],
     authorization: Optional[str],
     request: Request,
     price_usd: float,
+    *,
+    product: Optional[str] = None,
+    route: Optional[str] = None,
+    body=None,
 ):
     """Shared fail-closed auth + best-effort rate limiting for every paid
     audit route. Returns (AuthContext, None) on success, or (None,
@@ -1238,6 +1293,7 @@ def _authorize_and_rate_limit(
     if isinstance(auth, JSONResponse):
         return None, auth
 
+    _open_sale(auth, request, price_usd=price_usd, product=product, route=route, body=body)
     return auth, None
 
 
@@ -1306,7 +1362,7 @@ def _deliver(result: dict, auth):
     return _with_receipt(result, auth)
 
 
-def _unbill_failed_audit(auth) -> None:
+def _unbill_failed_audit(auth, reason: Optional[str] = None) -> None:
     """Undo what authentication took, for an audit that did not run.
 
     x402 needs nothing here: it is settled only in _bill, which the failure
@@ -1324,13 +1380,15 @@ def _unbill_failed_audit(auth) -> None:
     credential = getattr(auth, "mpp_credential", None)
     if credential:
         mpp_payments.release_credential(credential)
+    # The buyer signed or paid for this call: the book keeps it, unbilled.
+    _book(auth, outcome="failed_unbilled", note=reason)
 
 
 def _failed_audit_response(auth, detail: str) -> JSONResponse:
     """The 502 every paid route answers with when the audit could not run:
     nothing charged, and anything the payer is owed regardless -- the prepaid
     key a top-up just bought -- still delivered."""
-    _unbill_failed_audit(auth)
+    _unbill_failed_audit(auth, reason=detail)
     content = {
         "status": "error",
         "pass": None,
@@ -1359,6 +1417,18 @@ def _contract_failure(auth, path: str, problem: str) -> JSONResponse:
 
 
 def _bill(auth, price_usd: float) -> Optional[str]:
+    """Collect payment for a job that produced a result, then write its
+    purchase-book row (app/purchase_book.py). This is the one point where a
+    per-call sale is final on every rail: x402 has just settled (or failed to,
+    with its state on the handle), and MPP, prepaid and top-up payments have
+    been kept. Collection is _collect; the booking never changes its answer.
+    """
+    warning = _collect(auth, price_usd)
+    _book(auth)
+    return warning
+
+
+def _collect(auth, price_usd: float) -> Optional[str]:
     """Collect payment for an audit that actually produced a result.
 
     `price_usd` is this route's real rate, and it is passed through to the
@@ -3632,8 +3702,10 @@ def _mcp_tools_call(
         else None
     )
 
+    audit = name[len("audit_"):] if name.startswith("audit_") else name
     auth, err = _authorize_and_rate_limit(
-        x_api_key, x_payment or meta_payment, authorization, request, price_usd=price
+        x_api_key, x_payment or meta_payment, authorization, request, price_usd=price,
+        product="audit." + audit, route="/audit/" + audit, body=args,
     )
     if err is not None:
         if err.status_code == 429:
@@ -4002,6 +4074,17 @@ async def solana_topup_redeem(request: Request):
     # Blocking RPC and SQLite: off the loop, and off the two-slot audit pool.
     payload = await asyncio.get_running_loop().run_in_executor(
         None, solana_hash_verifier.redeem, body.get("tx_signature"), body.get("challenge_token"))
+    if payload.get("status") == "ok" and not payload.get("idempotent_replay"):
+        # The purchase book: the credit bought, who paid and from where. The
+        # challenge token is a bearer secret and is never stored.
+        try:
+            sale = purchase_book.open_sale(request, price_usd=None, route="/pay/solana/redeem",
+                                           product="prepaid_credit",
+                                           body={"tx_signature": body.get("tx_signature")})
+            await asyncio.get_running_loop().run_in_executor(
+                None, purchase_book.record_solana_topup, payload, sale)
+        except Exception:
+            logging.getLogger("hubvibe.purchases").exception("purchase book: top-up row not written")
     return _solana_hash_http(payload)
 
 
@@ -4130,6 +4213,97 @@ async def stripe_webhook(request: Request):
     return {"received": True}
 
 
+# --- owner: the purchase book ------------------------------------------------
+#
+# Private to the owner key: PURCHASE_OWNER_KEY, sent as X-API-Key or a Bearer
+# token. Its own key, not AUDIT_API_KEY: that one buys unmetered calls and is
+# left unset in production, while this one only reads the owner's records.
+# Anyone else gets FastAPI's own unknown-path 404, byte for byte, for any
+# method, so the routes cannot be discovered; they are left out of
+# openapi.json and every hand-written manifest.
+
+_NOT_FOUND = {"detail": "Not Found"}
+_OWNER_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
+
+
+def _owner_authorized(request: Request) -> bool:
+    owner_key = (os.environ.get("PURCHASE_OWNER_KEY") or "").strip()
+    presented = request.headers.get("x-api-key") or ""
+    bearer = request.headers.get("authorization") or ""
+    if not presented and bearer[:7].lower() == "bearer ":
+        presented = bearer[7:].strip()
+    return bool(owner_key and presented) and secrets.compare_digest(
+        presented.encode("utf-8"), owner_key.encode("utf-8"))
+
+
+def _owner_time(text: Optional[str]) -> Optional[float]:
+    if not text:
+        return None
+    text = text.strip()
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    from datetime import datetime, timezone
+
+    value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
+def _owner_filters(request: Request) -> dict:
+    q = request.query_params
+    limit = int(q.get("limit") or 500)
+    internal = q.get("internal")
+    return {"since": _owner_time(q.get("since")), "until": _owner_time(q.get("until")),
+            "limit": max(1, min(limit, 50000)), "kind": q.get("kind") or None,
+            "internal": None if internal in (None, "") else internal.lower() in ("1", "true", "yes")}
+
+
+async def _owner_read(request: Request, fn, **kwargs):
+    import asyncio
+
+    return await asyncio.get_running_loop().run_in_executor(None, lambda: fn(**kwargs))
+
+
+@app.api_route("/owner/purchases", methods=_OWNER_METHODS, include_in_schema=False)
+async def owner_purchases(request: Request):
+    if request.method != "GET" or not _owner_authorized(request):
+        return JSONResponse(status_code=404, content=_NOT_FOUND)
+    try:
+        filters = _owner_filters(request)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"detail": "since/until: ISO date or epoch; limit: 1-50000"})
+    rows = await _owner_read(request, purchase_book.query, **filters)
+    return JSONResponse(content={"count": len(rows), "rows": rows, "book": purchase_book.status()})
+
+
+@app.api_route("/owner/purchases.csv", methods=_OWNER_METHODS, include_in_schema=False)
+async def owner_purchases_csv(request: Request):
+    if request.method != "GET" or not _owner_authorized(request):
+        return JSONResponse(status_code=404, content=_NOT_FOUND)
+    try:
+        filters = _owner_filters(request)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"detail": "since/until: ISO date or epoch; limit: 1-50000"})
+    rows = await _owner_read(request, purchase_book.query, **filters)
+    return Response(content=purchase_book.to_csv(rows), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="hubvibe-purchases.csv"'})
+
+
+@app.api_route("/owner/purchases/summary", methods=_OWNER_METHODS, include_in_schema=False)
+async def owner_purchases_summary(request: Request):
+    if request.method != "GET" or not _owner_authorized(request):
+        return JSONResponse(status_code=404, content=_NOT_FOUND)
+    try:
+        filters = _owner_filters(request)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"detail": "since/until: ISO date or epoch"})
+    return JSONResponse(content=await _owner_read(
+        request, purchase_book.summary, since=filters["since"], until=filters["until"]))
+
+
 def _mpp_realm(request: Request) -> Optional[str]:
     """MPP realm SHOULD be the server's bare hostname -- strip the port off
     the Host header (":8811" locally, absent behind Cloud Run's HTTPS
@@ -4159,7 +4333,7 @@ def audit(
     missing = _reject_missing_input(payload)
     if missing is not None:
         return missing
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit"))
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit"), body=payload)
     if err:
         return err
 
@@ -4231,7 +4405,7 @@ def audit_wcag(
     missing = _reject_missing_input(payload)
     if missing is not None:
         return missing
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/wcag"))
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/wcag"), body=payload)
     if err:
         return err
 
@@ -4293,7 +4467,7 @@ def audit_seo(
     missing = _reject_missing_input(payload)
     if missing is not None:
         return missing
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/seo"))
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/seo"), body=payload)
     if err:
         return err
 
@@ -4331,7 +4505,7 @@ def audit_security(
     bad_language = _reject_bad_language(payload.language)
     if bad_language is not None:
         return bad_language
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/security"))
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/security"), body=payload)
     if err:
         return err
 
@@ -4369,7 +4543,7 @@ def audit_performance(
     bad_language = _reject_bad_language(payload.language)
     if bad_language is not None:
         return bad_language
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/performance"))
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/performance"), body=payload)
     if err:
         return err
 
@@ -4411,7 +4585,7 @@ def audit_bundle(
     bad_language = _reject_bad_language(payload.language)
     if bad_language is not None:
         return bad_language
-    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/bundle"))
+    auth, err = _authorize_and_rate_limit(x_api_key, x_payment, authorization, request, price_usd=_price_of("/audit/bundle"), body=payload)
     if err:
         return err
 
@@ -4466,6 +4640,9 @@ def audit_bundle(
         result["billing_warning"] = warning
     return _deliver(result, auth)
 
+
+purchase_book.configure(node_version=SERVICE_VERSION, mpp_facts=mpp_payments.settlement_for,
+                        facilitator_url=getattr(x402_payments, "_FACILITATOR_URL", None))
 
 # --- worker network ---------------------------------------------------------
 #
