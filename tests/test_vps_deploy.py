@@ -124,6 +124,9 @@ def test_compose_parses_and_wires_the_service_correctly():
     assert env["RATE_LIMIT_PROXY_DEPTH"] == "1"
     assert service["restart"] == "unless-stopped"
     assert "healthcheck" in service
+    # browser_pool kills a hung audit's browser process group; without an
+    # init as PID 1 the orphans stay as zombies.
+    assert service.get("init") is True
 
 
 def test_caddy_terminates_tls_and_proxies_to_the_service_port():

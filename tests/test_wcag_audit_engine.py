@@ -838,6 +838,54 @@ def _openapi_with_tempo(monkeypatch):
     return module, TestClient(module.app).get("/openapi.json").json()
 
 
+def test_static_files_never_wait_on_the_audit_thread_pool(monkeypatch):
+    """anyio's worker threads are the MAX_CONCURRENT_AUDITS slots. Static
+    files read there (FileResponse) queued behind running audits and never
+    answered while two audits hung (2026-10-01). They are served from
+    memory on the event loop now."""
+    import anyio.to_thread
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    client = TestClient(module.app)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a static file was read in the audit thread pool")
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", refuse)
+    for path, content_type, name in (
+        ("/", "text/html", "index.html"),
+        ("/llms.txt", "text/plain", "llms.txt"),
+        ("/robots.txt", "text/plain", "robots.txt"),
+        ("/sitemap.xml", "application/xml", "sitemap.xml"),
+        ("/favicon.svg", "image/svg+xml", "favicon.svg"),
+        ("/og-image.png", "image/png", "og-image.png"),
+        ("/hero.jpg", "image/jpeg", "hero.jpg"),
+        ("/logo-hv.png", "image/png", "logo-hv.png"),
+        ("/billing/success", "text/html", "success.html"),
+        ("/billing/cancel", "text/html", "cancel.html"),
+    ):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert response.headers["content-type"].startswith(content_type), path
+        assert response.content == (module.STATIC_DIR / name).read_bytes(), path
+
+
+def test_a_static_file_changed_on_disk_is_served_at_once(monkeypatch, tmp_path):
+    """Kept in memory, but re-read when the file changes: a file copied into
+    a running container is live without a restart, as it was before."""
+    import os
+
+    module = _load_main(monkeypatch)
+    (tmp_path / "robots.txt").write_text("first")
+    monkeypatch.setattr(module, "STATIC_DIR", tmp_path)
+    assert module._static_file("robots.txt", "text/plain").body == b"first"
+    (tmp_path / "robots.txt").write_text("second, longer")
+    stat = (tmp_path / "robots.txt").stat()
+    os.utime(tmp_path / "robots.txt", ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    assert module._static_file("robots.txt", "text/plain").body == b"second, longer"
+
+
 def test_openapi_marks_every_paid_route_with_x_payment_info(monkeypatch):
     """MPP's reference tooling discovers paid endpoints from openapi.json:
     an operation is payable iff it carries x-payment-info. Without the

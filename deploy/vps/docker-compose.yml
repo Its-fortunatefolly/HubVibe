@@ -17,6 +17,12 @@ services:
     build:
       context: ../../wcag-audit-engine
     restart: unless-stopped
+    # A real init as PID 1, so exited child processes are reaped. When an
+    # audit outlives its deadline, browser_pool kills that browser's whole
+    # process group; uvicorn as PID 1 never reaps the orphans, which left
+    # about six zombie entries per kill (measured on this image; zero with
+    # init).
+    init: true
     # Rotate container logs. Docker's json-file driver keeps every line
     # forever by default; at paid-traffic volume (one INFO line per
     # settlement plus uvicorn's access log) that fills the box's disk in

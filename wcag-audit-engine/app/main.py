@@ -1840,24 +1840,46 @@ def _remediation_notes(violations: list, language: Optional[str] = None) -> Opti
         return {"ai_generated": True, "notes": None, "error": str(exc)}
 
 
+# Static files are answered on the event loop, from memory. FileResponse
+# reads in anyio's worker threads, and those threads are the
+# MAX_CONCURRENT_AUDITS slots: while two audits ran, /llms.txt, robots.txt,
+# the favicon and the homepage queued behind them (163 timeouts on
+# 2026-10-01), and while two audits hung they never answered at all. The
+# largest file here is ~100 KB. Each is read once and kept; a stat per
+# request re-reads it when it changes on disk, so a file copied into a
+# running container is served at once, as before.
+_STATIC_CACHE: dict = {}
+
+
+def _static_file(name: str, media_type: str) -> Response:
+    path = STATIC_DIR / name
+    stat = path.stat()
+    key = (stat.st_mtime_ns, stat.st_size)
+    cached = _STATIC_CACHE.get(name)
+    if cached is None or cached[0] != key:
+        cached = (key, path.read_bytes())
+        _STATIC_CACHE[name] = cached
+    return Response(content=cached[1], media_type=media_type)
+
+
 @app.get("/", response_class=FileResponse)
 async def landing_page():
-    return FileResponse(STATIC_DIR / "index.html")
+    return _static_file("index.html", "text/html")
 
 
 @app.get("/billing/success", response_class=FileResponse)
 async def checkout_success_page():
-    return FileResponse(STATIC_DIR / "success.html")
+    return _static_file("success.html", "text/html")
 
 
 @app.get("/billing/cancel", response_class=FileResponse)
 async def checkout_cancel_page():
-    return FileResponse(STATIC_DIR / "cancel.html")
+    return _static_file("cancel.html", "text/html")
 
 
 @app.get("/llms.txt", response_class=FileResponse)
 async def llms_txt():
-    return FileResponse(STATIC_DIR / "llms.txt", media_type="text/plain")
+    return _static_file("llms.txt", "text/plain")
 
 
 @app.get("/mcp.json", tags=["discovery"])
@@ -1943,7 +1965,7 @@ async def mcp_manifest():
 
 @app.get("/favicon.svg", response_class=FileResponse, tags=["discovery"])
 async def favicon():
-    return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
+    return _static_file("favicon.svg", "image/svg+xml")
 
 
 @app.get("/og-image.png", response_class=FileResponse, tags=["discovery"])
@@ -1951,29 +1973,29 @@ async def og_image():
     # Referenced by og:image/twitter:image. Social scrapers fetch this
     # unauthenticated and cache aggressively, so it must stay a stable,
     # public URL -- a link with no preview card is a link people don't click.
-    return FileResponse(STATIC_DIR / "og-image.png", media_type="image/png")
+    return _static_file("og-image.png", "image/png")
 
 
 @app.get("/hero.jpg", response_class=FileResponse, include_in_schema=False)
 async def hero_image():
     # Landing-page artwork (robot mascot over Earth), cut from the owner's design.
-    return FileResponse(STATIC_DIR / "hero.jpg", media_type="image/jpeg")
+    return _static_file("hero.jpg", "image/jpeg")
 
 
 @app.get("/logo-hv.png", response_class=FileResponse, include_in_schema=False)
 async def logo_hv():
     # The owner's glowing HV mark, used in the landing page header and footer.
-    return FileResponse(STATIC_DIR / "logo-hv.png", media_type="image/png")
+    return _static_file("logo-hv.png", "image/png")
 
 
 @app.get("/robots.txt", response_class=FileResponse, tags=["discovery"])
 async def robots_txt():
-    return FileResponse(STATIC_DIR / "robots.txt", media_type="text/plain")
+    return _static_file("robots.txt", "text/plain")
 
 
 @app.get("/sitemap.xml", response_class=FileResponse)
 async def sitemap_xml():
-    return FileResponse(STATIC_DIR / "sitemap.xml", media_type="application/xml")
+    return _static_file("sitemap.xml", "application/xml")
 
 
 # Registered at BOTH paths on purpose. Google Cloud Run's frontend
