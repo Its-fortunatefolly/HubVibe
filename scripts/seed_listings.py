@@ -152,25 +152,19 @@ def plan_total(priced):
     return round(sum(price for _, _, _, price in priced if price is not None), 2)
 
 
-def _tiny_wav_base64() -> str:
-    """A short, genuinely valid PCM WAV (a quarter-second 440Hz tone) so
-    speech.transcribe's real paid call has real audio to decode -- silence
-    or garbage bytes would just fail Speech-to-Text's own validation and
-    list nothing, which is safe but wastes the one paid attempt this script
-    budgets per route."""
-    import base64
-    import math
-    import struct
+SPEECH_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "speech-check.wav")
 
-    rate, seconds, amplitude = 8000, 0.15, 3000
-    samples = [int(amplitude * math.sin(2 * math.pi * 440 * t / rate))
-              for t in range(int(rate * seconds))]
-    pcm = b"".join(struct.pack("<h", s) for s in samples)
-    byte_rate, block_align = rate * 2, 2
-    header = (b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVE" + b"fmt " +
-             struct.pack("<IHHIIHH", 16, 1, 1, rate, byte_rate, block_align, 16) +
-             b"data" + struct.pack("<I", len(pcm)))
-    return base64.b64encode(header + pcm).decode()
+
+def _tiny_wav_base64() -> str:
+    """Real speech for speech.transcribe's paid call: a 5-second English
+    sentence (LINEAR16, 16 kHz) made with Google Text-to-Speech and kept in
+    scripts/fixtures. A tone is valid audio but has no words in it, so the
+    worker rightly answers "no speech recognized" unbilled -- and the route
+    is never listed (seen 2026-09-23 and again 2026-10-01)."""
+    import base64
+
+    with open(SPEECH_FIXTURE, "rb") as handle:
+        return base64.b64encode(handle.read()).decode()
 
 
 def _top_market_slug() -> str:
