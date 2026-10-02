@@ -734,6 +734,37 @@ CATALOG = [
         pricing_basis="Provisional, completed-work tier. Up to six provider calls; usage measured per call.",
         composes=["search.web", "extract.page", "news.search", "llm.analyze"],
         requires=("brave", "web", "gemini")),
+    *[Worker(
+        name=name, price_usd=price, tier=tier,
+        title=title,
+        description=(
+            f'HubVibe Agent ({label}): hand it any task in plain words and get the finished '
+            f'result in one call. Research a company or a person of interest, check a website, '
+            f'screen a name, read the markets, compare options, pull the facts: you get a headline, '
+            f'the key points, the full answer, its sources and every tool step. Up to {calls} steps. '
+            f'Charged only when the answer is delivered. Input: task; optional context, fields '
+            f'for a JSON answer, language.'),
+        tags=["ai-agent", "task-automation", "research", "autonomous-agent", "multi-tool"],
+        input_schema=_obj({
+            "task": {"type": "string", "maxLength": 4000,
+                     "description": "The task, in plain words."},
+            "context": {"type": ["string", "object", "array"],
+                        "description": "Optional material the task refers to (text or JSON)."},
+            "fields": {"type": "array", "items": {"type": "string"}, "maxItems": 30,
+                       "description": "Optional: also return `data` with exactly these keys."},
+            "language": _LANGUAGE,
+        }, ["task"]),
+        returns="task, tier, headline, key_points[], answer, data, steps[{n,tool,input,ok,summary,seconds}], tools_used[], sources[], notes[].",
+        skill=name, max_seconds=seconds,
+        pricing_basis=(f"Completed-task tier: one price for up to {calls} tool steps plus planning; "
+                       f"tools listed above ${price:.2f} are not used at this tier."),
+        composes=["search.web", "extract.page", "research.web", "company.enrich", "llm.analyze"],
+        requires=("gemini",))
+      for name, price, tier, title, label, calls, seconds in (
+          ("agent.task", 2.75, "standard", "Agent: get a task done", "quick", 4, 120),
+          ("agent.task_pro", 9.00, "advanced", "Agent Pro: a deeper task", "pro", 10, 200),
+          ("agent.task_max", 20.00, "premium", "Agent Max: the hardest tasks", "max", 20, 240),
+      )],
     Worker(
         name="monitor.snapshot", price_usd=0.50, tier="standard",
         title="Save a monitoring baseline",
@@ -1719,7 +1750,7 @@ BY_PATH = {worker.path: worker for worker in CATALOG}
 NATIVE_LANGUAGE_WORKERS = frozenset({
     "llm.generate", "llm.analyze", "llm.extract", "search.web", "research.brief", "research.page_facts",
     "research.web", "research.company", "verify.claims", "monitor.check", "market.intel", "data.question",
-    "commerce.availability",
+    "commerce.availability", "agent.task", "agent.task_pro", "agent.task_max",
     # news.search's `language` picks the publishers' edition, so its articles already arrive in that language.
     "news.search",
     # search.results' `language` is the search language: results come back in it.
@@ -1764,6 +1795,7 @@ def price_of(path: str) -> Optional[float]:
 # a new worker reusing a field gets a valid example for free; a guard test
 # fails if a required field has no value here.
 _EXAMPLE_VALUES = {
+    "task": "Find the official website of Anthropic and summarize what it sells, with sources.",
     "url": "https://example.com",
     "symbol": "AAPL",
     "address": "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd",

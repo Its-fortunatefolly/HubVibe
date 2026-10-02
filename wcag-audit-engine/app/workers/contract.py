@@ -141,6 +141,35 @@ _BQ_ROWS = _arr(_obj({}, [], "One row keyed by column name.", additionalProperti
                 "Result rows, keyed by column name.", [{"name": "James", "n": 4942431}])
 _GIB = _n("Gibibytes BigQuery scanned; the metered cost basis.", 0.012)
 
+_AGENT_STEP = _obj({
+    "n": _i("Step number.", 1),
+    "tool": _s("The HubVibe tool used.", "search.web"),
+    "input": _obj({}, [], "What the tool was asked.", additionalProperties=True,
+                  examples=[{"query": "Anthropic official website"}]),
+    "ok": _b("Whether the step succeeded.", True),
+    "summary": _s("What the step found, or why it did not succeed.",
+                  '{"answer": "Anthropic is an AI safety company..."}'),
+    "seconds": _n("How long the step took.", 4.2),
+}, ["n", "tool", "input", "ok", "summary", "seconds"], "One step of the work.")
+
+_AGENT_RESULT = _obj({
+    "task": _s("The task, as given.", "Find the official website of Anthropic and summarize what it sells, with sources."),
+    "tier": _enum(["quick", "pro", "max"], "The tier that ran: quick ($2.75), pro ($9) or max ($20).", "quick"),
+    "headline": _s("The one-sentence takeaway.", "Anthropic sells the Claude AI models to people and businesses."),
+    "key_points": _arr(_s("A finding.", "Claude is offered through apps, an API and cloud marketplaces."),
+                       "3-7 short findings.", ["Claude is offered through apps, an API and cloud marketplaces."]),
+    "answer": _s("The finished answer.", "Anthropic (anthropic.com) builds the Claude family of AI models..."),
+    "data": {"type": ["object", "null"], "additionalProperties": True,
+             "description": "The JSON answer with exactly the requested `fields` (null when unknown); null when no fields were requested.",
+             "examples": [None]},
+    "steps": _arr(_AGENT_STEP, "Every step of the work, in order."),
+    "tools_used": _arr(_s("Tool name.", "search.web"), "The HubVibe tools that did the work.", ["search.web"]),
+    "sources": _arr(_s("URL.", "https://www.anthropic.com/"), "URLs the answer rests on.",
+                    ["https://www.anthropic.com/"]),
+    "notes": _arr(_s("Note.", "Finished within this tier's scope; the answer uses the work done."),
+                  "Anything that limited the work.", []),
+}, ["task", "tier", "headline", "key_points", "answer", "data", "steps", "tools_used", "sources", "notes"])
+
 _AVAILABILITY = ["in_stock", "out_of_stock", "preorder", "backorder", "limited", "discontinued", "unknown"]
 
 
@@ -2111,6 +2140,8 @@ OUTPUT_SCHEMAS = {
         "model": _MODEL,
     }, ["company", "report", "sources", "partial", "news", "news_note", "model"]),
 
+    **{name: _AGENT_RESULT for name in ("agent.task", "agent.task_pro", "agent.task_max")},
+
     "verify.claims": _obj({
         "claims": _arr(_s("A claim, as given.", "HubVibe sells machine-payable site audits."),
                        "The claims checked, in order.", ["HubVibe sells machine-payable site audits."]),
@@ -2596,6 +2627,21 @@ REPRESENTATIVE_QUERIES = {
         "research a company from live web sources with citations",
         "what does this company do, what does it sell, anything notable",
         "company due diligence brief with sources",
+    ],
+    "agent.task": [
+        "do this task for me using web search and data tools",
+        "an AI agent that completes a task and returns the answer with sources",
+        "autonomous agent to research and answer a question",
+    ],
+    "agent.task_pro": [
+        "deeper multi-step research task done by an agent",
+        "agent that combines company data, news and web research into one answer",
+        "complete a multi-tool task and return structured JSON",
+    ],
+    "agent.task_max": [
+        "hardest multi-step agent task with many tool calls",
+        "full due diligence done by an autonomous agent",
+        "agent that runs up to twenty tool steps and cites every source",
     ],
     "verify.claims": [
         "fact-check these claims against these source URLs",
