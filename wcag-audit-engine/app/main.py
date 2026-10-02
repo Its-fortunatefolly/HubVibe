@@ -4442,6 +4442,15 @@ async def _mcp_worker_tool_call(
             "structuredContent": body,
             "isError": False,
         }
+        # A generated clip travels as MCP's own file reference, so the
+        # agent's client can treat it as a video rather than as a string.
+        delivered = body.get("result") if isinstance(body, dict) else None
+        if isinstance(delivered, dict) and delivered.get("video_url"):
+            tool_result["content"].append({
+                "type": "resource_link", "uri": delivered["video_url"],
+                "name": "video.mp4", "mimeType": delivered.get("mime_type") or "video/mp4",
+                "description": "Generated clip; the link works for 48 hours.",
+            })
         receipt = x402_payments.receipt_meta(getattr(auth, "pending_payment", None))
         if receipt:
             tool_result["_meta"] = receipt

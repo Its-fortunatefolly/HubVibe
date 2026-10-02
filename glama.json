@@ -33515,7 +33515,7 @@
     {
       "name": "hubvibe_video_generate",
       "title": "Generate a video",
-      "description": "AI video generation / text to video: a short clip from a text prompt with Google Veo, returned as a download link (video_url, valid 24 hours) with its MIME type, optionally with generated audio. Input: prompt; optional aspect_ratio (16:9 or 9:16), duration_seconds (4, 6 or 8), generate_audio, inline. $10.00 per call. Returns: prompt, aspect_ratio, duration_seconds, video_url (24 h), video_base64 when inline, mime_type, model.",
+      "description": "AI video generation / text to video: a short clip from a text prompt with Google Veo, returned as a download link (video_url, valid 48 hours) with its MIME type, optionally with generated audio. Input: prompt; optional aspect_ratio (16:9 or 9:16), duration_seconds (4, 6 or 8), generate_audio, inline. $10.00 per call. Returns: prompt, aspect_ratio, duration_seconds, video_url (48 h), video_base64 when inline, mime_type, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -33613,7 +33613,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Download link for the clip, valid 24 hours.",
+                "description": "Download link for the clip, valid 48 hours.",
                 "examples": [
                   "https://hubvibe-io.com/work/media/0f3c9a1e5b7d4c2a8e6f1b3d5a7c9e1f.mp4"
                 ]

@@ -42,6 +42,24 @@ def _load_workers():
 W = _load_workers()
 
 
+def _drop_sibling_cache():
+    """main.py caches its sibling modules (payments, billing...) in
+    sys.modules and some read their configuration at import, so loading main
+    here with x402 configured must not leave that cache configured for the
+    next test file (test_wcag_audit_engine expects it unconfigured) -- the
+    same isolation test_audit_language.py does."""
+    for name in [n for n in sys.modules
+                 if n.startswith("wcag_audit_engine_") and n != "wcag_audit_engine_workers"]:
+        sys.modules.pop(name, None)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_siblings():
+    _drop_sibling_cache()
+    yield
+    _drop_sibling_cache()
+
+
 @pytest.fixture
 def app_module(monkeypatch, tmp_path):
     global W
@@ -50,6 +68,11 @@ def app_module(monkeypatch, tmp_path):
     monkeypatch.setenv("X402_FACILITATOR_URL", "https://facilitator.example")
     monkeypatch.setenv("X402_PAY_TO_ADDRESS", TEST_PAY_TO)
     monkeypatch.setenv("WORKER_LEDGER_PATH", str(tmp_path / "workers.db"))
+    # These tests enter the app's lifespan (so handed-back jobs keep running
+    # between requests); its sanctions and DB-IP prefetch would download tens
+    # of megabytes on every test.
+    monkeypatch.setenv("SANCTIONS_PREFETCH", "0")
+    monkeypatch.setenv("WORKER_MEDIA_DIR", str(tmp_path / "media"))
     W.ledger.reset_for_tests()
     W.runtime.reset_breakers()
     spec = importlib.util.spec_from_file_location("wcag_audit_main_deliver_later", MAIN_PATH)
@@ -327,3 +350,52 @@ def test_media_links_refuse_malformed_unknown_and_expired_names(app_module, monk
     old = os.path.getmtime(tmp_path / name) - W.media_store.KEEP_SECONDS - 10
     os.utime(tmp_path / name, (old, old))
     assert client.get(f"/work/media/{name}").status_code == 404
+
+
+# --- native formats: MCP resource_link, A2A working state and file part -------
+
+def test_a2a_says_working_not_completed_for_a_handed_back_job(app_module):
+    a2a = app_module.a2a
+    processing = {"status": "processing", "job_id": "j1", "collect_url": "/work/jobs/j1",
+                  "billed": False, "detail": "still running"}
+    out = a2a.outcome({"isError": False, "structuredContent": processing}, paid=True)
+    assert out["state"] == "working"
+    assert out["metadata"]["collect_url"] == "/work/jobs/j1"
+    task = a2a.new_task(None, None, "video.generate", {}, out)
+    assert a2a.task_json(task, "1.0")["status"]["state"] == "TASK_STATE_WORKING"
+
+
+def test_a_delivered_video_is_a_file_part_in_a2a_and_a_resource_link_in_mcp(app_module, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    a2a = app_module.a2a
+    url = "https://hubvibe-io.com/work/media/" + "b" * 32 + ".mp4"
+    delivered = {"status": "ok", "result": _valid("video.generate", video_url=url, video_base64=None)}
+    task = a2a.new_task(None, None, "video.generate", {},
+                        a2a.outcome({"isError": False, "structuredContent": delivered}, paid=True))
+    parts_v1 = a2a.task_json(task, "1.0")["artifacts"][0]["parts"]
+    assert {"url": url, "mediaType": "video/mp4", "filename": "video.mp4"} in parts_v1
+    parts_03 = a2a.task_json(task, "0.3")["artifacts"][0]["parts"]
+    assert any(p.get("kind") == "file" and p["file"]["uri"] == url for p in parts_03)
+
+    worker_cls = type(W.catalog.BY_NAME["video.generate"])
+    original = worker_cls.available
+    monkeypatch.setattr(worker_cls, "available",
+                        lambda self: True if self.name == "video.generate" else original(self))
+    registry = dict(W.router.REGISTRY)
+
+    async def clip(ctx, payload):
+        return _valid("video.generate", video_url=url, video_base64=None)
+
+    registry["video.generate"] = clip
+    monkeypatch.setattr(W.router, "REGISTRY", registry)
+    W.router.configure(authorize_and_rate_limit=app_module._authorize_and_rate_limit,
+                       bill=app_module._bill, deliver=app_module._deliver,
+                       failed_response=app_module._failed_audit_response)
+    tool = next(n for n, w in app_module._mcp_worker_tools().items() if w.name == "video.generate")
+    with TestClient(app_module.app) as client:
+        result = client.post("/mcp", headers={"X-API-Key": "test-key"}, json={
+            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": tool, "arguments": {"prompt": "a bee"}}}).json()["result"]
+    links = [c for c in result["content"] if c["type"] == "resource_link"]
+    assert links and links[0]["uri"] == url and links[0]["mimeType"] == "video/mp4"

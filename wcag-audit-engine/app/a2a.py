@@ -169,6 +169,13 @@ def outcome(result: dict, *, paid: bool) -> dict:
     structured = result.get("structuredContent")
     meta = result.get("_meta") or {}
     if not result.get("isError"):
+        if isinstance(structured, dict) and structured.get("status") == "processing":
+            # Handed back to collect (deliver later): still running, and not
+            # charged until it delivers -- not "completed".
+            return {"state": "working",
+                    "text": structured.get("detail") or "Still running; collect at collect_url.",
+                    "metadata": {"billed": False, "collect_url": structured.get("collect_url")},
+                    "data": structured}
         receipt = meta.get("x402/payment-response")
         md = {}
         if receipt:
@@ -241,8 +248,17 @@ def task_json(task: dict, version: str) -> dict:
     if task.get("data") is not None:
         part = {"data": task["data"], "mediaType": "application/json"} if version == "1.0" \
             else {"kind": "data", "data": task["data"]}
+        parts = [part]
+        delivered = task["data"].get("result") if isinstance(task["data"], dict) else None
+        if isinstance(delivered, dict) and delivered.get("video_url"):
+            # The clip as A2A's own file part, beside the JSON.
+            mime = delivered.get("mime_type") or "video/mp4"
+            parts.append({"url": delivered["video_url"], "mediaType": mime, "filename": "video.mp4"}
+                         if version == "1.0" else
+                         {"kind": "file", "file": {"uri": delivered["video_url"], "mimeType": mime,
+                                                   "name": "video.mp4"}})
         body["artifacts"] = [{"artifactId": f"{task['id']}-result",
-                              "name": task.get("skill") or "result", "parts": [part]}]
+                              "name": task.get("skill") or "result", "parts": parts}]
     if version != "1.0":
         body["kind"] = "task"
     return body

@@ -477,7 +477,7 @@ def release_idempotency(key: str) -> None:
 # a job to collect (202) and finishes here. Its row is written before the 202
 # leaves, so a restart can always tell a buyer what happened to it.
 
-DEFERRED_KEEP_SECONDS = 24 * 3600
+DEFERRED_KEEP_SECONDS = 48 * 3600
 
 
 def open_deferred(job_id: str, call_id: str, worker: str, rail: Optional[str] = None,

@@ -585,7 +585,7 @@ def _defer(worker, work, call_id: str, auth) -> JSONResponse:
         "detail": (
             f"{worker.name} is still running. You have not been charged: payment is taken "
             f"only when the result is ready, and nothing is charged if it fails. GET "
-            f"{collect} (free, no payment) to collect it; it is kept for 24 hours."),
+            f"{collect} (free, no payment) to collect it; it is kept for 48 hours."),
     })
 
 
@@ -622,7 +622,7 @@ async def collect_job(job_id: str):
     if row is None:
         return JSONResponse(status_code=404, content={
             "status": "error", "reason": "unknown_job", "billed": False,
-            "detail": "No such job here. Jobs are kept for 24 hours after they start."})
+            "detail": "No such job here. Jobs are kept for 48 hours after they start."})
     if row["state"] == "running":
         return JSONResponse(status_code=202, headers={"Retry-After": "5"}, content={
             "status": "processing", "job_id": job_id, "worker": row["worker"],
@@ -641,13 +641,13 @@ async def collect_job(job_id: str):
 
 @router.get("/work/media/{name}", tags=["workers"], include_in_schema=False)
 async def media(name: str):
-    """A generated file (video.generate) by its link, for 24 hours. Read off
+    """A generated file (video.generate) by its link, for 48 hours. Read off
     the event loop's own pool so a download never waits behind an audit."""
     path = media_store.path_for(name)
     if path is None:
         return JSONResponse(status_code=404, content={
             "status": "error", "reason": "unknown_media", "billed": False,
-            "detail": "No such file. Generated media links last 24 hours."})
+            "detail": "No such file. Generated media links last 48 hours."})
 
     def read():
         with open(path, "rb") as handle:

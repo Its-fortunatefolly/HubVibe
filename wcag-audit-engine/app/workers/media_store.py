@@ -15,7 +15,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-KEEP_SECONDS = 24 * 3600
+# Google keeps a Veo clip for 2 days; so do we.
+KEEP_SECONDS = 48 * 3600
 _NAME = re.compile(r"^[0-9a-f]{32}\.(mp4|png|jpg|wav|mp3)$")
 MEDIA_TYPES = {"mp4": "video/mp4", "png": "image/png", "jpg": "image/jpeg",
                "wav": "audio/wav", "mp3": "audio/mpeg"}
