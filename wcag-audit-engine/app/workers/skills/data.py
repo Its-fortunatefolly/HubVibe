@@ -132,9 +132,9 @@ async def answer_question(ctx, payload: dict) -> dict:
     }
 
 
-# Above query_resumable's own wait (16 s) plus its dry run and job lookup,
+# Above query_resumable's own wait (150 s) plus its dry run and job lookup,
 # so the provider answers "still computing" before this window cuts it off.
-_MODEL_JOB_ATTEMPT_SECONDS = 26
+_MODEL_JOB_ATTEMPT_SECONDS = 165
 
 
 def _id_cols_sql(payload: dict) -> str:
@@ -183,8 +183,8 @@ async def forecast(ctx, payload: dict) -> dict:
     async def call(provider):
         return await provider.query_resumable(sql, max_gib=payload.get("max_scan_gib"))
 
-    # One attempt: a model job still running is answered "still computing"
-    # (unbilled, resumable), never waited on past the caller's timeout.
+    # One attempt. The caller is handed the job to collect at 22 s (deliver
+    # later); a model job still running at 150 s answers "still computing".
     value = await ctx.run("forecast", bigquery.PROVIDERS, call,
                           per_attempt_seconds=_MODEL_JOB_ATTEMPT_SECONDS, max_attempts=1)
     return {

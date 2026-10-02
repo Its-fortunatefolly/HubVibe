@@ -80,6 +80,13 @@ CREATE TABLE IF NOT EXISTS worker_results (
     result_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS deferred_jobs (
+    job_id TEXT PRIMARY KEY, call_id TEXT NOT NULL, worker TEXT NOT NULL,
+    created_at REAL NOT NULL, finished_at REAL, state TEXT NOT NULL,
+    rail TEXT, mpp_tx TEXT, http_status INTEGER, body TEXT, headers TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_dj_created ON deferred_jobs(created_at);
+
 CREATE TABLE IF NOT EXISTS monitor_snapshots (
     url TEXT PRIMARY KEY, content_hash TEXT NOT NULL, text TEXT,
     title TEXT, saved_at REAL NOT NULL
@@ -462,6 +469,76 @@ def release_idempotency(key: str) -> None:
             conn.commit()
         except Exception as exc:
             _note(exc)
+
+
+# --- deliver later ---------------------------------------------------------
+#
+# A job still running when its caller's patience runs out is handed back as
+# a job to collect (202) and finishes here. Its row is written before the 202
+# leaves, so a restart can always tell a buyer what happened to it.
+
+DEFERRED_KEEP_SECONDS = 24 * 3600
+
+
+def open_deferred(job_id: str, call_id: str, worker: str, rail: Optional[str] = None,
+                  mpp_tx: Optional[str] = None) -> None:
+    with _lock:
+        conn = _safe_connect()
+        if conn is None:
+            return
+        try:
+            conn.execute("DELETE FROM deferred_jobs WHERE created_at < ?",
+                         (time.time() - DEFERRED_KEEP_SECONDS,))
+            conn.execute(
+                "INSERT INTO deferred_jobs (job_id, call_id, worker, created_at, state, rail, mpp_tx) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (job_id, call_id, worker, time.time(), "running", rail, mpp_tx))
+            conn.commit()
+        except Exception as exc:
+            _note(exc)
+
+
+def finish_deferred(job_id: str, http_status: int, body: str, headers: str) -> None:
+    with _lock:
+        conn = _safe_connect()
+        if conn is None:
+            return
+        try:
+            conn.execute(
+                "UPDATE deferred_jobs SET state='done', finished_at=?, http_status=?, body=?, "
+                "headers=? WHERE job_id=?", (time.time(), http_status, body, headers, job_id))
+            conn.commit()
+        except Exception as exc:
+            _note(exc)
+
+
+def get_deferred(job_id: str) -> Optional[dict]:
+    with _lock:
+        conn = _safe_connect()
+        if conn is None:
+            return None
+        try:
+            row = conn.execute("SELECT * FROM deferred_jobs WHERE job_id=?", (job_id,)).fetchone()
+            return dict(row) if row is not None else None
+        except Exception as exc:
+            _note(exc)
+            return None
+
+
+def running_deferred() -> list:
+    """Jobs still marked running -- after a restart, the ones it interrupted."""
+    with _lock:
+        conn = _safe_connect()
+        if conn is None:
+            return []
+        try:
+            rows = conn.execute(
+                "SELECT d.*, c.idempotency_key FROM deferred_jobs d "
+                "LEFT JOIN worker_calls c ON c.call_id = d.call_id WHERE d.state='running'").fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            _note(exc)
+            return []
 
 
 # --- reporting --------------------------------------------------------------

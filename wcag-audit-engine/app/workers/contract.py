@@ -595,10 +595,13 @@ OUTPUT_SCHEMAS = {
         "prompt": _s("The prompt.", "A single bee landing on a circuit-board flower, slow motion"),
         "aspect_ratio": _s("Aspect ratio generated.", "16:9"),
         "duration_seconds": _i("Clip length in seconds.", 4),
-        "video_base64": _s("The video, base64, when returned inline.", "AAAAIGZ0eXBpc29t...", nullable=True),
+        "video_url": _s("Download link for the clip, valid 24 hours.",
+                        "https://hubvibe-io.com/work/media/0f3c9a1e5b7d4c2a8e6f1b3d5a7c9e1f.mp4", nullable=True),
+        "video_url_expires_at": _s("When video_url stops working (UTC).", "2026-10-03T14:00:00Z", nullable=True),
+        "video_base64": _s("The video, base64: only when the request set inline=true.", None, nullable=True),
         "gcs_uri": _s("Cloud Storage URI, when the provider stored it instead.", None, nullable=True),
         "mime_type": _s("Video MIME type.", "video/mp4"),
-        "model": _s("Video model.", "veo-3.0-generate-001"),
+        "model": _s("Video model.", "veo-3.1-fast-generate-001"),
     }, ["prompt", "aspect_ratio", "duration_seconds", "mime_type", "model"]),
 
     "stats.probability": _obj({

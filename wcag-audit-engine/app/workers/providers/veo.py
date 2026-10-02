@@ -26,7 +26,9 @@ from . import google_auth
 DEFAULT_REGION = os.environ.get("WORKER_VEO_REGION", "us-central1")
 _MODEL = os.environ.get("WORKER_VEO_MODEL", "veo-3.1-fast-generate-001")
 _TIMEOUT = float(os.environ.get("WORKER_VEO_TIMEOUT_SECONDS", "30"))
-_POLL_INTERVAL = float(os.environ.get("WORKER_VEO_POLL_SECONDS", "8"))
+# A poll is free and a finished clip waited up to a whole interval to be
+# noticed: at 8 s that was up to 8 s added to every video.
+_POLL_INTERVAL = float(os.environ.get("WORKER_VEO_POLL_SECONDS", "2"))
 _ASPECT_RATIOS = {"16:9", "9:16"}
 _DURATIONS = {4, 6, 8}
 

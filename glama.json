@@ -33515,7 +33515,7 @@
     {
       "name": "hubvibe_video_generate",
       "title": "Generate a video",
-      "description": "AI video generation / text to video: a short clip from a text prompt with Google Veo, returned as base64 video bytes (or a GCS URI when large) with its MIME type, optionally with generated audio. Input: prompt; optional aspect_ratio (16:9 or 9:16), duration_seconds (4, 6 or 8), generate_audio. $10.00 per call. Returns: prompt, aspect_ratio, duration_seconds, video_base64 or gcs_uri, mime_type, model.",
+      "description": "AI video generation / text to video: a short clip from a text prompt with Google Veo, returned as a download link (video_url, valid 24 hours) with its MIME type, optionally with generated audio. Input: prompt; optional aspect_ratio (16:9 or 9:16), duration_seconds (4, 6 or 8), generate_audio, inline. $10.00 per call. Returns: prompt, aspect_ratio, duration_seconds, video_url (24 h), video_base64 when inline, mime_type, model.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -33534,6 +33534,10 @@
           "generate_audio": {
             "type": "boolean",
             "description": "Default false."
+          },
+          "inline": {
+            "type": "boolean",
+            "description": "Also return the bytes as video_base64. Default false."
           },
           "language": {
             "type": "string",
@@ -33604,14 +33608,34 @@
                   4
                 ]
               },
+              "video_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Download link for the clip, valid 24 hours.",
+                "examples": [
+                  "https://hubvibe-io.com/work/media/0f3c9a1e5b7d4c2a8e6f1b3d5a7c9e1f.mp4"
+                ]
+              },
+              "video_url_expires_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "When video_url stops working (UTC).",
+                "examples": [
+                  "2026-10-03T14:00:00Z"
+                ]
+              },
               "video_base64": {
                 "type": [
                   "string",
                   "null"
                 ],
-                "description": "The video, base64, when returned inline.",
+                "description": "The video, base64: only when the request set inline=true.",
                 "examples": [
-                  "AAAAIGZ0eXBpc29t..."
+                  null
                 ]
               },
               "gcs_uri": {
@@ -33635,7 +33659,7 @@
                 "type": "string",
                 "description": "Video model.",
                 "examples": [
-                  "veo-3.0-generate-001"
+                  "veo-3.1-fast-generate-001"
                 ]
               }
             },

@@ -3,7 +3,7 @@
 import base64
 import binascii
 
-from .. import runtime
+from .. import media_store, runtime
 from ..providers import imagen, stt, tts, veo
 
 MAX_PROMPT_CHARS = 2_000
@@ -89,6 +89,7 @@ async def generate_video(ctx, payload: dict) -> dict:
     except (TypeError, ValueError):
         raise runtime.InvalidRequest("`duration_seconds` must be a whole number.")
     generate_audio = bool(payload.get("generate_audio", False))
+    inline = bool(payload.get("inline", False))
 
     async def call(provider):
         # A poll loop lives inside this one call, so its budget is what is
@@ -102,9 +103,22 @@ async def generate_video(ctx, payload: dict) -> dict:
     # video, same reasoning as image.generate and speech.synthesize.
     value = await ctx.run("generate", veo.PROVIDERS, call, per_attempt_seconds=ctx.remaining(),
                           max_attempts=1)
+    # Delivered as a link: several megabytes of base64 in the body is of no
+    # use to an agent. Inline bytes only when asked for -- or when the file
+    # cannot be stored, so a finished clip is never lost to a full disk.
+    video_b64 = value["video_base64"]
+    video_url = expires_at = None
+    if video_b64:
+        try:
+            stored = media_store.save(base64.b64decode(video_b64), "mp4")
+            video_url, expires_at = stored["url"], stored["expires_at"]
+        except (OSError, ValueError, binascii.Error):
+            inline = True
     return {
         "prompt": prompt, "aspect_ratio": aspect_ratio,
-        "duration_seconds": value["duration_seconds"], "video_base64": value["video_base64"],
+        "duration_seconds": value["duration_seconds"],
+        "video_url": video_url, "video_url_expires_at": expires_at,
+        "video_base64": video_b64 if inline else None,
         "gcs_uri": value.get("gcs_uri"), "mime_type": value["mime_type"], "model": value["model"],
     }
 

@@ -148,7 +148,24 @@ async def _lifespan(_app: "FastAPI"):
                     _asyncio.ensure_future(workers.providers.iplookup.DBIP.keep_warm())]
         except Exception:
             warm = None
+    # Jobs a restart interrupted are closed failed and unbilled, any MPP
+    # payment they hold released (workers.router.reconcile_interrupted).
+    if globals().get("workers") is not None:
+        try:
+            interrupted = workers.router.reconcile_interrupted(mpp_payments._release_hash)
+            if interrupted:
+                logging.getLogger("hubvibe").warning(
+                    "closed %d job(s) interrupted by the last restart, unbilled", interrupted)
+        except Exception as exc:  # pragma: no cover
+            logging.getLogger("hubvibe").error("job reconciliation failed: %s", exc)
     yield
+    # Let handed-back jobs finish and charge inside the stop grace period
+    # (deploy/vps/docker-compose.yml) instead of being cut off mid-sale.
+    if globals().get("workers") is not None:
+        try:
+            await workers.router.drain(float(os.environ.get("WORKER_DRAIN_SECONDS", "60")))
+        except Exception:  # pragma: no cover
+            pass
     for task in warm or ():
         task.cancel()
 
@@ -2614,7 +2631,9 @@ def _agent_guidance(entries: list, methods: list) -> str:
         "with the price and a payment challenge for each rail its "
         f"x-payment-info.protocols lists. Rails: {rails}. Pay with any one and "
         "resend the same request with the credential. A /work 200 also carries "
-        "a receipt id (GET /work/receipts/{receipt_id}).\n"
+        "a receipt id (GET /work/receipts/{receipt_id}). A /work job still running "
+        "at 22 s answers 202 with collect_url (GET /work/jobs/{job_id}, free); its "
+        "payment is taken only when it delivers.\n"
         "Not billed: a 429 (the rate limit is checked before payment), a call that "
         "produced no result (an MPP tempo or evm credential from one can be "
         "presented again while its challenge is valid), or a /work result that "
@@ -3090,6 +3109,13 @@ def _worker_manifest_entries(live_methods: list) -> dict:
         # The 200 body every capability below returns: the envelope once,
         # each capability's own `result` schema on its row.
         "response_envelope": workers.catalog.contract.RESPONSE_ENVELOPE,
+        "deliver_later": (
+            f"A job still running after {workers.router.deliver_later_after():g} s answers "
+            f"202 with job_id and collect_url; GET {PUBLIC_BASE_URL}/work/jobs/{{job_id}} "
+            "(free) returns 202 while it runs, then exactly the response a waiting caller "
+            "would have received. Payment is taken only when the result is ready; a job "
+            "that fails is not charged."
+        ),
         "receipts": (
             f"Every delivered job's body carries receipt_id and receipt_url; "
             f"GET {PUBLIC_BASE_URL}/work/receipts/{{receipt_id}} (free) returns "
@@ -4423,6 +4449,16 @@ async def _mcp_worker_tool_call(
         return _with_receipt(envelope, auth)
     if status == 402:
         return _mcp_payment_required(request_id, name, price, served)
+    if status == 202:
+        # Handed back to collect (workers.router._defer): not an error, and
+        # not "nothing was charged" either -- the payment is taken when the
+        # result is ready. Collected free at body["collect_url"].
+        tool_result = {
+            "content": [{"type": "text", "text": _json.dumps(body, indent=2)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+        return {"jsonrpc": "2.0", "id": request_id, "result": tool_result}
     if status == 429:
         envelope = _mcp_tool_error(
             request_id,

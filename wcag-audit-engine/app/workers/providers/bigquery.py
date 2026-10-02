@@ -40,10 +40,12 @@ _MAX_GIB = float(os.environ.get("WORKER_BQ_MAX_SCAN_GIB", "20"))
 _MAX_ROWS = int(os.environ.get("WORKER_BQ_MAX_ROWS", "200"))
 # The model jobs (AI.FORECAST, AI.DETECT_ANOMALIES) run on Google's TimesFM,
 # whose time is Google's queue, not our code: on 2026-10-02 the same
-# uncached 56-series query took 28.7 s, then 72.8 s. A paid call cannot wait
-# that out -- routers' clients give up at 30 s -- so these wait at most this
-# long and then answer "still computing" (unbilled) while the job runs on.
-_RESUMABLE_WAIT = float(os.environ.get("WORKER_BQ_RESUMABLE_WAIT_SECONDS", "16"))
+# uncached 56-series query took 28.7 s, then 72.8 s. The caller is never held
+# for that: past 22 s the router hands the job back to collect (deliver later)
+# while it runs on here, paid once on delivery. Only a job still running
+# after this long answers "still computing" (unbilled); the identical request
+# then resumes the same BigQuery job.
+_RESUMABLE_WAIT = float(os.environ.get("WORKER_BQ_RESUMABLE_WAIT_SECONDS", "150"))
 # A job is resumed only by the identical request within this long of its
 # start, so a resumed answer is never older than this.
 _JOB_REUSE_SECONDS = 600

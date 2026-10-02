@@ -1693,17 +1693,18 @@ CATALOG = [
         title="Generate a video",
         description=(
             'AI video generation / text to video: a short clip from a text prompt with Google'
-            ' Veo, returned as base64 video bytes (or a GCS URI when large) with its MIME '
+            ' Veo, returned as a download link (video_url, valid 24 hours) with its MIME '
             'type, optionally with generated audio. Input: prompt; optional aspect_ratio '
-            '(16:9 or 9:16), duration_seconds (4, 6 or 8), generate_audio.'),
+            '(16:9 or 9:16), duration_seconds (4, 6 or 8), generate_audio, inline.'),
         tags=["video-generation", "text-to-video", "veo", "ai-video", "clips"],
         input_schema=_obj({
             "prompt": {"type": "string"},
             "aspect_ratio": {"type": "string", "description": "16:9 or 9:16. Default 16:9."},
             "duration_seconds": {"type": "integer", "description": "4, 6 or 8. Default 6."},
             "generate_audio": {"type": "boolean", "description": "Default false."},
+            "inline": {"type": "boolean", "description": "Also return the bytes as video_base64. Default false."},
         }, ["prompt"]),
-        returns="prompt, aspect_ratio, duration_seconds, video_base64 or gcs_uri, mime_type, model.",
+        returns="prompt, aspect_ratio, duration_seconds, video_url (24 h), video_base64 when inline, mime_type, model.",
         skill="video.generate", max_seconds=MAX_WORKER_SECONDS,
         pricing_basis="Provisional. Flat per-second rate once measured; one attempt only (a retry would re-bill the vendor).",
         requires=("veo",)),

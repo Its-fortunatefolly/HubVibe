@@ -38,9 +38,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
 
 from fastapi import APIRouter, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
-from . import catalog, ledger, runtime
+from . import catalog, ledger, media_store, runtime
 from .context import JobContext
 from .providers import health as provider_health
 from .skills import PRECHECKS, REGISTRY, localize
@@ -408,6 +408,26 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
                      request_hash=ledger.canonical_hash(payload),
                      node_version=_node_version)
 
+    work = asyncio.ensure_future(
+        _complete(worker, payload, call_id, auth, payer, claimed, idempotency_key))
+    after = deliver_later_after()
+    if after <= 0:
+        return await work
+    done, _pending = await asyncio.wait({work}, timeout=after)
+    if work in done:
+        return work.result()
+    # Still running at the caller's limit: a job to collect, charged only when
+    # it delivers.
+    return _defer(worker, work, call_id, auth)
+
+
+async def _complete(worker, payload: dict, call_id: str, auth, payer, claimed: bool,
+                    idempotency_key):
+    """Run the job and finish the sale: the delivery contract, billing, the
+    receipt, the ledger row and the idempotency record. The same code path
+    whether the caller is still waiting or the job was handed back to collect
+    (see _defer); only who receives the response differs.
+    """
     try:
         async with _semaphore:
             result, ctx = await _run_job(worker, payload, call_id)
@@ -520,6 +540,157 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
     return delivered
 
 
+# --- deliver later -----------------------------------------------------------
+#
+# Routers' clients give up at 30 s (Mercator's gateway, measured 2026-10-01),
+# and a slow job -- a Veo video is 30-45 s -- used to be either waited out
+# past that or failed. Now any job still running at this many seconds is
+# answered 202 with a job to collect, keeps running here, and is charged only
+# when it delivers: x402 authorizations stay valid for the 402's 300 s
+# maxTimeoutSeconds, so _bill settles the held payment once the result exists,
+# exactly as it would have inline. A job that fails is never charged.
+
+_DEFERRED: dict = {}
+
+
+def deliver_later_after() -> float:
+    """Seconds a caller waits before a still-running job is handed back."""
+    try:
+        return float(os.environ.get("WORKER_DELIVER_LATER_AFTER_SECONDS", "22"))
+    except ValueError:
+        return 22.0
+
+
+def _defer(worker, work, call_id: str, auth) -> JSONResponse:
+    job_id = uuid.uuid4().hex
+    receipt_id = ledger.receipt_id_for(call_id)
+    rail = _rail_of(auth)
+    # MPP push payments moved money before the job ran; their hash is kept so
+    # a restart that interrupts the job can release it (reconcile_interrupted).
+    mpp_tx = _payment_facts_of(auth).get("tx_hash") if rail == "mpp" else None
+    ledger.open_deferred(job_id, call_id, worker.name, rail=rail, mpp_tx=mpp_tx)
+    _DEFERRED[job_id] = work
+    work.add_done_callback(lambda task: _finish_deferred(job_id, task))
+    collect = f"/work/jobs/{job_id}"
+    return JSONResponse(status_code=202, headers={"Retry-After": "10", "Location": collect}, content={
+        "status": "processing",
+        "worker": worker.name,
+        "price_usd": worker.price_usd,
+        "job_id": job_id,
+        "collect_url": collect,
+        "receipt_id": receipt_id,
+        "receipt_url": f"/work/receipts/{receipt_id}",
+        "retry_after_seconds": 10,
+        "billed": False,
+        "detail": (
+            f"{worker.name} is still running. You have not been charged: payment is taken "
+            f"only when the result is ready, and nothing is charged if it fails. GET "
+            f"{collect} (free, no payment) to collect it; it is kept for 24 hours."),
+    })
+
+
+def _response_parts(response) -> tuple:
+    """(status, JSON body text, headers JSON) of what a waiting caller would
+    have received."""
+    if isinstance(response, dict):
+        return 200, json.dumps(response), "{}"
+    status = getattr(response, "status_code", 500)
+    body = bytes(getattr(response, "body", b"") or b"").decode() or "{}"
+    headers = {k: v for k, v in getattr(response, "headers", {}).items()
+               if k.lower() not in ("content-length", "content-type")}
+    return status, body, json.dumps(headers)
+
+
+def _finish_deferred(job_id: str, task) -> None:
+    _DEFERRED.pop(job_id, None)
+    try:
+        response = task.result()
+    except BaseException as exc:  # pragma: no cover - _complete answers its own failures
+        log.error("deferred job %s crashed: %s: %s", job_id, type(exc).__name__, exc)
+        response = JSONResponse(status_code=502, content={
+            "status": "error", "reason": "internal_error", "billed": False,
+            "detail": "The job failed before it could deliver. Nothing was charged."})
+    status, body, headers = _response_parts(response)
+    ledger.finish_deferred(job_id, status, body, headers)
+
+
+@router.get("/work/jobs/{job_id}", tags=["workers"])
+async def collect_job(job_id: str):
+    """Collect a job that was handed back as 202. Free: the payment rode on
+    the original call and is taken only when the result is ready."""
+    row = ledger.get_deferred(job_id)
+    if row is None:
+        return JSONResponse(status_code=404, content={
+            "status": "error", "reason": "unknown_job", "billed": False,
+            "detail": "No such job here. Jobs are kept for 24 hours after they start."})
+    if row["state"] == "running":
+        return JSONResponse(status_code=202, headers={"Retry-After": "5"}, content={
+            "status": "processing", "job_id": job_id, "worker": row["worker"],
+            "retry_after_seconds": 5, "billed": False,
+            "detail": "Still running. Not charged yet; collect again in a few seconds."})
+    try:
+        headers = json.loads(row["headers"] or "{}")
+    except json.JSONDecodeError:
+        headers = {}
+    try:
+        content = json.loads(row["body"] or "{}")
+    except json.JSONDecodeError:
+        content = {"status": "error", "detail": "Stored result unreadable."}
+    return JSONResponse(status_code=int(row["http_status"] or 200), content=content, headers=headers)
+
+
+@router.get("/work/media/{name}", tags=["workers"], include_in_schema=False)
+async def media(name: str):
+    """A generated file (video.generate) by its link, for 24 hours. Read off
+    the event loop's own pool so a download never waits behind an audit."""
+    path = media_store.path_for(name)
+    if path is None:
+        return JSONResponse(status_code=404, content={
+            "status": "error", "reason": "unknown_media", "billed": False,
+            "detail": "No such file. Generated media links last 24 hours."})
+
+    def read():
+        with open(path, "rb") as handle:
+            return handle.read()
+
+    data = await asyncio.get_running_loop().run_in_executor(_executor, read)
+    return Response(content=data, media_type=media_store.media_type(name),
+                    headers={"Cache-Control": "private, max-age=86400"})
+
+
+def reconcile_interrupted(release_mpp_hash: Optional[Callable] = None) -> int:
+    """At startup: every job a restart interrupted is closed as failed and
+    unbilled, its MPP payment (the one rail that moves money before
+    delivery) released, its idempotency key freed. Returns how many."""
+    count = 0
+    for row in ledger.running_deferred():
+        if row["job_id"] in _DEFERRED:
+            continue
+        ledger.finish_deferred(row["job_id"], 502, json.dumps({
+            "status": "error", "reason": "interrupted", "billed": False,
+            "detail": ("The job was interrupted by a restart of this node before it "
+                       "finished. Nothing was charged; send the request again.")}), "{}")
+        ledger.close_call(row["call_id"], "failed", failure_reason="interrupted",
+                          failure_stage="execute")
+        if row.get("mpp_tx") and release_mpp_hash is not None:
+            try:
+                release_mpp_hash(row["mpp_tx"])
+            except Exception as exc:  # pragma: no cover
+                log.error("could not release MPP payment %s: %s", row["mpp_tx"], exc)
+        if row.get("idempotency_key"):
+            ledger.release_idempotency(row["idempotency_key"])
+        count += 1
+    return count
+
+
+async def drain(timeout: float) -> None:
+    """At shutdown: let handed-back jobs finish (and charge, and store) within
+    `timeout`, rather than cutting them off mid-sale."""
+    pending = [task for task in list(_DEFERRED.values()) if not task.done()]
+    if pending:
+        await asyncio.wait(pending, timeout=timeout)
+
+
 def _unbilled_failure(auth, worker, call_id: str, reason: str, status: int, detail: str):
     """The failed-job response: the core's unbilled failure (prepaid debit
     refunded, MPP credential released, nothing settled) with the worker's
@@ -558,6 +729,10 @@ def register_routes() -> None:
                         "schema": catalog.response_schema(worker),
                         "example": catalog.response_example(worker),
                     }},
+                },
+                202: {
+                    "description": ("Still running: collect free at collect_url (GET "
+                                    "/work/jobs/{job_id}); paid only when it delivers."),
                 },
             })
 
