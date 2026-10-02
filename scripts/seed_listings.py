@@ -90,6 +90,9 @@ ROUTES = [
         "sources": ["https://example.com"]}),
     ("advanced", "/work/research/web", {"question": "What is x402?", "max_sources": 2}),
     ("premium", "/work/research/company", {"company": "Anthropic", "max_sources": 2}),
+    ("standard", "/work/agent/task", {"task": "What does Anthropic sell? One paragraph with sources."}),
+    ("advanced", "/work/agent/task_pro", {"task": "Summarize what Anthropic sells and its most recent news, with sources."}),
+    ("premium", "/work/agent/task_max", {"task": "Brief on Anthropic: products, recent news and public web presence, with sources."}),
     ("standard", "/work/monitor/snapshot", {"url": "https://example.com"}),
     ("standard", "/work/monitor/check", {"url": "https://example.com"}),
     ("standard", "/work/commerce/availability", {
