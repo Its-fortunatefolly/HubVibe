@@ -18,7 +18,7 @@ from .gemini import _cost_micros, model_url, output_tokens_of
 log = __import__("logging").getLogger("hubvibe.workers.search_grounding")
 
 # Auto-updating alias; generated real output on `global` 2026-09-18.
-_MODEL = os.environ.get("WORKER_SEARCH_MODEL", "gemini-flash-latest")
+_MODEL = os.environ.get("WORKER_SEARCH_MODEL", "gemini-3.5-flash")
 _TIMEOUT = float(os.environ.get("WORKER_SEARCH_TIMEOUT_SECONDS", "45"))
 _SEARCH_QUERY_USD = float(os.environ.get("WORKER_SEARCH_PRICE_PER_QUERY_USD", "0.014"))
 

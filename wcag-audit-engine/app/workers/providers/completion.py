@@ -30,9 +30,9 @@ class _VertexGeminiCompletion:
     # explicitly. All generated real output on `global` 2026-09-18.
     models = {m.strip() for m in os.environ.get(
         "WORKER_LLM_GENERATE_GEMINI_MODELS",
-        "gemini-flash-latest,gemini-flash-lite-latest,gemini-3.5-flash,gemini-3.5-flash-lite"
+        "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.8-flash"
     ).split(",") if m.strip()}
-    default_model = os.environ.get("WORKER_LLM_GENERATE_GEMINI_MODEL", "gemini-flash-latest")
+    default_model = os.environ.get("WORKER_LLM_GENERATE_GEMINI_MODEL", "gemini-3.5-flash")
     id = f"vertex:{default_model}"
     _timeout = float(os.environ.get("WORKER_LLM_GENERATE_TIMEOUT_SECONDS", "60"))
 

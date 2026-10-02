@@ -16,7 +16,7 @@ from . import google_auth
 from .gemini import _cost_micros, model_url, output_tokens_of
 
 # Auto-updating alias rather than a pinned version -- see search_grounding.py.
-_MODEL = os.environ.get("WORKER_CODE_EXEC_MODEL", "gemini-flash-latest")
+_MODEL = os.environ.get("WORKER_CODE_EXEC_MODEL", "gemini-3.5-flash")
 _TIMEOUT = float(os.environ.get("WORKER_CODE_EXEC_TIMEOUT_SECONDS", "60"))
 
 

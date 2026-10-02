@@ -47,8 +47,13 @@ def model_url(project: str, model: str, method: str, region: Optional[str] = Non
 # this list stops needing a retirement chase. The second is a pinned GA model
 # (no retirement before 2027-05) in case the alias ever fails to resolve.
 # Both generated real output on `global` 2026-09-18.
+# Vertex AI model ids verified for this project on 2026-10-02. The AI Studio
+# aliases ("gemini-flash-latest") stopped resolving on Vertex that week and
+# every call paid a 404 before falling back; code.execute, which has a
+# single model, failed outright. Keep only ids Vertex serves AND the rate
+# table below prices (a model with no rate leaves cost unmeasured).
 _TEXT_MODELS = os.environ.get(
-    "WORKER_GEMINI_MODELS", "gemini-flash-latest,gemini-3.5-flash"
+    "WORKER_GEMINI_MODELS", "gemini-3.5-flash,gemini-3.8-flash"
 ).split(",")
 
 _TIMEOUT = float(os.environ.get("WORKER_GEMINI_TIMEOUT_SECONDS", "120"))
