@@ -1598,6 +1598,14 @@ def _reject_unfetchable_target(url: Optional[str]) -> Optional[JSONResponse]:
     problem = _target_url_problem(url)
     if problem is None:
         return None
+    # Recorded, so a refusal can be traced to its target afterwards: two paid
+    # bundles were refused on 2026-10-02 and nothing said which hosts.
+    try:
+        from urllib.parse import urlparse
+        refused_host = urlparse(url or "").hostname
+    except ValueError:
+        refused_host = None
+    logging.getLogger("hubvibe.audit").info("refused target host=%s: %s", refused_host, problem)
     return JSONResponse(
         status_code=400,
         content={
@@ -1729,6 +1737,16 @@ def _browser_status() -> dict:
     return {"ok": False, "detail": "chromium missing at %s" % _BROWSER_PATH}
 
 
+# axe-core waits this long for an embedded frame's results. Its own default
+# is 60 s, and a frame that times out fails the WHOLE run.
+_AXE_FRAME_WAIT_MS = 4000
+# A child frame gets this long to have a document before it is passed over,
+# and all child frames together this long, so a page full of stuck frames
+# costs seconds, not seconds per frame.
+_FRAME_READY_MS = 1500
+_FRAME_READY_TOTAL_MS = 2000
+
+
 def _run_axe_all_frames(page) -> dict:
     """Run axe with the harness present in every frame, and disclose any gaps.
 
@@ -1743,29 +1761,80 @@ def _run_axe_all_frames(page) -> dict:
     Injecting into each frame first lets axe reach them. Any frame that refuses
     the injection (cross-origin without CORS, about:blank, torn down mid-run)
     is counted and disclosed on the result rather than passed over in silence.
+
+    Nothing here waits on a frame that cannot answer. A lazy iframe still out
+    of view (`loading="lazy"`: Google Maps and YouTube embeds, on nearly every
+    local-business site) has never loaded, so it has no document -- and
+    frame.evaluate, which has no timeout, waited for one forever. On
+    2026-10-02 four map embeds on andersonplumbingok.com held a paid bundle
+    until the watchdog killed it. Such a frame rendered nothing, so there is
+    nothing in it to audit: it is counted as not loaded. Every other frame gets
+    _FRAME_READY_MS to have a document, and axe gets _AXE_FRAME_WAIT_MS per
+    frame; if a frame still stalls axe, the main page is audited alone and
+    every child frame is disclosed as not audited, instead of the whole audit
+    failing.
     """
+    not_loaded = 0
     unreachable = 0
     frames = list(getattr(page, "frames", []) or [])
+    ready_by = time.monotonic() + _FRAME_READY_TOTAL_MS / 1000
     for frame in frames[1:]:  # frames[0] is the main frame, which run() handles
+        if not frame.url:
+            not_loaded += 1
+            continue
+        left_ms = int((ready_by - time.monotonic()) * 1000)
+        if left_ms <= 0:
+            # Out of time for frames (foxnews.com: 29 frames took 4.2 s to
+            # inject): the rest are disclosed as not audited.
+            unreachable += 1
+            continue
         try:
+            frame.wait_for_load_state("domcontentloaded", timeout=max(1, min(_FRAME_READY_MS, left_ms)))
             frame.evaluate(_axe.axe_script)
         except Exception:
             unreachable += 1
 
-    result = _axe.run(page, options=AXE_OPTIONS).response
+    try:
+        result = _axe.run(page, options={**AXE_OPTIONS, "frameWaitTime": _AXE_FRAME_WAIT_MS}).response
+    except Exception as exc:
+        if "frame timed out" not in str(exc).lower():
+            raise
+        result = _axe.run(page, options={**AXE_OPTIONS, "iframes": False}).response
+        unreachable = len(frames) - 1 - not_loaded
     if isinstance(result, dict):
-        result["frames_audited"] = max(len(frames) - unreachable, 1)
+        result["frames_audited"] = max(len(frames) - unreachable - not_loaded, 1)
         result["frames_unreachable"] = unreachable
+        result["frames_not_loaded"] = not_loaded
     return result
+
+
+def _coverage(raw: dict, loaded: Optional[bool] = None) -> dict:
+    """What the accessibility audit could and could not see, for the buyer.
+
+    The frame counts were computed and then dropped by every route; a result
+    that says nothing about a frame it skipped reads as "that frame is clean".
+    """
+    coverage = {
+        "frames_audited": raw.get("frames_audited", 1),
+        "frames_unreachable": raw.get("frames_unreachable", 0),
+        "frames_not_loaded": raw.get("frames_not_loaded", 0),
+    }
+    if loaded is not None:
+        coverage["page_finished_loading"] = loaded
+    return coverage
 
 
 def _run_axe(html: Optional[str], url: Optional[str]) -> dict:
     def _audit(page) -> dict:
+        loaded = None
         if url:
-            audits.goto_guarded(page, url, wait_until="networkidle", timeout=15000)
+            _document, loaded = audits.load_page(page, url, load_timeout_ms=15000, idle_seconds=5.0)
         else:
             page.set_content(html, wait_until="networkidle", timeout=15000)
-        return _run_axe_all_frames(page)
+        raw = _run_axe_all_frames(page)
+        if isinstance(raw, dict) and loaded is not None:
+            raw["page_finished_loading"] = loaded
+        return raw
 
     # Pooled browser, fresh isolated context per call -- see browser_pool.
     return browser_pool.with_page(_audit)
@@ -1779,9 +1848,16 @@ BUNDLE_BUDGET_SECONDS = float(os.environ.get("AUDIT_BUNDLE_BUDGET_SECONDS", "24"
 # Navigation waits for the load event; network-idle is then waited for only
 # as long as the budget allows, rather than failing a page whose trackers
 # never go quiet. axe-core and the DOM count need the rest.
-_BUNDLE_LOAD_TIMEOUT_MS = 15000
+# Heavy pages need the time for axe-core itself (11 s on foxnews.com's 5,400
+# elements on this box), so the bundle stops waiting for `load` at 6 s and
+# reports "did not finish loading within 6 s" -- true, and the single most
+# important performance fact about such a page. Small sites load in 1-3 s.
+_BUNDLE_LOAD_TIMEOUT_MS = 6000
 _BUNDLE_IDLE_CEILING_SECONDS = 8.0
-_BUNDLE_AXE_RESERVE_SECONDS = 5.0
+# axe's worst case: child frames' readiness (2 s in all), one frame stalling
+# axe (4 s), then the main page alone (~2 s). Loading must leave this much of
+# the browser job's deadline (BUNDLE_BUDGET_SECONDS - 2) for it.
+_BUNDLE_AXE_RESERVE_SECONDS = 8.0
 
 _bundle_document = threading.local()
 
@@ -1839,22 +1915,11 @@ def _run_axe_and_performance(url: str):
             stats["bytes"] += measured
 
     def _both(page):
-        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
-        started = time.monotonic()
         page.on("response", _on_response)
-        document = audits.goto_guarded(page, url, wait_until="load", timeout=_BUNDLE_LOAD_TIMEOUT_MS)
-        idle_for = min(
-            _BUNDLE_IDLE_CEILING_SECONDS,
-            BUNDLE_BUDGET_SECONDS - _BUNDLE_AXE_RESERVE_SECONDS - (time.monotonic() - started),
-        )
-        if idle_for > 0:
-            try:
-                page.wait_for_load_state("networkidle", timeout=int(idle_for * 1000))
-            except PlaywrightTimeoutError:
-                # Still busy (analytics, chat widgets, long-polling): audit
-                # the page as loaded rather than lose the whole call.
-                pass
+        document, loaded = audits.load_page(
+            page, url, load_timeout_ms=_BUNDLE_LOAD_TIMEOUT_MS,
+            idle_seconds=_BUNDLE_IDLE_CEILING_SECONDS,
+            budget_seconds=BUNDLE_BUDGET_SECONDS - 2 - _BUNDLE_AXE_RESERVE_SECONDS)
         try:
             _bundle_document.value = _BrowserDocument(
                 document.url, document.status, document.all_headers(), document.text())
@@ -1862,12 +1927,16 @@ def _run_axe_and_performance(url: str):
             _bundle_document.value = None
         dom_node_count = page.evaluate("document.querySelectorAll('*').length")
         # axe runs against the already-loaded page rather than reloading it.
-        return _run_axe_all_frames(page), dom_node_count
+        axe_raw = _run_axe_all_frames(page)
+        if isinstance(axe_raw, dict):
+            axe_raw["page_finished_loading"] = loaded
+        return axe_raw, dom_node_count, loaded
 
-    axe_raw, dom_node_count = browser_pool.with_page(
+    axe_raw, dom_node_count, loaded = browser_pool.with_page(
         _both, user_agent=audits.USER_AGENT, deadline_seconds=BUNDLE_BUDGET_SECONDS - 2)
     performance = audits.performance_result_from_metrics(
-        dom_node_count, stats["bytes"], stats["requests"]
+        dom_node_count, stats["bytes"], stats["requests"],
+        load_incomplete_after_seconds=None if loaded else _BUNDLE_LOAD_TIMEOUT_MS / 1000,
     )
     return axe_raw, performance
 
@@ -3557,6 +3626,7 @@ def _mcp_run_tool(name: str, args: dict) -> dict:
                 {"id": v["id"], "impact": v.get("impact"), "help": v.get("help")}
                 for v in violations
             ],
+            "coverage": _coverage(wcag_raw, wcag_raw.get("page_finished_loading")),
         }
         seo = audits.run_seo_audit(None, url, response=shared)
         security = audits.run_security_audit(url, response=shared)
@@ -4925,6 +4995,7 @@ def audit_wcag(
             }
             for v in violations
         ],
+        "coverage": _coverage(raw, raw.get("page_finished_loading")),
     }
     if payload.language:
         try:
@@ -5104,6 +5175,7 @@ def audit_bundle(
                 }
                 for v in wcag_violations
             ],
+            "coverage": _coverage(wcag_raw, wcag_raw.get("page_finished_loading")),
         }
         seo_result = audits.run_seo_audit(None, payload.url, response=shared_response)
         security_result = audits.run_security_audit(payload.url, response=shared_response)

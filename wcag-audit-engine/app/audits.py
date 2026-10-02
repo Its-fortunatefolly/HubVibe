@@ -41,7 +41,7 @@ except ImportError:
         sys.modules[_POOL_NAME] = browser_pool
         _spec.loader.exec_module(browser_pool)
 
-USER_AGENT = "HubVibeAuditBot/1.0 (+https://hubvibe.dev)"
+USER_AGENT = "HubVibeAuditBot/1.0 (+https://hubvibe-io.com)"
 _USER_AGENT = USER_AGENT  # backwards-compatible alias
 _HTTP_TIMEOUT = 15.0
 
@@ -133,10 +133,23 @@ def blocked_target_reason(url: Optional[str]) -> Optional[str]:
     if host in _BLOCKED_TARGET_HOSTS or host.endswith(".internal") or host.endswith(".localhost"):
         return "points at an internal host, which this service will not fetch"
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, UnicodeError, OverflowError):
-        return "does not resolve to any address"
+    infos = None
+    for attempt in (1, 2):
+        try:
+            infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+            break
+        except socket.gaierror as exc:
+            # EAI_AGAIN is the resolver failing for the moment, not the
+            # domain failing to exist: telling a paying caller their URL
+            # "does not resolve" on a hiccup of ours loses the sale. Ask once
+            # more before saying so.
+            if attempt == 1 and exc.errno == getattr(socket, "EAI_AGAIN", -3):
+                import time as _time
+                _time.sleep(0.3)
+                continue
+            return "does not resolve to any address"
+        except (UnicodeError, OverflowError):
+            return "does not resolve to any address"
     for info in infos:
         raw = str(info[4][0]).split("%")[0]
         try:
@@ -193,7 +206,50 @@ def fetch_once(url: str):
     raise TargetNotFetchable(f"followed more than {_MAX_REDIRECTS} redirects")
 
 
+def load_page(page, url: str, load_timeout_ms: int = 15000, idle_seconds: float = 5.0,
+              budget_seconds: Optional[float] = None):
+    """Navigate to `url` and wait for it as far as time allows; a page is never
+    failed for being slow to finish.
+
+    The document existing (DOMContentLoaded) is the one hard requirement:
+    without it there is nothing to audit. The load event is then waited for
+    within what is left of `load_timeout_ms`, and network idle for at most
+    `idle_seconds` (and within `budget_seconds` of the start, when given). A
+    page whose ads and trackers keep it from ever finishing -- cnn.com never
+    fired `load` within 15 s on 2026-10-02 -- used to fail the whole audit;
+    it is now audited as it stands and the caller is told it did not finish.
+
+    Returns (document_response, loaded).
+    """
+    import time as _time
+
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    started = _time.monotonic()
+    document = goto_guarded(page, url, wait_until="domcontentloaded", timeout=load_timeout_ms)
+    left_ms = int(load_timeout_ms - (_time.monotonic() - started) * 1000)
+    loaded = True
+    try:
+        page.wait_for_load_state("load", timeout=max(1, left_ms))
+    except PlaywrightTimeoutError:
+        loaded = False
+    idle_for = idle_seconds
+    if budget_seconds is not None:
+        idle_for = min(idle_for, budget_seconds - (_time.monotonic() - started))
+    if loaded and idle_for > 0:
+        try:
+            page.wait_for_load_state("networkidle", timeout=int(idle_for * 1000))
+        except PlaywrightTimeoutError:
+            # Still busy (analytics, chat widgets, long-polling): audit the
+            # page as loaded rather than lose the call.
+            pass
+    return document, loaded
+
+
 HEAVY_PAGE_BYTES = 3_000_000
+# The single performance audit answers inside the 30 s routers wait, like the
+# bundle: navigation and load within this, then at most 8 s for network idle.
+_PERFORMANCE_LOAD_TIMEOUT_MS = 15000
 
 
 def response_bytes(response) -> Optional[int]:
@@ -482,6 +538,7 @@ def performance_result_from_metrics(
     resource_bytes: int,
     request_count: int,
     unmeasured_responses: int = 0,
+    load_incomplete_after_seconds: Optional[float] = None,
 ) -> dict:
     """Score already-measured page metrics.
 
@@ -491,6 +548,20 @@ def performance_result_from_metrics(
     second page load of the same URL.
     """
     findings = []
+    if load_incomplete_after_seconds is not None:
+        # Itself the most important performance finding there is, and the
+        # reason the numbers below are a floor rather than a total.
+        findings.append(
+            {
+                "id": "page-load-incomplete",
+                "severity": "serious",
+                "detail": (
+                    f"The page did not finish loading within {load_incomplete_after_seconds:g} s; "
+                    "the weight and request count below are what had loaded by then, so the "
+                    "page is at least this heavy"
+                ),
+            }
+        )
     if dom_node_count > 1500:
         findings.append(
             {
@@ -564,17 +635,19 @@ def run_performance_audit(url: Optional[str]) -> dict:
         else:
             resource_bytes += measured
 
-    def _measure(page) -> int:
+    def _measure(page):
         page.on("response", _on_response)
-        goto_guarded(page, url, wait_until="networkidle", timeout=30000)
-        return page.evaluate("document.querySelectorAll('*').length")
+        _document, loaded = load_page(page, url, load_timeout_ms=_PERFORMANCE_LOAD_TIMEOUT_MS,
+                                      idle_seconds=8.0)
+        return page.evaluate("document.querySelectorAll('*').length"), loaded
 
     # Pooled browser, fresh isolated context per call -- see browser_pool.
     # Isolation matters for this audit in particular: a shared cache would
     # make transferred-bytes and request-count read low on any URL a previous
     # audit had already warmed, silently reporting a page as lighter than it is.
-    dom_node_count = browser_pool.with_page(_measure, user_agent=_USER_AGENT)
+    dom_node_count, loaded = browser_pool.with_page(_measure, user_agent=_USER_AGENT)
 
     return performance_result_from_metrics(
-        dom_node_count, resource_bytes, request_count, unmeasured_responses=unmeasured
+        dom_node_count, resource_bytes, request_count, unmeasured_responses=unmeasured,
+        load_incomplete_after_seconds=None if loaded else _PERFORMANCE_LOAD_TIMEOUT_MS / 1000,
     )

@@ -5190,10 +5190,16 @@ def test_a_successful_topup_carries_no_owed_warning(monkeypatch):
 
 
 class _FakeFrame:
-    def __init__(self, name, refuses=False):
+    def __init__(self, name, refuses=False, url=None):
         self.name = name
         self.refuses = refuses
         self.injected = False
+        # A real Playwright frame's url is "" until it has navigated.
+        self.url = f"https://frames.example/{name}" if url is None else url
+        self.waited = False
+
+    def wait_for_load_state(self, state, timeout=None):
+        self.waited = True
 
     def evaluate(self, script):
         if self.refuses:
@@ -5230,6 +5236,145 @@ def test_axe_is_injected_into_child_frames_before_running(monkeypatch):
     assert not page.frames[0].injected, "the main frame is axe.run's own job, not ours"
     assert result["frames_unreachable"] == 1, "a frame that refused injection was not disclosed"
     assert result["frames_audited"] == 2
+
+
+def test_a_frame_that_never_loaded_is_skipped_not_waited_on(monkeypatch):
+    """A lazy iframe still out of view (Google Maps embeds on
+    andersonplumbingok.com, 2026-10-02) has no document; frame.evaluate has no
+    timeout and waited for one forever, until the watchdog killed the paid
+    bundle. It rendered nothing, so it is counted as not loaded, never touched."""
+    module = _load_main(monkeypatch)
+    lazy = _FakeFrame("map", url="")
+    page = type("P", (), {"frames": [_FakeFrame("main"), lazy, _FakeFrame("widget")]})()
+    monkeypatch.setattr(module._axe, "axe_script", "AXE_BUNDLE", raising=False)
+    monkeypatch.setattr(
+        module._axe, "run", lambda p, options=None: type("R", (), {"response": {"violations": []}})()
+    )
+    result = module._run_axe_all_frames(page)
+    assert not lazy.injected and not lazy.waited
+    assert result["frames_not_loaded"] == 1
+    assert result["frames_audited"] == 2
+    assert result["frames_unreachable"] == 0
+
+
+def test_a_frame_that_stalls_axe_falls_back_to_the_main_page(monkeypatch):
+    """axe fails the WHOLE run when one frame times out (its default wait is
+    60 s). Now the wait is bounded and the main page is audited alone, with
+    every child frame disclosed as not audited."""
+    module = _load_main(monkeypatch)
+    page = type("P", (), {"frames": [_FakeFrame("main"), _FakeFrame("a"), _FakeFrame("b")]})()
+    monkeypatch.setattr(module._axe, "axe_script", "AXE_BUNDLE", raising=False)
+    calls = []
+
+    def _run(p, options=None):
+        calls.append(dict(options or {}))
+        if options.get("iframes") is False:
+            return type("R", (), {"response": {"violations": [{"id": "image-alt"}]}})()
+        raise RuntimeError("Error: Axe in frame timed out: iframe:nth-child(2)")
+
+    monkeypatch.setattr(module._axe, "run", _run)
+    result = module._run_axe_all_frames(page)
+    assert calls[0]["frameWaitTime"] == module._AXE_FRAME_WAIT_MS
+    assert calls[1]["iframes"] is False
+    assert result["violations"] == [{"id": "image-alt"}]
+    assert result["frames_unreachable"] == 2 and result["frames_audited"] == 1
+
+
+def test_an_axe_error_that_is_not_a_frame_timeout_still_fails_the_audit(monkeypatch):
+    module = _load_main(monkeypatch)
+    page = type("P", (), {"frames": [_FakeFrame("main")]})()
+    monkeypatch.setattr(module._axe, "axe_script", "AXE_BUNDLE", raising=False)
+
+    def _boom(p, options=None):
+        raise RuntimeError("axe is not defined")
+
+    monkeypatch.setattr(module._axe, "run", _boom)
+    with pytest.raises(RuntimeError):
+        module._run_axe_all_frames(page)
+
+
+def test_a_page_that_never_finishes_loading_is_audited_as_it_stands(monkeypatch):
+    """cnn.com never fired `load` within 15 s (2026-10-02) and the whole bundle
+    failed. The document existing is the one hard requirement now."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    module = _load_main(monkeypatch)
+    waited = []
+
+    class _SlowPage(_FakePage):
+        def goto(self, url, **kwargs):
+            waited.append(("goto", kwargs.get("wait_until")))
+            return _FakeDocument()
+
+        def wait_for_load_state(self, state, **kwargs):
+            waited.append(state)
+            if state == "load":
+                raise PlaywrightTimeoutError("load never fired")
+
+    document, loaded = module.audits.load_page(_SlowPage(), "https://example.com", load_timeout_ms=50)
+    assert loaded is False
+    assert document.status == 200
+    assert waited == [("goto", "domcontentloaded"), "load"]   # no network-idle wait after a miss
+
+
+def test_performance_reports_an_incomplete_load_as_a_finding(monkeypatch):
+    audits = _load_main(monkeypatch).audits
+    result = audits.performance_result_from_metrics(800, 1_200_000, 40, load_incomplete_after_seconds=13)
+    assert result["pass"] is False
+    assert result["findings"][0]["id"] == "page-load-incomplete"
+    assert result["findings"][0]["severity"] == "serious"
+    assert audits.performance_result_from_metrics(800, 1_200_000, 40)["pass"] is True
+
+
+def test_a_resolver_hiccup_is_retried_before_refusing_the_target(monkeypatch):
+    """EAI_AGAIN is our resolver failing for the moment, not the domain not
+    existing; one retry before telling a paying caller their URL is dead."""
+    import socket
+
+    module = _load_main(monkeypatch)
+    monkeypatch.delenv("ALLOW_PRIVATE_TARGETS", raising=False)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def _flaky(host, port, proto=0):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _flaky)
+    assert module.audits.blocked_target_reason("https://example.com/") is None
+    assert calls["n"] == 2
+
+    def _nxdomain(host, port, proto=0):
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _nxdomain)
+    assert module.audits.blocked_target_reason("https://no-such-host.example/") == \
+        "does not resolve to any address"
+
+
+def test_the_audit_user_agent_names_our_own_domain(monkeypatch):
+    module = _load_main(monkeypatch)
+    assert "hubvibe-io.com" in module.audits.USER_AGENT
+    assert "hubvibe.dev" not in module.audits.USER_AGENT
+
+
+def test_the_bundle_tells_the_buyer_what_the_accessibility_audit_covered(monkeypatch):
+    class _Ok:
+        status_code = 200
+        url = "https://example.com/"
+        headers = {}
+        text = "<html></html>"
+
+        def raise_for_status(self):
+            return None
+
+    module, response, seen = _bundle_with_get(monkeypatch, lambda url: _Ok())
+    assert response.status_code == 200, response.json()
+    coverage = response.json()["wcag"]["coverage"]
+    assert coverage["frames_audited"] >= 1
+    assert coverage["page_finished_loading"] is True
 
 
 def test_a_page_with_no_iframes_reports_one_frame_audited(monkeypatch):
