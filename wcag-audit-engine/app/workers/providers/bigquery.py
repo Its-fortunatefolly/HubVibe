@@ -21,9 +21,11 @@ list even inside the 1 TiB monthly free tier so the ledger never flatters a
 margin. BQ_PRICE_PER_TIB overrides it.
 """
 
+import hashlib
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 import httpx
@@ -36,6 +38,15 @@ log = logging.getLogger("hubvibe.workers.bigquery")
 _TIMEOUT = float(os.environ.get("WORKER_BQ_TIMEOUT_SECONDS", "120"))
 _MAX_GIB = float(os.environ.get("WORKER_BQ_MAX_SCAN_GIB", "20"))
 _MAX_ROWS = int(os.environ.get("WORKER_BQ_MAX_ROWS", "200"))
+# The model jobs (AI.FORECAST, AI.DETECT_ANOMALIES) run on Google's TimesFM,
+# whose time is Google's queue, not our code: on 2026-10-02 the same
+# uncached 56-series query took 28.7 s, then 72.8 s. A paid call cannot wait
+# that out -- routers' clients give up at 30 s -- so these wait at most this
+# long and then answer "still computing" (unbilled) while the job runs on.
+_RESUMABLE_WAIT = float(os.environ.get("WORKER_BQ_RESUMABLE_WAIT_SECONDS", "16"))
+# A job is resumed only by the identical request within this long of its
+# start, so a resumed answer is never older than this.
+_JOB_REUSE_SECONDS = 600
 _BYTES_PER_GIB = 1024 ** 3
 _BYTES_PER_TIB = 1024 ** 4
 
@@ -60,6 +71,13 @@ def _cost_micros(bytes_processed: int):
     if rate is None:
         return None, False
     return int(round((bytes_processed / _BYTES_PER_TIB) * rate * 1_000_000)), True
+
+
+def _job_id(sql: str, ceiling_bytes: int, window: int) -> str:
+    """The job id the identical request computes again: same SQL, same byte
+    ceiling, same 10-minute window."""
+    digest = hashlib.sha256(f"{sql}\n{ceiling_bytes}".encode()).hexdigest()[:40]
+    return f"hubvibe_{digest}_{window}"
 
 
 def validate_sql(sql: str) -> str:
@@ -180,6 +198,100 @@ class _BigQuery:
         billed = int(data.get("totalBytesProcessed") or estimated or 0)
         cost, measured = _cost_micros(billed)
 
+        return runtime.ProviderResult(
+            value={
+                "columns": schema,
+                "rows": rows,
+                "row_count": len(rows),
+                "total_rows": int(data.get("totalRows") or len(rows)),
+                "truncated": int(data.get("totalRows") or 0) > len(rows),
+                "bytes_processed": billed,
+                "gib_processed": round(billed / _BYTES_PER_GIB, 4),
+                "cache_hit": bool(data.get("cacheHit")),
+            },
+            cost_micros=cost, cost_measured=measured,
+            usage=f"bytes={billed}")
+
+    async def query_resumable(self, sql: str, max_gib: Optional[float] = None,
+                              wait_seconds: Optional[float] = None) -> runtime.ProviderResult:
+        """For the long model jobs: a BigQuery job whose id is derived from
+        the query, waited on for at most `wait_seconds`.
+
+        Still running then -> StillComputing (the router answers 503 with
+        Retry-After, nothing billed). The identical request sent again finds
+        that same job -- started in this 10-minute window or the previous
+        one, at most _JOB_REUSE_SECONDS ago -- and collects its result
+        instead of paying for a second run.
+        """
+        if not google_auth.configured():
+            raise runtime.ProviderUnavailable(google_auth.unavailable_reason())
+
+        ceiling_gib = max_gib if max_gib is not None else _MAX_GIB
+        ceiling_bytes = int(ceiling_gib * _BYTES_PER_GIB)
+        dry = await self._post({"query": sql, "useLegacySql": False, "dryRun": True})
+        estimated = int(dry.get("totalBytesProcessed") or 0)
+        if estimated > ceiling_bytes:
+            raise runtime.InvalidRequest(
+                f"Query would scan {estimated / _BYTES_PER_GIB:.2f} GiB, over this "
+                f"worker's {ceiling_gib:.0f} GiB limit. Narrow it (fewer columns, "
+                f"a partition filter, or a LIMIT on a subquery).")
+        location = (dry.get("jobReference") or {}).get("location") or dry.get("location")
+
+        project = google_auth.project()
+        base = f"https://bigquery.googleapis.com/bigquery/v2/projects/{project}"
+        located = {"location": location} if location else {}
+        now = time.time()
+        window = int(now // _JOB_REUSE_SECONDS)
+
+        job_id = None
+        previous = _job_id(sql, ceiling_bytes, window - 1)
+        try:
+            job = await self._request("GET", f"{base}/jobs/{previous}", params=located)
+            started = int((job.get("statistics") or {}).get("creationTime") or 0) / 1000
+            if now - started < _JOB_REUSE_SECONDS:
+                job_id = previous
+        except runtime.PermanentProviderError:
+            pass  # no such job: the usual case
+        if job_id is None:
+            job_id = _job_id(sql, ceiling_bytes, window)
+            reference = {"projectId": project, "jobId": job_id}
+            if location:
+                reference["location"] = location
+            try:
+                await self._request("POST", f"{base}/jobs", json={
+                    "jobReference": reference,
+                    "configuration": {"query": {
+                        "query": sql, "useLegacySql": False,
+                        "maximumBytesBilled": str(ceiling_bytes)}}})
+            except runtime.PermanentProviderError as exc:
+                # The identical request already started it this window.
+                if "already exists" not in str(exc).lower():
+                    raise
+
+        wait = _RESUMABLE_WAIT if wait_seconds is None else float(wait_seconds)
+        deadline = time.monotonic() + wait
+        while True:
+            remaining = deadline - time.monotonic()
+            data = await self._request("GET", f"{base}/queries/{job_id}", params={
+                **located, "maxResults": _MAX_ROWS,
+                "timeoutMs": max(1, int(remaining * 1000))})
+            if data.get("jobComplete") is not False:
+                break
+            # BigQuery may answer before timeoutMs; keep waiting until ours.
+            if deadline - time.monotonic() <= 0.5:
+                raise runtime.StillComputing(
+                    f"BigQuery is still running this model job (job {job_id}). Nothing "
+                    f"was charged. Send the identical request again in about 20 seconds: "
+                    f"it resumes this same job and answers as soon as it finishes.",
+                    retry_after=20)
+
+        schema = [f.get("name") for f in (data.get("schema") or {}).get("fields", [])]
+        rows = []
+        for row in (data.get("rows") or [])[:_MAX_ROWS]:
+            values = [cell.get("v") for cell in row.get("f", [])]
+            rows.append(dict(zip(schema, values)) if schema else values)
+        billed = int(data.get("totalBytesProcessed") or estimated or 0)
+        cost, measured = _cost_micros(billed)
         return runtime.ProviderResult(
             value={
                 "columns": schema,

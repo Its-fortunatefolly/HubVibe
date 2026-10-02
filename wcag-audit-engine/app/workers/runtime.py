@@ -77,6 +77,18 @@ class DeadlineExceeded(WorkerError):
     reason = "deadline_exceeded"
 
 
+class StillComputing(WorkerError):
+    """The provider is still running the job and will finish it; this call
+    stopped waiting so the caller is not held past its own timeout. Never
+    billed, never retried in-call (waiting longer is the thing that cannot be
+    done here). The identical request, sent again, resumes the same job."""
+    reason = "still_computing"
+
+    def __init__(self, detail: str, retry_after: int = 20):
+        super().__init__(detail)
+        self.retry_after = int(retry_after)
+
+
 class ProviderResult:
     """What a provider hands back: the value, plus what it cost us.
 
@@ -241,7 +253,7 @@ async def run_with_policy(providers: list, call: Callable, deadline_seconds: flo
                 last_error = TransientProviderError(
                     f"{provider.id} did not answer within {window:.0f}s.",
                     reason="provider_timeout")
-            except InvalidRequest:
+            except (InvalidRequest, StillComputing):
                 # The CALLER's input is wrong, not any provider's fault -- no
                 # retry, no fallback to the next provider (it would refuse
                 # the same input too), straight out to the 400 the router

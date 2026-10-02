@@ -132,6 +132,11 @@ async def answer_question(ctx, payload: dict) -> dict:
     }
 
 
+# Above query_resumable's own wait (16 s) plus its dry run and job lookup,
+# so the provider answers "still computing" before this window cuts it off.
+_MODEL_JOB_ATTEMPT_SECONDS = 26
+
+
 def _id_cols_sql(payload: dict) -> str:
     """`, id_cols => [...]` for a table holding several series at once (one
     row per series per timestamp), or "" when the caller names none."""
@@ -176,13 +181,19 @@ async def forecast(ctx, payload: dict) -> dict:
         f"horizon => {horizon}{id_cols_sql})")
 
     async def call(provider):
-        return await provider.query(sql, max_gib=payload.get("max_scan_gib"))
+        return await provider.query_resumable(sql, max_gib=payload.get("max_scan_gib"))
 
-    value = await ctx.run("forecast", bigquery.PROVIDERS, call, per_attempt_seconds=150)
+    # One attempt: a model job still running is answered "still computing"
+    # (unbilled, resumable), never waited on past the caller's timeout.
+    value = await ctx.run("forecast", bigquery.PROVIDERS, call,
+                          per_attempt_seconds=_MODEL_JOB_ATTEMPT_SECONDS, max_attempts=1)
     return {
         "table": table, "timestamp_col": timestamp_col, "data_col": data_col,
         "horizon": horizon, "columns": value["columns"], "rows": value["rows"],
-        "row_count": value["row_count"], "gib_processed": value["gib_processed"],
+        "row_count": value["row_count"],
+        "total_rows": value.get("total_rows", value["row_count"]),
+        "truncated": bool(value.get("truncated")),
+        "gib_processed": value["gib_processed"],
     }
 
 
@@ -230,22 +241,38 @@ async def detect_anomalies(ctx, payload: dict) -> dict:
     else:
         history_sql, target_sql = f"TABLE `{history_table}`", f"TABLE `{target_table}`"
         mode, periods = "two_tables", None
+    # Anomalies first, most probable first, so the rows returned (capped at
+    # the provider's row limit) are the ones that matter; and the count is
+    # taken over EVERY scored point inside the query. Counted over the
+    # returned rows, a 56-series job (1,680 points, 200 returned) reported
+    # 15 anomalies when there were 47 (measured 2026-10-02).
     sql = (
-        f"SELECT * FROM AI.DETECT_ANOMALIES({history_sql}, {target_sql}, "
+        f"SELECT *, COUNTIF(is_anomaly) OVER () AS _hv_anomaly_total "
+        f"FROM AI.DETECT_ANOMALIES({history_sql}, {target_sql}, "
         f"data_col => '{data_col}', timestamp_col => '{timestamp_col}', "
-        f"anomaly_prob_threshold => {threshold}{_id_cols_sql(payload)})")
+        f"anomaly_prob_threshold => {threshold}{_id_cols_sql(payload)}) "
+        f"ORDER BY is_anomaly DESC, anomaly_probability DESC")
 
     async def call(provider):
-        return await provider.query(sql, max_gib=payload.get("max_scan_gib"))
+        return await provider.query_resumable(sql, max_gib=payload.get("max_scan_gib"))
 
-    value = await ctx.run("detect_anomalies", bigquery.PROVIDERS, call, per_attempt_seconds=150)
+    value = await ctx.run("detect_anomalies", bigquery.PROVIDERS, call,
+                          per_attempt_seconds=_MODEL_JOB_ATTEMPT_SECONDS, max_attempts=1)
+    rows = [r for r in value["rows"] if isinstance(r, dict)]
+    anomaly_total = 0
+    if rows and rows[0].get("_hv_anomaly_total") is not None:
+        anomaly_total = int(rows[0]["_hv_anomaly_total"])
+    for r in rows:
+        r.pop("_hv_anomaly_total", None)
     return {
         "history_table": history_table, "target_table": target_table,
         "timestamp_col": timestamp_col, "data_col": data_col,
         "anomaly_prob_threshold": threshold, "mode": mode, "target_periods": periods,
-        "columns": value["columns"], "rows": value["rows"], "row_count": value["row_count"],
-        "anomaly_count": sum(1 for r in value["rows"]
-                             if isinstance(r, dict) and str(r.get("is_anomaly")).lower() == "true"),
+        "columns": [c for c in value["columns"] if c != "_hv_anomaly_total"],
+        "rows": rows, "row_count": len(rows),
+        "total_rows": value.get("total_rows", len(rows)),
+        "truncated": bool(value.get("truncated")),
+        "anomaly_count": anomaly_total,
         "gib_processed": value["gib_processed"],
     }
 

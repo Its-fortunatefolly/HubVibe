@@ -124,6 +124,8 @@ def _error_status(reason: str) -> int:
         return 503
     if reason == runtime.DeadlineExceeded.reason:
         return 504
+    if reason == runtime.StillComputing.reason:
+        return 503
     return 502
 
 
@@ -426,7 +428,11 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
                 "input_schema": worker.input_schema, "billed": False})
         # Everything else goes through the CORE's failure path, so an
         # unbilled worker failure unwinds exactly like an unbilled audit.
-        return _unbilled_failure(auth, worker, call_id, exc.reason, status, exc.detail)
+        response = _unbilled_failure(auth, worker, call_id, exc.reason, status, exc.detail)
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after:
+            response.headers["Retry-After"] = str(retry_after)
+        return response
     except Exception as exc:  # pragma: no cover - unexpected adapter bug
         log.exception("worker %s crashed", worker.name)
         ledger.close_call(call_id, "failed", failure_reason="internal_error",

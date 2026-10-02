@@ -257,8 +257,12 @@ class _FakeCtx:
                        "cache_hit": False},
                 cost_micros=0, cost_measured=True)
 
+        async def query_resumable(sql, max_gib=None, wait_seconds=None):
+            return await query(sql, max_gib=max_gib)
+
         provider = _StubBigQuery()
         provider.query = query
+        provider.query_resumable = query_resumable
         result = await call(provider)
         return result.value
 
