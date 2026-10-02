@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy | HubVibe</title>
+<meta name="description" content="Exactly what HubVibe receives with each call, what it keeps, for how long, and who receives what.">
+<link rel="canonical" href="https://hubvibe-io.com/privacy">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #000000; --ink: #FFFFFF; --muted: #C9CBD6; --dim: #8E90A0; --line: #1E1E28; --purple: #8F7CFF; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: var(--bg); }
+body { color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.65; padding: 0 16px; }
+main { max-width: 760px; margin: 0 auto; padding: 40px 0 64px; }
+header { display: flex; align-items: center; gap: 12px; padding-bottom: 28px; border-bottom: 1px solid var(--line); margin-bottom: 32px; }
+header img { height: 40px; width: auto; }
+header a { color: var(--ink); text-decoration: none; font-weight: 700; font-size: 18px; }
+h1 { font-size: 30px; line-height: 1.2; margin-bottom: 6px; }
+.updated { color: var(--dim); font-size: 14px; margin-bottom: 28px; }
+h2 { font-size: 17px; margin: 28px 0 8px; }
+p, li { color: var(--muted); }
+p { margin-bottom: 12px; }
+ul { padding-left: 20px; margin-bottom: 12px; }
+li { margin-bottom: 8px; }
+strong { color: var(--ink); font-weight: 600; }
+a { color: var(--purple); }
+footer { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 20px; color: var(--dim); font-size: 13px; }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+<header><img src="/logo-hv.png" alt=""><a href="/">HubVibe</a></header>
+
+<h1>Privacy</h1>
+<p class="updated">Last updated: October 2, 2026</p>
+
+<p>HubVibe (hubvibe-io.com), contact <a href="mailto:hubvibe@hubvibe-io.com">hubvibe@hubvibe-io.com</a>. This page says exactly what the service receives, keeps and shares.</p>
+
+<h2>What we receive with each call</h2>
+<p>The request you send (for example a URL to audit, text to translate, or a name, email address, phone number or IP address to check), your IP address and user agent, and the payment details: for crypto, your wallet address and transaction hash; for cards, a payment reference from Stripe. We never see card numbers.</p>
+
+<h2>What we keep</h2>
+<ul>
+<li><strong>Sales record</strong>, for every purchase: time, tool, price, payment method, wallet and transaction (or payment reference), receipt id, the request body (up to 16 KB), your IP address with an approximate location looked up on our own server (country, region, city, network), and your user agent. This is our accounting and tax record, and it is kept.</li>
+<li><strong>Call ledger</strong>: tool, timing, provider used, cost, payer, and fingerprints (hashes) of the request and the result. No request or result content.</li>
+<li><strong>Retries</strong>: when you send an idempotency key, the result is stored so that a retry returns it without a second charge.</li>
+<li><strong>Results to collect</strong> (jobs handed back as a link) and <strong>generated videos</strong>: 48 hours.</li>
+<li><strong>Agent-to-agent tasks</strong>: 15 minutes.</li>
+<li><strong>Page monitoring</strong>: the baseline text of a page you ask us to monitor, until the next check replaces it.</li>
+<li><strong>Server logs</strong>: each request's IP address, path, status and user agent, rotated by size (typically a few weeks).</li>
+</ul>
+
+<h2>Who receives what</h2>
+<p>Only who is needed to do the job you bought: the service that performs it (for example Google Cloud for AI, speech, image, video, maps and BigQuery jobs; Brave Search; X; and public sources such as SEC EDGAR, Coinbase, Polymarket and government data portals), the website you ask us to read or audit, and the payment processors (Coinbase's x402 facilitator, Stripe, and the public blockchains a payment settles on). We do not sell data, show ads or use tracking cookies, and the website runs no analytics.</p>
+
+<h2>Your choices</h2>
+<p>Email <a href="mailto:hubvibe@hubvibe-io.com">hubvibe@hubvibe-io.com</a> to ask what we hold about a wallet, key or receipt, or to have it deleted where we do not need it for our accounting and tax records.</p>
+
+<footer>&copy; 2026 HubVibe &middot; <a href="/terms">Terms</a> &middot; <a href="/">Home</a></footer>
+</main>
+</body>
+</html>

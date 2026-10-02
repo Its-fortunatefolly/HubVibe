@@ -213,6 +213,7 @@ app = FastAPI(
     title=SERVICE_TITLE,
     version=SERVICE_VERSION,
     contact={"name": "HubVibe", "url": PUBLIC_BASE_URL, "email": CONTACT_EMAIL},
+    terms_of_service=f"{PUBLIC_BASE_URL}/terms",
     description=(
         "63 pay-per-call tools for AI agents under /work -- web search and "
         "cited research, email verification, company enrichment, identity "
@@ -2104,6 +2105,19 @@ async def checkout_success_page():
 @app.get("/billing/cancel", response_class=FileResponse)
 async def checkout_cancel_page():
     return _static_file("cancel.html", "text/html")
+
+
+# What a buyer agrees to and what the node keeps about them. Routers and
+# directories that review a provider read these before listing it; both
+# answered 404 until 2026-10-02.
+@app.get("/terms", response_class=FileResponse)
+async def terms_page():
+    return _static_file("terms.html", "text/html")
+
+
+@app.get("/privacy", response_class=FileResponse)
+async def privacy_page():
+    return _static_file("privacy.html", "text/html")
 
 
 @app.get("/llms.txt", response_class=FileResponse)

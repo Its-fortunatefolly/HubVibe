@@ -135,6 +135,10 @@ expect_status GET /openapi.json 200 "GET /openapi.json"
 expect_status GET /docs 200 "GET /docs"
 expect_status GET /robots.txt 200 "GET /robots.txt"
 expect_status GET /sitemap.xml 200 "GET /sitemap.xml"
+# Routers and directories read these before listing a provider; both were
+# 404 until 2026-10-02.
+expect_status GET /terms 200 "GET /terms"
+expect_status GET /privacy 200 "GET /privacy"
 
 echo
 echo "Link-preview assets (a link with no card is a link nobody clicks)"

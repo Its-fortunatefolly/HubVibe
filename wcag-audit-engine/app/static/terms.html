@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terms of Service | HubVibe</title>
+<meta name="description" content="The terms for buying HubVibe's pay-per-call tools: what you buy, how you pay, when you are charged, and acceptable use.">
+<link rel="canonical" href="https://hubvibe-io.com/terms">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #000000; --ink: #FFFFFF; --muted: #C9CBD6; --dim: #8E90A0; --line: #1E1E28; --purple: #8F7CFF; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: var(--bg); }
+body { color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.65; padding: 0 16px; }
+main { max-width: 760px; margin: 0 auto; padding: 40px 0 64px; }
+header { display: flex; align-items: center; gap: 12px; padding-bottom: 28px; border-bottom: 1px solid var(--line); margin-bottom: 32px; }
+header img { height: 40px; width: auto; }
+header a { color: var(--ink); text-decoration: none; font-weight: 700; font-size: 18px; }
+h1 { font-size: 30px; line-height: 1.2; margin-bottom: 6px; }
+.updated { color: var(--dim); font-size: 14px; margin-bottom: 28px; }
+h2 { font-size: 17px; margin: 28px 0 8px; }
+p { color: var(--muted); margin-bottom: 12px; }
+a { color: var(--purple); }
+code { font-size: 14px; color: var(--ink); }
+footer { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 20px; color: var(--dim); font-size: 13px; }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+<header><img src="/logo-hv.png" alt=""><a href="/">HubVibe</a></header>
+
+<h1>Terms of Service</h1>
+<p class="updated">Last updated: October 2, 2026</p>
+
+<p>HubVibe (hubvibe-io.com) sells pay-per-call tools to software agents and the people who run them. Contact: <a href="mailto:hubvibe@hubvibe-io.com">hubvibe@hubvibe-io.com</a>.</p>
+
+<h2>What you buy</h2>
+<p>Each tool is one HTTP route with a fixed price per call, published in our <a href="/openapi.json">OpenAPI document</a> and in the payment challenge (HTTP 402) the route returns before you pay. The price in the challenge is the price you pay. There are no accounts, subscriptions or minimums.</p>
+
+<h2>Paying</h2>
+<p>You pay per call with a supported method: x402 (USDC on Base or Solana), MPP (Tempo, EVM, or card through Stripe), or a prepaid key bought through one of those. Card payments are processed by Stripe. On-chain payments are final once they settle on their network.</p>
+
+<h2>When you are charged</h2>
+<p>Only when a result is delivered. Every result is checked against the tool's published response schema before billing; a result that fails the check is not delivered and not charged. A call that fails is not charged. A slow job may return a link to collect the result later; it is charged only when the result is ready. Every delivery has a receipt at <code>/work/receipts/{id}</code>.</p>
+
+<h2>Acceptable use</h2>
+<p>Use HubVibe lawfully. You must have the right to submit what you send us, including any personal data (names, email addresses, phone numbers, IP addresses) you ask us to check. Do not use the tools to harass anyone, to discriminate unlawfully, or to make a decision the law reserves to a regulated process without that process. Do not attack, overload or probe the service, or try to obtain results without paying. We may refuse or rate-limit traffic that does.</p>
+
+<h2>What results are, and are not</h2>
+<p>Market, financial and prediction-market data is information, not investment advice. Sanctions and identity checks are screening signals, not legal determinations. AI-generated output can be wrong. Some results include data from third-party sources, which remain subject to those sources' terms; results name their sources.</p>
+
+<h2>Availability and changes</h2>
+<p>We work to keep every tool available and correct, but we do not guarantee uninterrupted service. Prices and tools may change; the price that applies to a call is the one in the challenge you paid. We may update these terms; the date above changes when we do.</p>
+
+<h2>Liability</h2>
+<p>To the extent the law allows, HubVibe's total liability for any claim about a call is limited to the amount you paid for that call.</p>
+
+<footer>&copy; 2026 HubVibe &middot; <a href="/privacy">Privacy</a> &middot; <a href="/">Home</a></footer>
+</main>
+</body>
+</html>
