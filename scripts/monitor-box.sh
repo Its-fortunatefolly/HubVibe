@@ -13,9 +13,12 @@
 #   monitor-box.sh            hourly set: only bees whose providers cost $0
 #   monitor-box.sh daily      every live bee except image and video generation
 #
-# One line per run goes to /root/hubvibe-monitor.log. When anything fails and
-# /root/.hubvibe-monitor.env holds MONITOR_SMTP_USER, MONITOR_SMTP_PASSWORD and
-# MONITOR_ALERT_TO, the owner gets an email with the failing lines.
+# One line per run goes to /root/hubvibe-monitor.log. Email goes out through
+# the Hostinger Mail API from hubvibe@hubvibe-io.com when
+# /root/.hubvibe-monitor.env holds MONITOR_MAIL_TOKEN (a token scoped to that
+# one mailbox), MONITOR_MAILBOX_ID and MONITOR_ALERT_TO:
+#   - any failed check -> "HubVibe health check FAILED" with the failing lines;
+#   - any new outside sale since the last run -> "HubVibe: N new sale(s)".
 
 set -u
 MODE="${1:-hourly}"
@@ -86,23 +89,47 @@ docker exec "$CONTAINER" rm -rf "$WORK" /tmp/monitor-keys.db /tmp/monitor-purcha
 summary="$STAMP $MODE failures=$failures | live: ${live_line:-?} | $audit | sweep: ${sweep_line:-?}"
 echo "$summary" >> "$LOG"
 
-if [ "$failures" -gt 0 ] && [ -f /root/.hubvibe-monitor.env ]; then
+# Sales since the last run, from the purchase book (outside buyers only).
+SALES_STATE=/root/.hubvibe-monitor.last-sale
+since="$(cat "$SALES_STATE" 2>/dev/null || date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)"
+sales="$(docker exec "$CONTAINER" sh -c 'curl -s -m 20 -H "X-API-Key: $PURCHASE_OWNER_KEY" "http://127.0.0.1:8080/owner/purchases.csv"' 2>/dev/null \
+  | SINCE="$since" python3 -c '
+import csv, os, sys
+since = os.environ["SINCE"]
+rows = [r for r in csv.DictReader(sys.stdin)
+        if r.get("internal") == "0" and r.get("kind") in ("sale", "topup")
+        and str(r.get("outcome", "")).startswith("delivered")
+        and (r["date_utc"] + "T" + r["time_utc"] + "Z") > since]
+for r in rows:
+    print("%sT%sZ  %-20s $%s  payer %s  via %s" % (r["date_utc"], r["time_utc"], r["product"],
+          r["received_usd"] or r["price_usd"], (r["payer"] or "?")[:12], r.get("user_agent", "")[:40]))
+' 2>/dev/null)"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$SALES_STATE"
+
+send_mail() {  # subject, body
+  [ -f /root/.hubvibe-monitor.env ] || return 0
   # shellcheck disable=SC1091
   . /root/.hubvibe-monitor.env
-  if [ -n "${MONITOR_SMTP_USER:-}" ] && [ -n "${MONITOR_SMTP_PASSWORD:-}" ] && [ -n "${MONITOR_ALERT_TO:-}" ]; then
-    SUMMARY="$summary" DETAILS="$(cat "$OUT")" python3 - <<'PY'
-import os, smtplib, ssl
-from email.message import EmailMessage
-msg = EmailMessage()
-msg["Subject"] = "HubVibe health check FAILED"
-msg["From"] = os.environ["MONITOR_SMTP_USER"]
-msg["To"] = os.environ["MONITOR_ALERT_TO"]
-msg.set_content(os.environ["SUMMARY"] + "\n\n" + os.environ["DETAILS"] + "\n")
-with smtplib.SMTP_SSL(os.environ.get("MONITOR_SMTP_HOST", "smtp.hostinger.com"), 465,
-                      context=ssl.create_default_context(), timeout=30) as smtp:
-    smtp.login(os.environ["MONITOR_SMTP_USER"], os.environ["MONITOR_SMTP_PASSWORD"])
-    smtp.send_message(msg)
+  [ -n "${MONITOR_MAIL_TOKEN:-}" ] && [ -n "${MONITOR_MAILBOX_ID:-}" ] && [ -n "${MONITOR_ALERT_TO:-}" ] || return 0
+  SUBJECT="$1" BODY="$2" python3 - <<'PY'
+import json, os, urllib.request
+body = json.dumps({"to": [os.environ["MONITOR_ALERT_TO"]], "displayName": "HubVibe",
+                   "subject": os.environ["SUBJECT"], "text": os.environ["BODY"]}).encode()
+req = urllib.request.Request(
+    "https://api.mail.hostinger.com/api/v1/mailboxes/%s/send" % os.environ["MONITOR_MAILBOX_ID"],
+    data=body, method="POST", headers={"Authorization": "Bearer " + os.environ["MONITOR_MAIL_TOKEN"],
+                                       "Content-Type": "application/json", "User-Agent": "hubvibe-monitor"})
+urllib.request.urlopen(req, timeout=30)
 PY
-  fi
+}
+
+if [ "$failures" -gt 0 ]; then
+  send_mail "HubVibe health check FAILED" "$summary
+
+$(cat "$OUT")"
+fi
+if [ -n "$sales" ]; then
+  count="$(echo "$sales" | grep -c .)"
+  send_mail "HubVibe: $count new sale(s)" "$sales"
 fi
 exit 0
