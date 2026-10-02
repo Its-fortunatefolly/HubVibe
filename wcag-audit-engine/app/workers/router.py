@@ -33,6 +33,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
@@ -658,18 +659,38 @@ async def media(name: str):
                     headers={"Cache-Control": "private, max-age=86400"})
 
 
+# A job written before jobs carried their owner (rows from the release before
+# owners existed) is judged by age instead: no job runs longer than
+# catalog.MAX_WORKER_SECONDS plus its settlement, so one this old has no
+# process left to finish it.
+_OWNERLESS_GRACE_SECONDS = 600.0
+
+
 def reconcile_interrupted(release_mpp_hash: Optional[Callable] = None) -> int:
-    """At startup: every job a restart interrupted is closed as failed and
-    unbilled, its MPP payment (the one rail that moves money before
-    delivery) released, its idempotency key freed. Returns how many."""
+    """Every job whose process is gone -- a crash, a restart, a shutdown drain
+    that ran out -- is closed as failed and unbilled, its MPP payment (the one
+    rail that moves money before delivery) released, its idempotency key
+    freed. A job that another live copy of the node is still running is never
+    touched (ledger "instance liveness"): during a deploy two copies share the
+    volume, and closing the other's job would release a payment for work that
+    is about to be delivered. Returns how many were closed."""
     count = 0
+    now = time.time()
     for row in ledger.running_deferred():
         if row["job_id"] in _DEFERRED:
             continue
-        ledger.finish_deferred(row["job_id"], 502, json.dumps({
+        owner = row.get("owner")
+        if owner:
+            if ledger.owner_alive(owner):
+                continue
+        elif now - float(row.get("created_at") or now) < _OWNERLESS_GRACE_SECONDS:
+            continue
+        closed = ledger.close_interrupted(row["job_id"], json.dumps({
             "status": "error", "reason": "interrupted", "billed": False,
             "detail": ("The job was interrupted by a restart of this node before it "
-                       "finished. Nothing was charged; send the request again.")}), "{}")
+                       "finished. Nothing was charged; send the request again.")}))
+        if not closed:
+            continue
         ledger.close_call(row["call_id"], "failed", failure_reason="interrupted",
                           failure_stage="execute")
         if row.get("mpp_tx") and release_mpp_hash is not None:
@@ -689,6 +710,24 @@ async def drain(timeout: float) -> None:
     pending = [task for task in list(_DEFERRED.values()) if not task.done()]
     if pending:
         await asyncio.wait(pending, timeout=timeout)
+
+
+async def keep_reconciled(release_mpp_hash: Optional[Callable] = None,
+                          every_seconds: float = 60.0) -> None:
+    """reconcile_interrupted once a minute for the life of the process. A job
+    whose node died is then answered within a minute -- a clear unbilled
+    failure for the buyer collecting it -- instead of reading "still running"
+    until the next restart, which after a deploy may never come."""
+    loop = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(every_seconds)
+        try:
+            closed = await loop.run_in_executor(_executor, reconcile_interrupted, release_mpp_hash)
+            if closed:
+                log.warning("closed %d job(s) whose node stopped before they finished, unbilled",
+                            closed)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.error("job reconciliation failed: %s", exc)
 
 
 def _unbilled_failure(auth, worker, call_id: str, reason: str, status: int, detail: str):

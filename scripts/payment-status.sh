@@ -294,7 +294,7 @@ if not node_live:
 elif advertised_pay_to is None:
     print("  The node is up but advertises no x402 rail, so no agent can pay on-chain.")
     print("  Next:  check X402_FACILITATOR_URL and X402_PAY_TO_ADDRESS in deploy/vps/.env,")
-    print("         then: cd deploy/vps && docker compose up -d --build")
+    print("         then, on the box: bash scripts/deploy-box.sh")
 elif advertised_pay_to.lower() not in OWNER_WALLETS:
     print("  The node is payable but pays a wallet you have not affirmed. Fix that FIRST.")
 else:

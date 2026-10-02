@@ -220,6 +220,11 @@ def test_a_job_a_restart_interrupted_is_closed_unbilled_and_its_mpp_payment_rele
                        price_usd=10.0, idempotency_key="lost-key")
     W.ledger.claim_idempotency("lost-key", "c-lost", "video.generate")
     W.ledger.open_deferred("job-lost", "c-lost", "video.generate", rail="mpp", mpp_tx="0xabc")
+    # Owned by a process that is gone: a restart, a crash or the OOM killer
+    # drops its liveness lock, so nothing is left to finish the job.
+    conn = W.ledger._safe_connect()
+    conn.execute("UPDATE deferred_jobs SET owner=? WHERE job_id=?", ("f" * 32, "job-lost"))
+    conn.commit()
     released = []
 
     assert W.router.reconcile_interrupted(released.append) == 1

@@ -756,7 +756,7 @@ else
   # say "old revision" once the body has confirmed we WERE paid.
   warn "no PAYMENT-RESPONSE receipt came back. If the body above reports no"
   warn "billing problem, the deployed revision predates the receipt header"
-  warn "(rebuild: cd deploy/vps && docker compose up -d --build)."
+  warn "(redeploy on the box: bash scripts/deploy-box.sh)."
   warn "look for the transfer at https://basescan.org/address/$PAY_TO"
 fi
 

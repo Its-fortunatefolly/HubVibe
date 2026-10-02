@@ -147,7 +147,7 @@ def test_a_node_running_an_older_image_is_caught_and_named(tmp_path):
     assert "FAIL|" in result.stdout, result.stdout
     assert "6a8383066ea1f57fed333625" in result.stdout, "the live value is not named"
     assert "6a83832901463168d7e651ca" in result.stdout, "the expected value is not named"
-    assert "--build" in result.stdout, "the fix command is missing"
+    assert "scripts/deploy-box.sh" in result.stdout, "the fix command is missing"
 
 
 def test_a_live_page_with_no_tag_at_all_is_a_failure(tmp_path):

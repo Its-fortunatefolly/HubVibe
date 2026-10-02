@@ -33,9 +33,16 @@ node is in [`deploy/vps/README.md`](../deploy/vps/README.md).
 
 ## Runbook (on the box, in the checkout)
 
-- Redeploy after a merge — `git pull` alone changes nothing, the image is
-  rebuilt: `git pull -q origin main && cd deploy/vps && docker compose up -d --build`
-  (a `Caddyfile` change also needs `docker compose restart caddy`).
+- Redeploy after a merge, or after any `.env` or `Caddyfile` change —
+  `git pull -q origin main && bash scripts/deploy-box.sh`. It builds the
+  commit as the standby copy (`hubvibe-blue` / `hubvibe-green`), runs the
+  monitor's checks on it, switches traffic only if they pass, and retires
+  the old copy after it finishes what it holds: no downtime, no untested
+  build in front of a buyer. `bash scripts/deploy-box.sh status` shows what
+  serves; `bash scripts/deploy-box.sh rollback` puts the previous build back.
+  Never `docker compose up -d --build`, `restart` or `docker cp` into the
+  node: each bypasses the gate.
+- Run a command in the live copy: `bash scripts/box-exec.sh <command>`
 - Switch facilitator: `bash scripts/switch-facilitator.sh <url>`
 - Re-seed both Bazaar indexes after a price or description change
   (~$1.05, payer → pay-to): `bash scripts/refresh-listings.sh`

@@ -61,7 +61,12 @@ def _stub_env(tmp_path, *, after_switch, index_status="200"):
         else printf '%s' '{after_switch}'
         fi
         """))
-    for name in ("docker", "curl"):
+    # The gated deploy (scripts/deploy-box.sh) is what puts a new .env live;
+    # here it records that it ran and succeeds, or fails like a refused gate.
+    (bin_dir / "deploy").write_text(
+        "#!/bin/sh\nprintf 'deploy %s\\n' \"$HV_COMPOSE_DIR\" >> \"$STUB_LOG\"\n"
+        "exit \"${DEPLOY_EXIT:-0}\"\n")
+    for name in ("docker", "curl", "deploy"):
         (bin_dir / name).chmod(0o755)
 
     log = tmp_path / "docker.log"
@@ -71,6 +76,7 @@ def _stub_env(tmp_path, *, after_switch, index_status="200"):
         "STUB_LOG": str(log),
         "STUB_ENV": str(compose_dir / ".env"),
         "COMPOSE_DIR": str(compose_dir),
+        "DEPLOY_SCRIPT": str(bin_dir / "deploy"),
         "BASE": "https://hubvibe-io.com",
     }
     return compose_dir / ".env", env
@@ -174,3 +180,28 @@ def test_a_facilitator_with_no_index_is_reported_not_hidden(tmp_path):
     assert result.returncode == 0
     assert "may run no index" in result.stdout
     assert f"X402_FACILITATOR_URL={NEW}" in env_file.read_text()
+
+
+def test_every_switch_goes_live_through_the_deploy_gate(tmp_path):
+    """A new facilitator runs on a fresh copy that must pass the gate before
+    it takes a request; the script never restarts the live node itself."""
+    env_file, env = _stub_env(tmp_path, after_switch=_challenge())
+    result = _run(env, NEW)
+    assert result.returncode == 0, result.stdout
+    log = (tmp_path / "docker.log").read_text()
+    assert f"deploy {env['COMPOSE_DIR']}" in log
+    text = SCRIPT.read_text()
+    assert 'DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-$REPO_ROOT/scripts/deploy-box.sh}"' in text
+    assert "compose up" not in text and "compose restart" not in text
+
+
+def test_a_facilitator_the_gate_refuses_never_reaches_a_buyer(tmp_path):
+    """The gate refused the new setting, so buyers stayed on the copy running
+    the old one: the .env goes back and nothing else needs undoing."""
+    env_file, env = _stub_env(tmp_path, after_switch=_challenge())
+    env["DEPLOY_EXIT"] = "1"
+    result = _run(env, NEW)
+    assert result.returncode == 1
+    assert "did not pass the deploy gate" in result.stdout
+    assert f"X402_FACILITATOR_URL={OLD}" in env_file.read_text()
+    assert (tmp_path / "docker.log").read_text().count("deploy ") == 1, "redeployed after a refusal"

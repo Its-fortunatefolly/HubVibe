@@ -35,9 +35,11 @@ bash scripts/vps-install.sh yourdomain.com
 ```
 
 That validates the payment recipient before touching anything, installs
-Docker if missing, writes `deploy/vps/.env`, builds, starts, and waits for
-health. Caddy fetches and renews the HTTPS certificate itself once DNS
-resolves. Re-running the same command later is safe: `.env` is kept.
+Docker if missing, writes `deploy/vps/.env`, and builds and starts the node
+through `scripts/deploy-box.sh`, which waits for health. Caddy fetches and
+renews the HTTPS certificate itself once DNS resolves. Re-running the same
+command later is safe: `.env` is kept, and a box already serving is
+redeployed with no downtime.
 
 To also enable the Stripe rails, export their variables in the same shell
 before running the installer (see `.env.example`); absent, those rails stay
@@ -56,18 +58,45 @@ payment carries its discovery record.
 
 ## Day-2 operations
 
+Every change to what runs -- a new commit, an edited `.env`, a new
+Caddyfile -- goes through one command, from the repo root on the box:
+
 ```bash
-cd HubVibe/deploy/vps
-docker compose logs -f hubvibe          # the node's log (x402 SETTLED lines = revenue)
-docker compose logs hubvibe | grep -c "x402 SETTLED"   # paid calls so far
-docker compose up -d --build            # deploy a new version after git pull
-docker compose restart hubvibe          # bounce the service
+git pull
+bash scripts/deploy-box.sh              # deploy the checkout, no downtime
+bash scripts/deploy-box.sh status       # which build serves, which stands by
+bash scripts/deploy-box.sh rollback     # previous build back in front
 ```
+
+The node runs as two identical copies, `hubvibe-blue` and `hubvibe-green`.
+One serves; a deploy builds the commit as the other, starts it beside the
+live one, and checks it with the same tests the hourly monitor runs
+(`scripts/box-checks.sh`: verify-live, a real browser audit, the bee sweep).
+Only a build that passes takes traffic: Caddy moves to it at its next
+health probe, requests already running finish on the old copy, and the old
+copy then stops after finishing everything it holds. A build that fails
+never sees a request. If the public node does not answer correctly after
+the switch, traffic goes straight back. Each run leaves a line in
+`/root/hubvibe-deploy.log`.
+
+Do not use `docker compose up -d --build` or `restart` on the node: they
+would bypass the gate (a bare `up -d` now starts only Caddy, by design).
+
+```bash
+bash scripts/box-exec.sh <command>      # run a command in the live copy
+cd deploy/vps
+docker compose logs -f hubvibe-blue hubvibe-green     # the node's log (x402 SETTLED lines = revenue)
+docker compose logs hubvibe-blue hubvibe-green | grep -c "x402 SETTLED"   # paid calls since each copy started
+```
+
+Durable records never depend on these logs: every sale is in the purchase
+book and the worker ledger on the `hubvibe_data` volume.
 
 From any machine, `BASE=https://yourdomain.com bash scripts/payment-status.sh`
 reads the wallet balances, the live 402 and whether the recipient is yours.
 
-Both containers restart on failure and on reboot (`restart: unless-stopped`).
+The live copy and Caddy restart on failure and on reboot (`restart:
+unless-stopped`); the copy standing by stays stopped until the next deploy.
 The key store lives in the `hubvibe_data` volume; back it up with
 `docker run --rm -v vps_hubvibe_data:/data alpine tar czf - /data > keys-backup.tgz`
 if the Stripe/prepaid rails carry balances you care about. x402 revenue

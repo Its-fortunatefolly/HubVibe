@@ -1,3 +1,15 @@
+{
+	# Caddy's active health checks (below) log every probe that fails.
+	# Between deploys one color is stopped by design, so its probe fails
+	# every second: about 86,000 identical lines a day in the log
+	# scripts/traffic-ledger.sh reads. This drops that one logger; the
+	# access log is a separate logger and keeps every request (measured on
+	# this box with Caddy 2.11).
+	log default {
+		exclude http.handlers.reverse_proxy.health_checker.active
+	}
+}
+
 # Caddy terminates TLS (certificates from Let's Encrypt, renewed
 # automatically) and proxies to the service.
 #
@@ -34,7 +46,32 @@
 	# streams text/event-stream as it is written. Headers are untouched, so
 	# every 402's WWW-Authenticate and PAYMENT-REQUIRED arrive as before.
 	encode zstd gzip
-	reverse_proxy hubvibe:8080
+	# Two copies of the node, one serving (docker-compose.yml, BLUE AND
+	# GREEN). Each is asked GET /ready every second, and traffic goes to the
+	# first copy that answers 200; a copy standing by answers 503. A deploy
+	# promotes a build by flipping that answer, so requests already running
+	# on the old copy finish there and no request is cut off or refused.
+	#
+	# lb_try_duration: while no copy is ready (a crash restarting, the
+	# moment of a switch), a request waits up to 15 s for one instead of
+	# failing at once. Retries only reach a copy that never received the
+	# request, so a paid call is never sent twice.
+	#
+	# health_fails 3 with a 5 s timeout: a copy is taken out only when it
+	# fails three probes in a row, so one slow moment under load cannot
+	# empty the pool. Rehearsed on this box: 600 back-to-back POSTs across
+	# a full switch, a stopped copy and a 3 s gap with no copy ready, zero
+	# failures; a 5 s request in flight across the switch finished normally.
+	reverse_proxy hubvibe-blue:8080 hubvibe-green:8080 {
+		lb_policy first
+		lb_try_duration 15s
+		lb_try_interval 250ms
+		health_uri /ready
+		health_interval 1s
+		health_timeout 5s
+		health_fails 3
+		health_passes 1
+	}
 }
 
 # www is the address people type; the identity every manifest advertises is

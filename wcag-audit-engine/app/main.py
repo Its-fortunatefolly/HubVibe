@@ -116,6 +116,21 @@ _configured_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper()
 if _root_logger.level == logging.NOTSET or _root_logger.level > _configured_level:
     _root_logger.setLevel(_configured_level)
 
+
+class _QuietReadyProbe(logging.Filter):
+    """Drop uvicorn's access line for GET /ready. Caddy asks every copy of the
+    node once a second (deploy/vps/Caddyfile), which would otherwise be
+    86,400 identical lines a day crowding out the real traffic in the log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3:
+            return str(args[2]).split("?", 1)[0] != "/ready"
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietReadyProbe())
+
 # Each in-flight audit holds a Chromium browser (see browser_pool), so the
 # ceiling on concurrent audits is really a memory ceiling, not a CPU one.
 # FastAPI runs these sync routes in anyio's threadpool, which defaults to 40
@@ -150,14 +165,26 @@ async def _lifespan(_app: "FastAPI"):
             warm = None
     # Jobs a restart interrupted are closed failed and unbilled, any MPP
     # payment they hold released (workers.router.reconcile_interrupted).
+    # Only jobs whose process is gone: during a deploy the other copy of the
+    # node shares this volume and may be running some (ledger "instance
+    # liveness"), so this process first takes its own liveness lock.
+    reconciler = None
     if globals().get("workers") is not None:
         try:
+            workers.ledger.hold_instance()
             interrupted = workers.router.reconcile_interrupted(mpp_payments._release_hash)
             if interrupted:
                 logging.getLogger("hubvibe").warning(
                     "closed %d job(s) interrupted by the last restart, unbilled", interrupted)
         except Exception as exc:  # pragma: no cover
             logging.getLogger("hubvibe").error("job reconciliation failed: %s", exc)
+        try:
+            import asyncio as _asyncio
+
+            reconciler = _asyncio.ensure_future(
+                workers.router.keep_reconciled(mpp_payments._release_hash))
+        except Exception:  # pragma: no cover
+            reconciler = None
     yield
     # Let handed-back jobs finish and charge inside the stop grace period
     # (deploy/vps/docker-compose.yml) instead of being cut off mid-sale.
@@ -166,8 +193,9 @@ async def _lifespan(_app: "FastAPI"):
             await workers.router.drain(float(os.environ.get("WORKER_DRAIN_SECONDS", "60")))
         except Exception:  # pragma: no cover
             pass
-    for task in warm or ():
-        task.cancel()
+    for task in [*(warm or ()), reconciler]:
+        if task is not None:
+            task.cancel()
 
 
 # The one name every discovery surface uses -- openapi.json, agent.json,
@@ -2244,7 +2272,55 @@ async def health_check():
             body["workers"] = workers.health()
         except Exception as exc:  # pragma: no cover - defensive
             body["workers"] = {"configured": False, "error": f"{type(exc).__name__}"}
+    # Which build and which copy answered: what scripts/deploy-box.sh reads
+    # through the public URL to prove the switch reached buyers.
+    body["build"] = BUILD_SHA
+    body["color"] = NODE_COLOR
     return JSONResponse(status_code=200 if browser["ok"] else 503, content=body)
+
+
+# --- blue/green: which copy takes traffic ------------------------------------
+#
+# On the box two copies of this node can run at once (scripts/deploy-box.sh):
+# the one buyers reach, and a new build being checked beside it. Caddy sends
+# traffic to the copy whose /ready answers 200 (deploy/vps/Caddyfile). The
+# deploy script decides which that is by writing the live color(s) to one
+# file on the shared volume; promoting a build is a write to that file, and
+# requests already running on the old copy finish there.
+#
+# Without HUBVIBE_COLOR (a single instance: Cloud Run, local runs, tests)
+# /ready is always 200. A missing or unreadable file also answers 200: a
+# node that cannot tell must keep serving rather than go dark. The deploy
+# script writes the file before it starts a second copy, so a build under
+# test is never ready by accident.
+NODE_COLOR = (os.environ.get("HUBVIBE_COLOR") or "").strip().lower() or None
+BUILD_SHA = (os.environ.get("HUBVIBE_BUILD_SHA") or "").strip() or None
+ACTIVE_COLORS_FILE = os.environ.get("HUBVIBE_ACTIVE_FILE", "/data/hubvibe-active")
+
+
+def _active_colors() -> Optional[set]:
+    try:
+        with open(ACTIVE_COLORS_FILE, encoding="utf-8") as handle:
+            return set(handle.read().lower().split())
+    except Exception:
+        return None
+
+
+@app.get("/ready", include_in_schema=False)
+async def ready():
+    """200 when this copy should take traffic; 503 while it stands by.
+
+    Deliberately not tied to the browser: a copy whose Chromium broke still
+    sells every /work route, and /health already reports the browser. The
+    deploy gate proves the browser on a new build before promoting it.
+    """
+    body = {"ready": True, "color": NODE_COLOR, "build": BUILD_SHA}
+    if NODE_COLOR:
+        active = _active_colors()
+        if active is not None and NODE_COLOR not in active:
+            body.update(ready=False, active=sorted(active))
+            return JSONResponse(status_code=503, content=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 _AUTH_DESCRIPTION = (

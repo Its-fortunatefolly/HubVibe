@@ -107,9 +107,13 @@ def _compose() -> dict:
     return yaml.safe_load((VPS_DIR / "docker-compose.yml").read_text())
 
 
-def test_compose_parses_and_wires_the_service_correctly():
+NODE_SERVICES = ("hubvibe-blue", "hubvibe-green")
+
+
+@pytest.mark.parametrize("name", NODE_SERVICES)
+def test_compose_parses_and_wires_the_service_correctly(name):
     compose = _compose()
-    service = compose["services"]["hubvibe"]
+    service = compose["services"][name]
     env = service["environment"]
     # The identity is the domain, never the box.
     assert env["PUBLIC_BASE_URL"] == "https://${DOMAIN}"
@@ -134,7 +138,7 @@ def test_caddy_terminates_tls_and_proxies_to_the_service_port():
     caddy = compose["services"]["caddy"]
     assert "80:80" in caddy["ports"] and "443:443" in caddy["ports"]
     caddyfile = (VPS_DIR / "Caddyfile").read_text()
-    assert "reverse_proxy hubvibe:8080" in caddyfile
+    assert "reverse_proxy hubvibe-blue:8080 hubvibe-green:8080" in caddyfile
     assert "{$DOMAIN}" in caddyfile
     assert caddy["environment"]["DOMAIN"] == "${DOMAIN}", (
         "Caddy never sees DOMAIN, so it would serve nothing"
@@ -237,7 +241,7 @@ def test_container_logs_are_rotated():
     otherwise. One INFO line per settlement plus the access log fills a
     small box's disk in months, and a full disk takes the node down."""
     compose = _compose()
-    for name in ("hubvibe", "caddy"):
+    for name in (*NODE_SERVICES, "caddy"):
         logging = compose["services"][name].get("logging") or {}
         assert logging.get("driver") == "json-file", f"{name}: no rotating log driver"
         options = logging.get("options") or {}
@@ -256,7 +260,7 @@ def test_caddy_serves_www_as_a_redirect_and_caps_request_bodies():
     text = (VPS_DIR / "Caddyfile").read_text()
     apex = re.search(r"^\{\$DOMAIN\}\s*\{(.*?)^\}", text, re.S | re.M)
     www = re.search(r"^www\.\{\$DOMAIN\}\s*\{(.*?)^\}", text, re.S | re.M)
-    assert apex and "reverse_proxy hubvibe:8080" in apex.group(1)
+    assert apex and "reverse_proxy hubvibe-blue:8080 hubvibe-green:8080" in apex.group(1)
     assert www, "no www site block"
     assert re.search(r"redir\s+https://\{\$DOMAIN\}\{uri\}\s+permanent", www.group(1))
     assert "reverse_proxy" not in www.group(1), "www must redirect, not serve a second identity"
@@ -409,7 +413,8 @@ def test_a_facilitator_with_an_index_says_the_paid_call_will_register(tmp_path):
     assert "Checking Docker" in result.stdout
 
 
-def test_compose_gives_inflight_audits_room_to_finish():
+@pytest.mark.parametrize("name", NODE_SERVICES)
+def test_compose_gives_inflight_audits_room_to_finish(name):
     """A page load is allowed 30s and a settle waits on chain inclusion, but
     Docker's default stop grace is 10s. `docker compose up -d --build` on a
     busy node therefore SIGKILLed calls a customer had already paid for."""
@@ -418,7 +423,7 @@ def test_compose_gives_inflight_audits_room_to_finish():
     compose = yaml.safe_load(
         (REPO_ROOT / "deploy" / "vps" / "docker-compose.yml").read_text()
     )
-    grace = compose["services"]["hubvibe"].get("stop_grace_period")
+    grace = compose["services"][name].get("stop_grace_period")
     assert grace is not None, "no stop_grace_period: in-flight paid audits die on redeploy"
     seconds = int(str(grace).rstrip("s"))
     assert seconds >= 35, f"{grace} is under the 30s a page load may take"

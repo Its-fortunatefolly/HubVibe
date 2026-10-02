@@ -3,10 +3,10 @@
 
 On the box the same logic runs inside the container, next to the book:
 
-    cd /root/HubVibe/deploy/vps
-    docker compose exec hubvibe python -m app.purchase_reconcile            # report
-    docker compose exec hubvibe python -m app.purchase_reconcile --backfill # fill gaps
-    docker compose exec hubvibe python -m app.purchase_reconcile --backfill --scan  # also read every
+    cd /root/HubVibe
+    bash scripts/box-exec.sh python -m app.purchase_reconcile            # report
+    bash scripts/box-exec.sh python -m app.purchase_reconcile --backfill # fill gaps
+    bash scripts/box-exec.sh python -m app.purchase_reconcile --backfill --scan  # also read every
                                                                              # Base USDC log (slow)
 
 From a checkout, point PURCHASE_BOOK_PATH / WORKER_LEDGER_PATH at copies of

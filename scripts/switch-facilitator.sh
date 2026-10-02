@@ -15,15 +15,19 @@
 # while /health still answers 200 and the site looks fine.
 #
 # So the switch is only safe if something checks the LIVE 402 afterwards and
-# undoes it. That is this script: it edits deploy/vps/.env, restarts, waits
-# for the node, and reads a real unpaid POST. If the x402 rail is gone, or
-# the recipient changed, or the price moved, it restores the previous
-# facilitator, restarts again, and exits non-zero. Nothing is left half-done.
+# undoes it. That is this script: it edits deploy/vps/.env and redeploys
+# through scripts/deploy-box.sh -- the new setting runs on a fresh copy that
+# must pass every check before it takes a request, so a facilitator that
+# breaks the rail never reaches a buyer -- then reads a real unpaid POST. If
+# the x402 rail is gone, or the recipient changed, or the price moved, it
+# restores the previous facilitator, redeploys again, and exits non-zero.
+# Nothing is left half-done.
 #
 # Run it on the box, from the repo root.
 #
 # Optional:
 #     COMPOSE_DIR  where the stack lives   (default deploy/vps beside this repo)
+#     DEPLOY_SCRIPT how a change goes live (default scripts/deploy-box.sh)
 #     BASE         how to reach the node   (default https://$DOMAIN from .env)
 #     ROUTE        the route to probe      (default /audit/wcag)
 
@@ -37,6 +41,7 @@ die()  { printf '  \033[31mSTOP\033[0m  %s\n' "$1"; exit 1; }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_DIR="${COMPOSE_DIR:-$REPO_ROOT/deploy/vps}"
 ENV_FILE="$COMPOSE_DIR/.env"
+DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-$REPO_ROOT/scripts/deploy-box.sh}"
 ROUTE="${ROUTE:-/audit/wcag}"
 
 NEW_FACILITATOR="${1:-}"
@@ -78,8 +83,6 @@ if [ "$OLD_FACILITATOR" = "$NEW_FACILITATOR" ]; then
   exit 0
 fi
 
-compose() { docker compose -f "$COMPOSE_DIR/docker-compose.yml" --project-directory "$COMPOSE_DIR" "$@"; }
-
 # Reads the live 402 and answers with the rail's facts, or "none".
 probe() {
   curl -s -m 25 -X POST "$BASE$ROUTE" -H 'Content-Type: application/json' \
@@ -106,17 +109,25 @@ else
   ok "now: payTo=$(printf '%s' "$BEFORE" | cut -f1) network=$(printf '%s' "$BEFORE" | cut -f2) amount=$(printf '%s' "$BEFORE" | cut -f3)"
 fi
 
-apply() {
-  local url="$1"
+set_facilitator() {
   # sed -i with a backup suffix, then remove it: the bare form differs
   # between GNU and BSD sed and this must not depend on which the box has.
-  sed -i.bak "s|^X402_FACILITATOR_URL=.*|X402_FACILITATOR_URL=$url|" "$ENV_FILE" \
+  sed -i.bak "s|^X402_FACILITATOR_URL=.*|X402_FACILITATOR_URL=$1|" "$ENV_FILE" \
     && rm -f "$ENV_FILE.bak"
-  compose up -d >/dev/null 2>&1
 }
 
-step "Switching to $NEW_FACILITATOR and restarting"
-apply "$NEW_FACILITATOR" || die "could not write $ENV_FILE"
+apply() {
+  set_facilitator "$1" || return 1
+  HV_COMPOSE_DIR="$COMPOSE_DIR" bash "$DEPLOY_SCRIPT"
+}
+
+step "Switching to $NEW_FACILITATOR (through the deploy gate)"
+if ! apply "$NEW_FACILITATOR"; then
+  # The gate refused it, so buyers never left the copy on the old setting:
+  # putting the file back is the whole undo.
+  set_facilitator "$OLD_FACILITATOR"
+  die "$NEW_FACILITATOR did not pass the deploy gate (above); buyers stayed on $OLD_FACILITATOR. Nothing changed."
+fi
 
 for attempt in $(seq 1 20); do
   curl -sf -m 10 -o /dev/null "$BASE/health" && break
@@ -144,7 +155,7 @@ if [ -z "$AFTER" ] || [ "$AFTER" = "none" ]; then
     ok "restored $OLD_FACILITATOR; the node is advertising x402 again"
   else
     warn "restored $OLD_FACILITATOR but the node still advertises no rail --"
-    warn "read: cd $COMPOSE_DIR && docker compose logs hubvibe | tail -40"
+    warn "read: cd $COMPOSE_DIR && docker compose logs hubvibe-blue hubvibe-green | tail -40"
   fi
   die "$NEW_FACILITATOR cannot serve a payable challenge here. Nothing changed."
 fi

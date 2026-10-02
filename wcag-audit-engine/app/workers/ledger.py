@@ -24,6 +24,7 @@ normal, and cents would round most real costs to zero.
 """
 
 import datetime
+import fcntl
 import hashlib
 import json
 import logging
@@ -31,6 +32,7 @@ import os
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -114,6 +116,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for name, kind in _RECEIPT_COLUMNS:
         if name not in have:
             conn.execute(f"ALTER TABLE worker_calls ADD COLUMN {name} {kind}")
+    # Which process is running a handed-back job (see "instance liveness").
+    # Rows written before this column existed have none and are judged by age.
+    if "owner" not in {row[1] for row in conn.execute("PRAGMA table_info(deferred_jobs)")}:
+        conn.execute("ALTER TABLE deferred_jobs ADD COLUMN owner TEXT")
     conn.commit()
 
 
@@ -184,7 +190,7 @@ def _safe_connect() -> Optional[sqlite3.Connection]:
 
 
 def reset_for_tests() -> None:
-    global _conn, _configured_path, _last_error, _degraded
+    global _conn, _configured_path, _last_error, _degraded, _instance_handle
     with _lock:
         if _conn is not None:
             try:
@@ -193,6 +199,14 @@ def reset_for_tests() -> None:
                 pass
         _conn = _configured_path = _last_error = None
         _degraded = False
+        # The liveness lock lives beside the ledger; a test that moves the
+        # ledger takes a fresh one there.
+        if _instance_handle is not None:
+            try:
+                _instance_handle.close()
+            except Exception:
+                pass
+            _instance_handle = None
 
 
 def status() -> dict:
@@ -482,6 +496,7 @@ DEFERRED_KEEP_SECONDS = 48 * 3600
 
 def open_deferred(job_id: str, call_id: str, worker: str, rail: Optional[str] = None,
                   mpp_tx: Optional[str] = None) -> None:
+    owner = hold_instance()
     with _lock:
         conn = _safe_connect()
         if conn is None:
@@ -490,12 +505,110 @@ def open_deferred(job_id: str, call_id: str, worker: str, rail: Optional[str] = 
             conn.execute("DELETE FROM deferred_jobs WHERE created_at < ?",
                          (time.time() - DEFERRED_KEEP_SECONDS,))
             conn.execute(
-                "INSERT INTO deferred_jobs (job_id, call_id, worker, created_at, state, rail, mpp_tx) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (job_id, call_id, worker, time.time(), "running", rail, mpp_tx))
+                "INSERT INTO deferred_jobs (job_id, call_id, worker, created_at, state, rail, mpp_tx, owner) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (job_id, call_id, worker, time.time(), "running", rail, mpp_tx, owner))
             conn.commit()
         except Exception as exc:
             _note(exc)
+
+
+def close_interrupted(job_id: str, body: str) -> bool:
+    """Close a running job as interrupted. True only for the one caller that
+    moved it out of 'running': a job finished by its owner, or already closed
+    by another copy of the node, is left alone, so its payment is released
+    at most once."""
+    with _lock:
+        conn = _safe_connect()
+        if conn is None:
+            return False
+        try:
+            changed = conn.execute(
+                "UPDATE deferred_jobs SET state='done', finished_at=?, http_status=502, body=?, "
+                "headers='{}' WHERE job_id=? AND state='running'",
+                (time.time(), body, job_id)).rowcount
+            conn.commit()
+            return changed == 1
+        except Exception as exc:
+            _note(exc)
+            return False
+
+
+# --- instance liveness --------------------------------------------------------
+#
+# A deploy runs two copies of the node on one volume for a few minutes: the
+# new one is checked while the old one serves (scripts/deploy-box.sh). A copy
+# that starts must close the jobs a crash or a restart interrupted -- and must
+# never close a job the other copy is still running, which would release a
+# payment for work that is about to be delivered. "Started before me" cannot
+# tell those apart; only "is its process alive" can.
+#
+# Each process holds an exclusive flock on its own file for its whole life.
+# The kernel drops the lock when the process ends, however it ends (SIGKILL
+# and the OOM killer included), and flock works across containers that share
+# the volume, because both see the same file on the host. A job whose owner's
+# lock can be taken has no live owner.
+
+INSTANCE_ID = uuid.uuid4().hex
+_instance_handle = None
+
+
+def _instances_dir() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(_path())), "instances")
+
+
+def hold_instance() -> Optional[str]:
+    """Take this process's liveness lock, once. Returns INSTANCE_ID, or None
+    if the lock cannot be taken (its jobs are then judged by age, like rows
+    written before owners existed)."""
+    global _instance_handle
+    with _lock:
+        if _instance_handle is not None:
+            return INSTANCE_ID
+        try:
+            directory = _instances_dir()
+            os.makedirs(directory, exist_ok=True)
+            handle = open(os.path.join(directory, INSTANCE_ID + ".lock"), "a+")
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                handle.close()
+                raise
+            _instance_handle = handle
+            return INSTANCE_ID
+        except Exception as exc:
+            _note(exc)
+            return None
+
+
+def owner_alive(owner: str) -> bool:
+    """True while the process that wrote `owner` is running. Unknown counts as
+    alive: a job is closed only when its owner is proven gone."""
+    if owner == INSTANCE_ID and _instance_handle is not None:
+        return True
+    path = os.path.join(_instances_dir(), owner + ".lock")
+    try:
+        handle = open(path, "r")
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        except Exception:
+            return True
+        # The lock was free, so its process is gone. Holding it now, remove
+        # the file; nothing else can be using it.
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return False
+    finally:
+        handle.close()
 
 
 def finish_deferred(job_id: str, http_status: int, body: str, headers: str) -> None:

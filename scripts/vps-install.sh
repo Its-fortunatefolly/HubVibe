@@ -8,8 +8,8 @@
 # Point the domain's DNS A record at this box first (an apex or a subdomain,
 # either works). The script validates the payment configuration BEFORE it
 # touches Docker -- a refused recipient must cost zero setup -- then installs
-# Docker if missing, writes deploy/vps/.env, builds, starts the stack, and
-# waits for the service to answer.
+# Docker if missing, writes deploy/vps/.env, and builds and starts the node
+# through scripts/deploy-box.sh, which waits for it to answer.
 #
 # Why a flat-rate box at all: the per-call rails (x402, MPP) never needed
 # Google -- only the API-key store did, and KEY_STORE=sqlite (set by the
@@ -205,20 +205,15 @@ ok "mode 600; paid to $(grep '^X402_PAY_TO_ADDRESS=' "$ENV_FILE" | cut -d= -f2-)
 # 4. Build and start.
 # ---------------------------------------------------------------------------
 
-step "Building and starting the stack (first build downloads Chromium; minutes, not seconds)"
-docker compose -f "$VPS_DIR/docker-compose.yml" --project-directory "$VPS_DIR" up -d --build \
-  || die "compose failed -- the output above says why. Nothing is half-configured; re-run after fixing it."
-
-step "Waiting for the service to answer"
-for attempt in $(seq 1 30); do
-  if docker compose -f "$VPS_DIR/docker-compose.yml" --project-directory "$VPS_DIR" \
-       exec -T hubvibe python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=5)' 2>/dev/null; then
-    ok "the node is up inside the box"
-    break
-  fi
-  [ "$attempt" -eq 30 ] && die "the service did not come up in 5 minutes. Read: docker compose -f deploy/vps/docker-compose.yml logs hubvibe"
-  sleep 10
-done
+step "Building and starting the node (first build downloads Chromium; minutes, not seconds)"
+# The same path every later deploy takes (scripts/deploy-box.sh). On a fresh
+# box it starts the first copy and Caddy and waits for /health; on a box
+# that is already serving, it builds this checkout beside the live copy,
+# checks it, and switches with no downtime -- a re-run never takes the node
+# down.
+bash "$REPO_ROOT/scripts/deploy-box.sh" \
+  || die "the deploy did not finish -- the output above says why. Nothing is half-configured; re-run after fixing it."
+ok "the node is up inside the box"
 
 step "What happens next"
 printf '  1. DNS: an A record for %s must point at this machine.\n' "$DOMAIN"

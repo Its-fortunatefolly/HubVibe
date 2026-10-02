@@ -1,9 +1,9 @@
 """Check the purchase book against every payment the chains show.
 
-Run inside the container, next to the book:
+Run inside the live container, next to the book (from /root/HubVibe on the box):
 
-    docker compose exec hubvibe python -m app.purchase_reconcile            # report only
-    docker compose exec hubvibe python -m app.purchase_reconcile --backfill # and fill the book
+    bash scripts/box-exec.sh python -m app.purchase_reconcile            # report only
+    bash scripts/box-exec.sh python -m app.purchase_reconcile --backfill # and fill the book
 
 For each wallet this node is paid into, every incoming USDC payment is
 listed from a public source and marked:

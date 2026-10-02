@@ -18,6 +18,8 @@ This module is pure shaping -- no I/O -- so main.py owns the wiring.
 """
 
 import json
+import os
+import sqlite3
 import threading
 import time
 import uuid
@@ -275,32 +277,94 @@ def reply(text: str, version: str) -> dict:
     return {"message": message} if version == "1.0" else message
 
 
-class TaskStore:
-    """Recent tasks, in memory: GetTask, and a paid follow-up that names only
-    its taskId. One uvicorn process serves this node, so one dict is the
-    whole store; a restart forgets tasks, and GetTask then says not found."""
+def _default_tasks_path() -> Optional[str]:
+    """A2A_TASKS_PATH, else a file on the node's volume, else memory only."""
+    configured = os.environ.get("A2A_TASKS_PATH")
+    if configured is not None:
+        return configured or None
+    if os.path.isdir("/data") and os.access("/data", os.W_OK):
+        return "/data/hubvibe-a2a-tasks.db"
+    return None
 
-    def __init__(self, ttl_seconds: int = 900, max_tasks: int = 2000):
+
+class TaskStore:
+    """Recent tasks: GetTask, and a paid follow-up that names only its taskId.
+
+    Kept in SQLite on the node's volume rather than in one process's memory.
+    A deploy starts the new build beside the old one and then moves traffic
+    to it (scripts/deploy-box.sh), so a buyer who opened a task on the old
+    copy sends the follow-up to the new one; in memory, every deploy and
+    every restart forgot every open task and that follow-up read "task not
+    found". Two copies share the file safely (WAL, one row per task).
+
+    Falls back to memory when the file cannot be used, and never raises into
+    a request: a task store that fails costs a follow-up, not the call.
+    """
+
+    def __init__(self, ttl_seconds: int = 900, max_tasks: int = 2000,
+                 path: Optional[str] = None):
         self._ttl, self._max = ttl_seconds, max_tasks
         self._tasks: dict = {}
         self._lock = threading.Lock()
+        self._path = _default_tasks_path() if path is None else (path or None)
+        self._conn: Optional[sqlite3.Connection] = None
+        self._writes = 0
+
+    def _db(self) -> Optional[sqlite3.Connection]:
+        if self._conn is None and self._path:
+            try:
+                conn = sqlite3.connect(self._path, timeout=5.0, check_same_thread=False,
+                                       isolation_level=None)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("CREATE TABLE IF NOT EXISTS a2a_tasks (id TEXT PRIMARY KEY, "
+                             "stored_at REAL NOT NULL, task TEXT NOT NULL)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_a2a_stored ON a2a_tasks(stored_at)")
+                self._conn = conn
+            except Exception:
+                self._path = None
+        return self._conn
 
     def put(self, task: dict) -> None:
-        now = time.monotonic()
+        now = time.time()
         with self._lock:
+            conn = self._db()
+            if conn is not None:
+                try:
+                    conn.execute("INSERT OR REPLACE INTO a2a_tasks (id, stored_at, task) "
+                                 "VALUES (?,?,?)", (str(task["id"]), now, json.dumps(task, default=str)))
+                    self._writes += 1
+                    if self._writes % 100 == 1:
+                        conn.execute("DELETE FROM a2a_tasks WHERE stored_at < ?", (now - self._ttl,))
+                        conn.execute("DELETE FROM a2a_tasks WHERE id NOT IN (SELECT id FROM "
+                                     "a2a_tasks ORDER BY stored_at DESC LIMIT ?)", (self._max,))
+                    return
+                except Exception:
+                    pass
             self._tasks[task["id"]] = (now, task)
             if len(self._tasks) > self._max:
-                for key, (stamp, _) in sorted(self._tasks.items(), key=lambda kv: kv[1][0]):
+                for key, _ in sorted(self._tasks.items(), key=lambda kv: kv[1][0]):
                     if len(self._tasks) <= self._max:
                         break
                     del self._tasks[key]
 
     def get(self, task_id) -> Optional[dict]:
+        if task_id is None:
+            return None
+        now = time.time()
         with self._lock:
+            conn = self._db()
+            if conn is not None:
+                try:
+                    row = conn.execute("SELECT stored_at, task FROM a2a_tasks WHERE id=?",
+                                       (str(task_id),)).fetchone()
+                    if row is not None:
+                        return json.loads(row[1]) if now - row[0] <= self._ttl else None
+                except Exception:
+                    pass
             entry = self._tasks.get(task_id)
             if entry is None:
                 return None
-            if time.monotonic() - entry[0] > self._ttl:
+            if now - entry[0] > self._ttl:
                 del self._tasks[task_id]
                 return None
             return entry[1]

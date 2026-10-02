@@ -102,8 +102,8 @@ else:
     print("  settlements: none in this window")
 if not requests:
     print("  no access-log lines seen: is Caddy's `log` directive deployed? "
-          "(deploy/vps/Caddyfile is bind-mounted and read only on start, so a "
-          "rebuild is not enough: restart the caddy container from deploy/vps)")
+          "(bash scripts/deploy-box.sh loads deploy/vps/Caddyfile into the "
+          "running Caddy)")
 PY
 
 summarise() {
@@ -119,5 +119,8 @@ command -v docker >/dev/null 2>&1 || {
   printf 'docker is not on PATH. Run this on the box, or pipe log lines in with --stdin.\n' >&2
   exit 1
 }
+# Both copies of the node (blue and green, deploy/vps/docker-compose.yml):
+# after a deploy the earlier part of the window is in the other copy's log.
+# A copy that has never run simply contributes nothing.
 docker compose -f "$COMPOSE_DIR/docker-compose.yml" --project-directory "$COMPOSE_DIR" \
-  logs --no-color --since "$SINCE" caddy hubvibe 2>/dev/null | summarise
+  logs --no-color --since "$SINCE" caddy hubvibe-blue hubvibe-green 2>/dev/null | summarise

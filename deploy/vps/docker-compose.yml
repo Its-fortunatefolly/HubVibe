@@ -11,57 +11,96 @@
 # in-flight audit holds a Chromium context, so it is a memory ceiling. The
 # default of 2 fits a 4 GB box with room for the OS; raise it and mem_limit
 # together when the box grows.
+#
+# BLUE AND GREEN. The node is defined twice, identically, as hubvibe-blue
+# and hubvibe-green. One serves buyers; the other is where the next build is
+# started and checked while the first keeps serving. Caddy sends traffic to
+# whichever copy's /ready says 200, and the deploy script decides that by
+# writing the live color to /data/hubvibe-active. So a deploy never stops
+# the copy buyers are using, a build that fails its checks never takes a
+# request, and the previous build stays on disk for an instant rollback:
+#
+#   bash scripts/deploy-box.sh            # build, check, switch, retire old
+#   bash scripts/deploy-box.sh rollback   # previous build back in front
+#   bash scripts/deploy-box.sh status     # what is live, what stands by
+#
+# Both colors carry a profile, so a bare `docker compose up -d` starts only
+# Caddy and can never start, rebuild or restart a node behind the gate's
+# back. Name a color, or better, use the script.
+
+x-hubvibe: &hubvibe
+  build:
+    context: ../../wcag-audit-engine
+    args:
+      # The commit, reported by /health (set by scripts/deploy-box.sh).
+      BUILD_SHA: ${HUBVIBE_BUILD_SHA:-unknown}
+  restart: unless-stopped
+  # A real init as PID 1, so exited child processes are reaped. When an
+  # audit outlives its deadline, browser_pool kills that browser's whole
+  # process group; uvicorn as PID 1 never reaps the orphans, which left
+  # about six zombie entries per kill (measured on this image; zero with
+  # init).
+  init: true
+  # Rotate container logs. Docker's json-file driver keeps every line
+  # forever by default; at paid-traffic volume (one INFO line per
+  # settlement plus uvicorn's access log) that fills the box's disk in
+  # months and takes the node down with it.
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "5"
+  env_file: .env
+  volumes:
+    - hubvibe_data:/data
+  # A copy is stopped only after traffic has left it (scripts/deploy-box.sh),
+  # and then it finishes everything it holds: uvicorn drains the requests in
+  # flight, and the app lets jobs handed back to collect (202) run to the
+  # end. No job runs longer than 240 s (MAX_WORKER_SECONDS) plus its
+  # settlement, so WORKER_DRAIN_SECONDS below is 280 and this grace is 300:
+  # Docker's default 10 s SIGKILLed calls a customer had already paid for.
+  stop_grace_period: 300s
+  # Chromium under memory pressure takes the whole box with it; cap the
+  # container so the worst case is a restarted service, not a dead host.
+  mem_limit: 3g
+  healthcheck:
+    test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 30s
+
+x-hubvibe-environment: &hubvibe-environment
+  # The public identity every manifest and 402 advertises. The domain,
+  # never the box: agents cache this URL, and the domain is what lets
+  # the box change hosts later without losing them.
+  PUBLIC_BASE_URL: https://${DOMAIN}
+  # One volume, shared files: SQLite replaces Firestore off-Google. Both
+  # colors open the same databases; every write path takes SQLite's own
+  # lock (WAL, BEGIN IMMEDIATE, PRIMARY KEY claims), so two copies running
+  # side by side during a deploy cannot double-spend a key or a payment.
+  KEY_STORE: sqlite
+  KEY_STORE_SQLITE_PATH: /data/hubvibe-keys.db
+  # Exactly one trusted proxy (Caddy) appends the client address to
+  # X-Forwarded-For, so the rate limiter reads one hop back.
+  RATE_LIMIT_PROXY_DEPTH: "1"
+  # See stop_grace_period.
+  WORKER_DRAIN_SECONDS: "280"
 
 services:
-  hubvibe:
-    build:
-      context: ../../wcag-audit-engine
-    restart: unless-stopped
-    # A real init as PID 1, so exited child processes are reaped. When an
-    # audit outlives its deadline, browser_pool kills that browser's whole
-    # process group; uvicorn as PID 1 never reaps the orphans, which left
-    # about six zombie entries per kill (measured on this image; zero with
-    # init).
-    init: true
-    # Rotate container logs. Docker's json-file driver keeps every line
-    # forever by default; at paid-traffic volume (one INFO line per
-    # settlement plus uvicorn's access log) that fills the box's disk in
-    # months and takes the node down with it.
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "5"
-    env_file: .env
+  hubvibe-blue:
+    <<: *hubvibe
+    profiles: ["blue"]
     environment:
-      # The public identity every manifest and 402 advertises. The domain,
-      # never the box: agents cache this URL, and the domain is what lets
-      # the box change hosts later without losing them.
-      PUBLIC_BASE_URL: https://${DOMAIN}
-      # One instance, one file: SQLite replaces Firestore off-Google.
-      KEY_STORE: sqlite
-      KEY_STORE_SQLITE_PATH: /data/hubvibe-keys.db
-      # Exactly one trusted proxy (Caddy) appends the client address to
-      # X-Forwarded-For, so the rate limiter reads one hop back.
-      RATE_LIMIT_PROXY_DEPTH: "1"
-    volumes:
-      - hubvibe_data:/data
-    # A page load is allowed 30s and a settle waits on chain inclusion, so
-    # Docker's default 10s grace SIGKILLed audits a customer had already paid
-    # for: `docker compose up -d --build` on a busy node dropped every call in
-    # flight. uvicorn stops accepting on SIGTERM and drains what it holds; this
-    # gives it room to finish rather than being shot halfway through -- including
-    # jobs handed back to collect (202), which the app drains for up to 60 s.
-    stop_grace_period: 75s
-    # Chromium under memory pressure takes the whole box with it; cap the
-    # container so the worst case is a restarted service, not a dead host.
-    mem_limit: 3g
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      <<: *hubvibe-environment
+      HUBVIBE_COLOR: blue
+
+  hubvibe-green:
+    <<: *hubvibe
+    profiles: ["green"]
+    environment:
+      <<: *hubvibe-environment
+      HUBVIBE_COLOR: green
 
   caddy:
     image: caddy:2
@@ -80,8 +119,6 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on:
-      - hubvibe
 
 volumes:
   hubvibe_data:

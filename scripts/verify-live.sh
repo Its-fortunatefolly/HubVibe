@@ -110,7 +110,7 @@ expect_status GET / 200 "GET / (landing page)"
 # main carried a new app_id while the live page served the old one, every
 # check here passed (an old image answers 200 on everything), and the only
 # symptom was a Base domain verification that silently never completed.
-# `git pull` on the box does not rebuild; `docker compose up -d --build`
+# `git pull` on the box does not rebuild; `bash scripts/deploy-box.sh`
 # does. Skipped, out loud, when there is nothing local to compare against.
 LOCAL_INDEX="${REPO_DIR:-}/wcag-audit-engine/app/static/index.html"
 if [ -n "${REPO_DIR:-}" ] && [ -f "$LOCAL_INDEX" ]; then
@@ -122,7 +122,7 @@ if [ -n "${REPO_DIR:-}" ] && [ -f "$LOCAL_INDEX" ]; then
   elif [ "$LIVE_APP_ID" = "$WANT_APP_ID" ]; then
     pass "the deployed homepage is this checkout's ($WANT_APP_ID)"
   else
-    fail "the node is running an OLDER IMAGE: its homepage serves base:app_id '${LIVE_APP_ID:-none}', this checkout serves '$WANT_APP_ID'. A git pull does not rebuild -- on the box: cd deploy/vps && docker compose up -d --build"
+    fail "the node is running an OLDER IMAGE: its homepage serves base:app_id '${LIVE_APP_ID:-none}', this checkout serves '$WANT_APP_ID'. A git pull does not rebuild -- on the box: bash scripts/deploy-box.sh"
   fi
 fi
 
