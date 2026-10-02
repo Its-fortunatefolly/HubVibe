@@ -313,3 +313,48 @@ def test_an_outside_sale_alerts_and_a_failed_alert_changes_nothing(app_module, c
     client.post("/audit/wcag", headers={"PAYMENT-SIGNATURE": "signed"}, json={"html": "<p>x</p>"})
     PB.wait_for_alerts()
     assert sent == []  # the owner's own seeding is not a sale to alert on
+
+
+def test_a_paid_job_handed_back_to_collect_is_booked_once_when_it_delivers(app_module, monkeypatch):
+    """Deliver later (a job still running at 22 s is a job to collect): the
+    sale is booked -- once, with payer, transaction and receipt -- at the
+    moment the result exists, and not before; its receipt says paid and
+    delivered."""
+    import asyncio
+    import time as _time
+
+    from fastapi.testclient import TestClient
+
+    W = app_module.workers
+    monkeypatch.setenv("WORKER_DELIVER_LATER_AFTER_SECONDS", "0.2")
+    _pay_x402(app_module, monkeypatch)
+    worker = W.catalog.BY_NAME["stats.probability"]
+    registry = dict(W.router.REGISTRY)
+
+    async def slow(ctx, payload):
+        await asyncio.sleep(0.6)
+        return W.catalog.output_example(worker)
+
+    registry["stats.probability"] = slow
+    monkeypatch.setattr(W.router, "REGISTRY", registry)
+    with TestClient(app_module.app) as client:
+        first = client.post(worker.path, headers={"PAYMENT-SIGNATURE": "signed"},
+                            json=W.catalog.example_for(worker))
+        assert first.status_code == 202, first.text
+        assert _rows(app_module) == [], "nothing is booked before the result exists"
+        deadline = _time.monotonic() + 5
+        while True:
+            done = client.get(first.json()["collect_url"])
+            if done.status_code != 202 or _time.monotonic() > deadline:
+                break
+            _time.sleep(0.05)
+        assert done.status_code == 200, done.text
+        receipt = client.get(first.json()["receipt_url"]).json()
+
+    rows = _rows(app_module)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["outcome"] == "delivered" and row["kind"] == "sale" and row["internal"] == 0
+    assert row["payer"] == BUYER and row["tx_hash"] == TX
+    assert row["receipt_id"] == first.json()["receipt_id"] == done.json()["receipt_id"]
+    assert receipt["outcome"] == "paid_delivered"
