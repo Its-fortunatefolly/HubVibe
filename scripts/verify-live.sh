@@ -176,13 +176,13 @@ print("on" if "x402" in methods else "off")
 [ -n "$X402_STATE" ] || X402_STATE=unknown
 echo "  x402 rail per the manifest: $X402_STATE"
 
-if printf '%s' "$CHALLENGE" | grep -q '"price_usd"'; then
+if grep -q '"price_usd"' <<< "$CHALLENGE"; then
   pass "402 body carries price_usd"
 else
   fail "402 body missing price_usd -- agents cannot budget the call"
 fi
 
-if printf '%s' "$CHALLENGE" | grep -q '"accepts"'; then
+if grep -q '"accepts"' <<< "$CHALLENGE"; then
   pass "402 body carries an accepts[] list"
 else
   fail "402 body missing accepts[] -- agents cannot pick a payment rail"
@@ -262,7 +262,7 @@ esac
 # body, so a node without it serves every modern client the legacy path -- and
 # has nowhere to put the v2 extensions slot or the service name the Bazaar
 # indexes by.
-if printf '%s' "$CHALLENGE_HEADERS" | grep -qi '^payment-required:'; then
+if grep -qi '^payment-required:' <<< "$CHALLENGE_HEADERS"; then
   if [ "$X402_STATE" = "off" ]; then
     fail "x402 is off per the manifest, but the 402 still carries a v2 PAYMENT-REQUIRED challenge -- a v2 client reads that header FIRST, so it would still be told to pay"
   else
@@ -276,7 +276,7 @@ fi
 
 # A null payTo is worse than no x402 at all: it tells a paying agent to send
 # funds nowhere. Absent is correct when x402 is not configured.
-if printf '%s' "$CHALLENGE" | grep -q '"payTo": *null'; then
+if grep -q '"payTo": *null' <<< "$CHALLENGE"; then
   fail "402 advertises x402 with payTo:null -- agents would pay nowhere"
 else
   pass "402 does not advertise an unpayable x402 rail"
@@ -287,8 +287,8 @@ fi
 # -- the array an agent actually iterates -- omitted it, so a CI pipeline
 # holding a pre-funded key could not learn from the challenge that its key
 # was spendable here.
-if printf '%s' "$MANIFEST" | grep -q 'stripe_api_key'; then
-  if printf '%s' "$CHALLENGE" | grep -q '"api_key"'; then
+if grep -q 'stripe_api_key' <<< "$MANIFEST"; then
+  if grep -q '"api_key"' <<< "$CHALLENGE"; then
     pass "402 accepts[] offers the API-key rail the manifest advertises"
   else
     fail "manifest lists stripe_api_key but the 402's accepts[] omits it -- an agent reading the challenge cannot find the rail"
@@ -319,9 +319,15 @@ print("on" if any(str(m).startswith("mpp-") for m in methods) else "off")
 ' 2>/dev/null)
 [ -n "$MPP_STATE" ] || MPP_STATE=unknown
 
-if curl -sS -m 30 -D - -o /dev/null -X POST "$BASE/audit/wcag" \
-  -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null \
-  | grep -qi '^www-authenticate:.*Payment'; then
+# Headers captured first, then matched: under `set -o pipefail`, a `curl |
+# grep -q` pipeline failed whenever grep matched and exited before curl had
+# written everything (curl exit 23) -- measured on the box 2026-10-02: 5 of
+# 60 probes reported "no WWW-Authenticate" while Caddy logged all three
+# challenges sent. Same reason every check below matches a captured string
+# with a here-string instead of piping it.
+WCAG_HEADERS="$(curl -sS -m 30 -D - -o /dev/null -X POST "$BASE/audit/wcag" \
+  -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)"
+if grep -qi '^www-authenticate:.*Payment' <<< "$WCAG_HEADERS"; then
   if [ "$MPP_STATE" = "off" ]; then
     fail "the manifest advertises no mpp-* method, but the 402 still sends a WWW-Authenticate: Payment challenge -- a caller would be invited to pay a rail this node says it cannot settle"
   else
@@ -357,21 +363,21 @@ echo
 echo "MCP endpoint (what the official registry lists as a remote server)"
 MCP_INIT=$(curl -sS -m 30 -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' 2>/dev/null)
-if printf '%s' "$MCP_INIT" | grep -q '"serverInfo"'; then
+if grep -q '"serverInfo"' <<< "$MCP_INIT"; then
   pass "MCP initialize handshake responds"
 else
   fail "MCP initialize did not respond with serverInfo"
 fi
 # 2026-07-28 is a modern-only version; returning it here makes every real
 # client refuse the connection, so assert we never do.
-if printf '%s' "$MCP_INIT" | grep -q '"protocolVersion": *"2026'; then
+if grep -q '"protocolVersion": *"2026' <<< "$MCP_INIT"; then
   fail "MCP returned a non-handshake protocol version -- clients will refuse"
 else
   pass "MCP returned a usable handshake protocol version"
 fi
 MCP_TOOLS=$(curl -sS -m 30 -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' 2>/dev/null)
-if printf '%s' "$MCP_TOOLS" | grep -q 'audit_bundle'; then
+if grep -q 'audit_bundle' <<< "$MCP_TOOLS"; then
   pass "MCP tools/list advertises the audit tools"
 else
   fail "MCP tools/list did not return the audit tools"
@@ -485,7 +491,7 @@ fi
 echo
 echo "Human plans: the manifest must only offer what checkout can sell"
 PLANS=$(curl -sS -m 30 "$BASE/.well-known/agent.json" 2>/dev/null)
-if printf '%s' "$PLANS" | grep -q 'included_calls_per_month'; then
+if grep -q 'included_calls_per_month' <<< "$PLANS"; then
   fail "manifest still advertises the retired included-calls plan"
 else
   pass "manifest does not advertise the retired plan"
@@ -526,7 +532,7 @@ echo
 echo "Machine discovery: is this node findable by agents that would pay it?"
 DISC=$(curl -sS -m 30 -X POST "$BASE/audit/bundle" \
   -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' 2>/dev/null)
-if printf '%s' "$DISC" | grep -q '"bazaar"'; then
+if grep -q '"bazaar"' <<< "$DISC"; then
   # Presence was the whole check, and presence is not indexability. The
   # record shipped for months without `info.input.method` while the schema
   # emitted beside it declared method required, so the Bazaar's own
