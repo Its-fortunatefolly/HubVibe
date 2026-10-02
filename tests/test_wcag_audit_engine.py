@@ -2509,6 +2509,24 @@ def test_bundle_does_not_wait_out_a_slow_plain_get(monkeypatch):
     assert _time.monotonic() - started < 10
 
 
+
+def test_manifest_lists_the_card_rail_when_the_top_up_is_on(monkeypatch):
+    """Every audit is priced under Stripe's 0.50 USD card floor, but with the
+    top-up on, each route still has a card path (a prepaid block), and every
+    live 402 offers it. agent.json must say so, or agents that read the
+    manifest never see the card rail."""
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch)
+    monkeypatch.setattr(module.mpp_payments, "stripe_available_for", lambda cents: False)
+    monkeypatch.setattr(module.mpp_payments, "topup_available", lambda: True)
+    methods = TestClient(module.app).get("/.well-known/agent.json").json()["payment"]["methods"]
+    assert "mpp-stripe" in methods
+
+    monkeypatch.setattr(module.mpp_payments, "topup_available", lambda: False)
+    methods = TestClient(module.app).get("/.well-known/agent.json").json()["payment"]["methods"]
+    assert "mpp-stripe" not in methods
+
 class _FakeAxeResult:
     response = {"violations": []}
 

@@ -2771,7 +2771,11 @@ def _payment_methods_live() -> list:
     # could ever settle" -- and with the catalog priced in cents, the
     # answer today is no. Listing it anyway would put a method in the array an
     # agent picks from that fails at the Stripe API every single time.
-    if mpp_payments.stripe_available_for(_max_catalog_price_cents()):
+    # With the top-up on, every route has a card path: a direct charge where
+    # the price clears the floor, a prepaid block where it does not -- which
+    # is what every live 402 offers. Leaving the method out of the manifest
+    # hid the card rail from agents that read this list instead of a 402.
+    if mpp_payments.topup_available() or mpp_payments.stripe_available_for(_max_catalog_price_cents()):
         methods.append("mpp-stripe")
     if mpp_payments.tempo_configured():
         methods.append("mpp-tempo")
