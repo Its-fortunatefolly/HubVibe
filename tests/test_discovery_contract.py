@@ -524,3 +524,13 @@ def test_the_email_verify_example_suggests_nothing_for_a_correct_address(app_mod
     W = app_module.workers
     example = W.catalog.output_example(W.catalog.BY_NAME["email.verify"])
     assert example["domain"] == "github.com" and example["did_you_mean"] is None
+
+
+def test_the_static_mcp_manifest_lists_every_paid_route():
+    """verify-live refuses a deploy when /mcp.json and /mcp disagree on the
+    tool set (it caught the three agent tiers missing on 2026-10-02). Catch
+    it here first: every catalog route has an entry in the static file."""
+    manifest = json.loads((STATIC / "mcp.json").read_text())
+    listed = {(t.get("httpEndpoint") or {}).get("path") for t in manifest["tools"]}
+    missing = sorted(w.path for w in W.catalog.CATALOG if w.path not in listed)
+    assert not missing, f"add these to app/static/mcp.json: {missing}"

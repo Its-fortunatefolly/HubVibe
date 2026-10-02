@@ -9493,6 +9493,1263 @@
       }
     },
     {
+      "name": "hubvibe_agent_task",
+      "title": "Agent: get a task done",
+      "description": "HubVibe Agent (quick): hand it any task in plain words and get the finished result in one call. Research a company or a person of interest, check a website, screen a name, read the markets, compare options, pull the facts: you get a headline, the key points, the full answer, its sources and every tool step. Up to 4 steps. Charged only when the answer is delivered. Input: task; optional context, fields for a JSON answer, language. $2.75 per call. Returns: task, tier, headline, key_points[], answer, data, steps[{n,tool,input,ok,summary,seconds}], tools_used[], sources[], notes[].",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "The task, in plain words."
+          },
+          "context": {
+            "type": [
+              "string",
+              "object",
+              "array"
+            ],
+            "description": "Optional material the task refers to (text or JSON)."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "description": "Optional: also return `data` with exactly these keys."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "The task, as given.",
+                "examples": [
+                  "Find the official website of Anthropic and summarize what it sells, with sources."
+                ]
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "quick",
+                  "pro",
+                  "max"
+                ],
+                "description": "The tier that ran: quick ($2.75), pro ($9) or max ($20).",
+                "examples": [
+                  "quick"
+                ]
+              },
+              "headline": {
+                "type": "string",
+                "description": "The one-sentence takeaway.",
+                "examples": [
+                  "Anthropic sells the Claude AI models to people and businesses."
+                ]
+              },
+              "key_points": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A finding.",
+                  "examples": [
+                    "Claude is offered through apps, an API and cloud marketplaces."
+                  ]
+                },
+                "description": "3-7 short findings.",
+                "examples": [
+                  [
+                    "Claude is offered through apps, an API and cloud marketplaces."
+                  ]
+                ]
+              },
+              "answer": {
+                "type": "string",
+                "description": "The finished answer.",
+                "examples": [
+                  "Anthropic (anthropic.com) builds the Claude family of AI models..."
+                ]
+              },
+              "data": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": true,
+                "description": "The JSON answer with exactly the requested `fields` (null when unknown); null when no fields were requested.",
+                "examples": [
+                  null
+                ]
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "n": {
+                      "type": "integer",
+                      "description": "Step number.",
+                      "examples": [
+                        1
+                      ]
+                    },
+                    "tool": {
+                      "type": "string",
+                      "description": "The HubVibe tool used.",
+                      "examples": [
+                        "search.web"
+                      ]
+                    },
+                    "input": {
+                      "type": "object",
+                      "properties": {},
+                      "required": [],
+                      "description": "What the tool was asked.",
+                      "additionalProperties": true,
+                      "examples": [
+                        {
+                          "query": "Anthropic official website"
+                        }
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "What the step found, or why it did not succeed.",
+                      "examples": [
+                        "{\"answer\": \"Anthropic is an AI safety company...\"}"
+                      ]
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "description": "How long the step took.",
+                      "examples": [
+                        4.2
+                      ]
+                    }
+                  },
+                  "required": [
+                    "n",
+                    "tool",
+                    "input",
+                    "ok",
+                    "summary",
+                    "seconds"
+                  ],
+                  "description": "One step of the work."
+                },
+                "description": "Every step of the work, in order."
+              },
+              "tools_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Tool name.",
+                  "examples": [
+                    "search.web"
+                  ]
+                },
+                "description": "The HubVibe tools that did the work.",
+                "examples": [
+                  [
+                    "search.web"
+                  ]
+                ]
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "URL.",
+                  "examples": [
+                    "https://www.anthropic.com/"
+                  ]
+                },
+                "description": "URLs the answer rests on.",
+                "examples": [
+                  [
+                    "https://www.anthropic.com/"
+                  ]
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Note.",
+                  "examples": [
+                    "Finished within this tier's scope; the answer uses the work done."
+                  ]
+                },
+                "description": "Anything that limited the work.",
+                "examples": [
+                  []
+                ]
+              }
+            },
+            "required": [
+              "task",
+              "tier",
+              "headline",
+              "key_points",
+              "answer",
+              "data",
+              "steps",
+              "tools_used",
+              "sources",
+              "notes"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
+          }
+        },
+        "title": "agent.task response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Agent: get a task done"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/agent/task",
+        "price_usd": 2.75
+      }
+    },
+    {
+      "name": "hubvibe_agent_task_pro",
+      "title": "Agent Pro: a deeper task",
+      "description": "HubVibe Agent (pro): hand it any task in plain words and get the finished result in one call. Research a company or a person of interest, check a website, screen a name, read the markets, compare options, pull the facts: you get a headline, the key points, the full answer, its sources and every tool step. Up to 10 steps. Charged only when the answer is delivered. Input: task; optional context, fields for a JSON answer, language. $9.00 per call. Returns: task, tier, headline, key_points[], answer, data, steps[{n,tool,input,ok,summary,seconds}], tools_used[], sources[], notes[].",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "The task, in plain words."
+          },
+          "context": {
+            "type": [
+              "string",
+              "object",
+              "array"
+            ],
+            "description": "Optional material the task refers to (text or JSON)."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "description": "Optional: also return `data` with exactly these keys."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "The task, as given.",
+                "examples": [
+                  "Find the official website of Anthropic and summarize what it sells, with sources."
+                ]
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "quick",
+                  "pro",
+                  "max"
+                ],
+                "description": "The tier that ran: quick ($2.75), pro ($9) or max ($20).",
+                "examples": [
+                  "quick"
+                ]
+              },
+              "headline": {
+                "type": "string",
+                "description": "The one-sentence takeaway.",
+                "examples": [
+                  "Anthropic sells the Claude AI models to people and businesses."
+                ]
+              },
+              "key_points": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A finding.",
+                  "examples": [
+                    "Claude is offered through apps, an API and cloud marketplaces."
+                  ]
+                },
+                "description": "3-7 short findings.",
+                "examples": [
+                  [
+                    "Claude is offered through apps, an API and cloud marketplaces."
+                  ]
+                ]
+              },
+              "answer": {
+                "type": "string",
+                "description": "The finished answer.",
+                "examples": [
+                  "Anthropic (anthropic.com) builds the Claude family of AI models..."
+                ]
+              },
+              "data": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": true,
+                "description": "The JSON answer with exactly the requested `fields` (null when unknown); null when no fields were requested.",
+                "examples": [
+                  null
+                ]
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "n": {
+                      "type": "integer",
+                      "description": "Step number.",
+                      "examples": [
+                        1
+                      ]
+                    },
+                    "tool": {
+                      "type": "string",
+                      "description": "The HubVibe tool used.",
+                      "examples": [
+                        "search.web"
+                      ]
+                    },
+                    "input": {
+                      "type": "object",
+                      "properties": {},
+                      "required": [],
+                      "description": "What the tool was asked.",
+                      "additionalProperties": true,
+                      "examples": [
+                        {
+                          "query": "Anthropic official website"
+                        }
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "What the step found, or why it did not succeed.",
+                      "examples": [
+                        "{\"answer\": \"Anthropic is an AI safety company...\"}"
+                      ]
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "description": "How long the step took.",
+                      "examples": [
+                        4.2
+                      ]
+                    }
+                  },
+                  "required": [
+                    "n",
+                    "tool",
+                    "input",
+                    "ok",
+                    "summary",
+                    "seconds"
+                  ],
+                  "description": "One step of the work."
+                },
+                "description": "Every step of the work, in order."
+              },
+              "tools_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Tool name.",
+                  "examples": [
+                    "search.web"
+                  ]
+                },
+                "description": "The HubVibe tools that did the work.",
+                "examples": [
+                  [
+                    "search.web"
+                  ]
+                ]
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "URL.",
+                  "examples": [
+                    "https://www.anthropic.com/"
+                  ]
+                },
+                "description": "URLs the answer rests on.",
+                "examples": [
+                  [
+                    "https://www.anthropic.com/"
+                  ]
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Note.",
+                  "examples": [
+                    "Finished within this tier's scope; the answer uses the work done."
+                  ]
+                },
+                "description": "Anything that limited the work.",
+                "examples": [
+                  []
+                ]
+              }
+            },
+            "required": [
+              "task",
+              "tier",
+              "headline",
+              "key_points",
+              "answer",
+              "data",
+              "steps",
+              "tools_used",
+              "sources",
+              "notes"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
+          }
+        },
+        "title": "agent.task_pro response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Agent Pro: a deeper task"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/agent/task_pro",
+        "price_usd": 9.0
+      }
+    },
+    {
+      "name": "hubvibe_agent_task_max",
+      "title": "Agent Max: the hardest tasks",
+      "description": "HubVibe Agent (max): hand it any task in plain words and get the finished result in one call. Research a company or a person of interest, check a website, screen a name, read the markets, compare options, pull the facts: you get a headline, the key points, the full answer, its sources and every tool step. Up to 20 steps. Charged only when the answer is delivered. Input: task; optional context, fields for a JSON answer, language. $20.00 per call. Returns: task, tier, headline, key_points[], answer, data, steps[{n,tool,input,ok,summary,seconds}], tools_used[], sources[], notes[].",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "The task, in plain words."
+          },
+          "context": {
+            "type": [
+              "string",
+              "object",
+              "array"
+            ],
+            "description": "Optional material the task refers to (text or JSON)."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "description": "Optional: also return `data` with exactly these keys."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "description": "Optional answer language, BCP-47 (en, ja, pt-BR). Default: the input's."
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "description": "The 200 body of every paid /work call. `result` is the worker's own output (its schema is per route); everything else is the same on every /work route. A receipt for the job is at `receipt_url`.",
+        "required": [
+          "status",
+          "worker",
+          "price_usd",
+          "result",
+          "provenance",
+          "receipt_id",
+          "receipt_url"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "description": "Present only on a delivered result."
+          },
+          "worker": {
+            "type": "string",
+            "description": "Catalog name of the worker that ran.",
+            "examples": [
+              "market.quote"
+            ]
+          },
+          "price_usd": {
+            "type": "number",
+            "description": "What this call cost, in USD.",
+            "examples": [
+              0.02
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "The task, as given.",
+                "examples": [
+                  "Find the official website of Anthropic and summarize what it sells, with sources."
+                ]
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "quick",
+                  "pro",
+                  "max"
+                ],
+                "description": "The tier that ran: quick ($2.75), pro ($9) or max ($20).",
+                "examples": [
+                  "quick"
+                ]
+              },
+              "headline": {
+                "type": "string",
+                "description": "The one-sentence takeaway.",
+                "examples": [
+                  "Anthropic sells the Claude AI models to people and businesses."
+                ]
+              },
+              "key_points": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "A finding.",
+                  "examples": [
+                    "Claude is offered through apps, an API and cloud marketplaces."
+                  ]
+                },
+                "description": "3-7 short findings.",
+                "examples": [
+                  [
+                    "Claude is offered through apps, an API and cloud marketplaces."
+                  ]
+                ]
+              },
+              "answer": {
+                "type": "string",
+                "description": "The finished answer.",
+                "examples": [
+                  "Anthropic (anthropic.com) builds the Claude family of AI models..."
+                ]
+              },
+              "data": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": true,
+                "description": "The JSON answer with exactly the requested `fields` (null when unknown); null when no fields were requested.",
+                "examples": [
+                  null
+                ]
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "n": {
+                      "type": "integer",
+                      "description": "Step number.",
+                      "examples": [
+                        1
+                      ]
+                    },
+                    "tool": {
+                      "type": "string",
+                      "description": "The HubVibe tool used.",
+                      "examples": [
+                        "search.web"
+                      ]
+                    },
+                    "input": {
+                      "type": "object",
+                      "properties": {},
+                      "required": [],
+                      "description": "What the tool was asked.",
+                      "additionalProperties": true,
+                      "examples": [
+                        {
+                          "query": "Anthropic official website"
+                        }
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "What the step found, or why it did not succeed.",
+                      "examples": [
+                        "{\"answer\": \"Anthropic is an AI safety company...\"}"
+                      ]
+                    },
+                    "seconds": {
+                      "type": "number",
+                      "description": "How long the step took.",
+                      "examples": [
+                        4.2
+                      ]
+                    }
+                  },
+                  "required": [
+                    "n",
+                    "tool",
+                    "input",
+                    "ok",
+                    "summary",
+                    "seconds"
+                  ],
+                  "description": "One step of the work."
+                },
+                "description": "Every step of the work, in order."
+              },
+              "tools_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Tool name.",
+                  "examples": [
+                    "search.web"
+                  ]
+                },
+                "description": "The HubVibe tools that did the work.",
+                "examples": [
+                  [
+                    "search.web"
+                  ]
+                ]
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "URL.",
+                  "examples": [
+                    "https://www.anthropic.com/"
+                  ]
+                },
+                "description": "URLs the answer rests on.",
+                "examples": [
+                  [
+                    "https://www.anthropic.com/"
+                  ]
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Note.",
+                  "examples": [
+                    "Finished within this tier's scope; the answer uses the work done."
+                  ]
+                },
+                "description": "Anything that limited the work.",
+                "examples": [
+                  []
+                ]
+              }
+            },
+            "required": [
+              "task",
+              "tier",
+              "headline",
+              "key_points",
+              "answer",
+              "data",
+              "steps",
+              "tools_used",
+              "sources",
+              "notes"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "description": "Step name inside the worker.",
+                      "examples": [
+                        "quote"
+                      ]
+                    },
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the step succeeded.",
+                      "examples": [
+                        true
+                      ]
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Provider that served the step.",
+                      "examples": [
+                        "coinbase-advanced-trade-public"
+                      ]
+                    },
+                    "ms": {
+                      "type": "integer",
+                      "description": "Milliseconds the step took.",
+                      "examples": [
+                        312
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Failure reason, on a failed step.",
+                      "examples": [
+                        "provider_timeout"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "ok",
+                    "ms"
+                  ],
+                  "description": "One step of the job."
+                },
+                "description": "Every step the job ran, in order."
+              },
+              "providers_used": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "description": "Provider name.",
+                  "examples": [
+                    "coinbase-advanced-trade-public"
+                  ]
+                },
+                "description": "Providers that served the job.",
+                "examples": [
+                  [
+                    "coinbase-advanced-trade-public"
+                  ]
+                ]
+              },
+              "attempts": {
+                "type": "integer",
+                "description": "Provider attempts made, including retries and failovers.",
+                "examples": [
+                  1
+                ]
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "description": "Wall-clock milliseconds for the whole job.",
+                "examples": [
+                  340
+                ]
+              }
+            },
+            "required": [
+              "steps",
+              "providers_used",
+              "attempts",
+              "elapsed_ms"
+            ],
+            "description": "How the result was produced: which providers ran and how long each took."
+          },
+          "receipt_id": {
+            "type": "string",
+            "description": "Receipt id for this job.",
+            "examples": [
+              "rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "receipt_url": {
+            "type": "string",
+            "description": "Where to fetch the machine-readable receipt (free, no payment).",
+            "examples": [
+              "/work/receipts/rcpt_9f1c2b3a4d5e6f70"
+            ]
+          },
+          "billing_warning": {
+            "type": "string",
+            "description": "Present only when the charge was recorded with a caveat.",
+            "examples": [
+              "settlement pending"
+            ]
+          },
+          "attribution": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Credit.",
+                  "examples": [
+                    "Translated by Google"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Link.",
+                  "examples": [
+                    "https://translate.google.com"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "url"
+              ],
+              "description": "A credit."
+            },
+            "description": "Present only when the result's text was machine-translated: the credit to show with it."
+          }
+        },
+        "title": "agent.task_max response"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "title": "Agent Max: the hardest tasks"
+      },
+      "httpEndpoint": {
+        "method": "POST",
+        "path": "/work/agent/task_max",
+        "price_usd": 20.0
+      }
+    },
+    {
       "name": "hubvibe_monitor_snapshot",
       "title": "Save a monitoring baseline",
       "description": "Website change monitoring, step one: fetch a page and store it as the baseline to compare against later. Use it to watch pricing pages, terms, job boards or competitors. Input: url. Then call monitor.check to learn whether and how it changed. $0.50 per call. Returns: url, title, text_chars, content_hash, note.",
