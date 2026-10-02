@@ -807,6 +807,26 @@ _SERVICE_NAME = "HubVibe"
 _SERVICE_TAGS = ["accessibility", "wcag", "seo", "security", "performance"]
 _TAG_LIMIT = 5
 _TAG_MAX_CHARS = 32
+# Served by app.main at /icon.png: the HV monogram, 512x512 PNG. Raster,
+# because Bazaar readers re-encode icons (Agentic.Market serves them as
+# 256x256 PNG) and an SVG is not reliably accepted.
+_ICON_PATH = "/icon.png"
+
+
+def service_icon_url(resource_url: Optional[str]) -> Optional[str]:
+    """The icon on the same origin as the route being sold, or None when the
+    route URL is not absolute -- never someone else's host."""
+    if not resource_url:
+        return None
+    try:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(resource_url)
+    except Exception:
+        return None
+    if parts.scheme not in ("https", "http") or not parts.netloc:
+        return None
+    return f"{parts.scheme}://{parts.netloc}{_ICON_PATH}"
 
 
 # Coinbase's facilitator validates the payment payload against its own API
@@ -1151,6 +1171,9 @@ def payment_required_v2(
                 # This route's own tags (a worker's catalog tags), or the
                 # audit default. What capability search matches on.
                 tags=bazaar_tags(tags),
+                # The service icon Agentic.Market and other Bazaar readers
+                # show beside the listing; without it ours rendered bare.
+                iconUrl=service_icon_url(resource_url),
             ),
             accepts=_v2_accepts(priced, resolved),
             extensions=extensions or None,

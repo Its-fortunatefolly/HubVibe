@@ -3310,7 +3310,8 @@ def test_mcp_json_never_hands_a_client_another_deployment_url(monkeypatch):
     assert manifest["remotes"][0]["url"] == "https://audit.example.test/mcp"
     assert manifest["websiteUrl"] == "https://audit.example.test/"
     assert manifest["documentationUrl"] == "https://audit.example.test/.well-known/agent.json"
-    assert manifest["icons"][0]["src"] == "https://audit.example.test/favicon.svg"
+    assert [icon["src"] for icon in manifest["icons"]] == [
+        "https://audit.example.test/icon.png", "https://audit.example.test/favicon.svg"]
 
     blob = str(manifest)
     assert "run.app" not in blob, "a production URL survived into a self-hosted manifest"

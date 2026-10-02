@@ -2183,7 +2183,7 @@ async def mcp_manifest():
     for remote in manifest.get("remotes", []):
         remote["url"] = f"{base}/mcp"
     for icon in manifest.get("icons", []):
-        icon["src"] = f"{base}/favicon.svg"
+        icon["src"] = f"{base}/" + icon["src"].rsplit("/", 1)[-1]
 
     manifest["auth"]["methods"] = live_methods
     manifest["auth"]["description"] = (
@@ -2209,6 +2209,13 @@ async def mcp_manifest():
 @app.get("/favicon.svg", response_class=FileResponse, tags=["discovery"])
 async def favicon():
     return _static_file("favicon.svg", "image/svg+xml")
+
+
+# The HV monogram as a 512x512 PNG: the icon every listing shows (x402
+# Bazaar resource iconUrl, the A2A card, the MCP manifests).
+@app.get("/icon.png", response_class=FileResponse, tags=["discovery"])
+async def icon_png():
+    return _static_file("icon.png", "image/png")
 
 
 @app.get("/og-image.png", response_class=FileResponse, tags=["discovery"])

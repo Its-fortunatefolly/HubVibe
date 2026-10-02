@@ -111,7 +111,7 @@ def build_card(*, base_url: str, name: str, description: str, version: str,
         "provider": {"organization": "HubVibe", "url": base_url},
         "version": version,
         "documentationUrl": f"{base_url}/llms.txt",
-        "iconUrl": f"{base_url}/favicon.svg",
+        "iconUrl": f"{base_url}/icon.png",
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,

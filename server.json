@@ -6,6 +6,13 @@
   "version": "1.31.1",
   "icons": [
     {
+      "src": "https://hubvibe-io.com/icon.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "512x512"
+      ]
+    },
+    {
       "src": "https://hubvibe-io.com/favicon.svg",
       "mimeType": "image/svg+xml",
       "sizes": [
