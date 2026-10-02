@@ -110,6 +110,41 @@ _SYSTEM = (
 )
 
 
+# The tool registry and catalog this agent dispatches through, handed over
+# once by the package that loaded it (skills/__init__.py, workers/__init__.py)
+# rather than looked up by name at run time, so the agent always calls the
+# exact same skill objects the routes use.
+_registry: Optional[dict] = None
+_prechecks: Optional[dict] = None
+_catalog = None
+
+
+def bind(registry: dict, prechecks: dict) -> None:
+    global _registry, _prechecks
+    _registry, _prechecks = registry, prechecks
+
+
+def bind_catalog(catalog_module) -> None:
+    global _catalog
+    _catalog = catalog_module
+
+
+def _the_catalog():
+    if _catalog is not None:
+        return _catalog
+    from .. import catalog  # pragma: no cover - bound at package load
+
+    return catalog
+
+
+def _the_registry() -> tuple:
+    if _registry is not None:
+        return _registry, _prechecks or {}
+    from . import PRECHECKS, REGISTRY  # pragma: no cover - bound at package load
+
+    return REGISTRY, PRECHECKS
+
+
 def _tier(name: str) -> dict:
     return TIERS[name]
 
@@ -146,8 +181,7 @@ def precheck(payload: dict) -> None:
 def _tools_for(name: str) -> list:
     """The workers this tier may call: live on this deployment, not an agent,
     and listed at or below the tier's own price."""
-    from .. import catalog
-
+    catalog = _the_catalog()
     ceiling = _tier(name)["price_usd"]
     return [w for w in catalog.live()
             if not w.name.startswith("agent.") and w.price_usd <= ceiling]
@@ -160,8 +194,7 @@ def _first_sentence(text: str) -> str:
 
 
 def _tool_line(worker) -> str:
-    from .. import catalog
-
+    catalog = _the_catalog()
     props = worker.input_schema.get("properties") or {}
     required = set(worker.input_schema.get("required") or [])
     fields = ", ".join(
@@ -197,8 +230,7 @@ def _sources_in(value, found: list) -> None:
 def _validate_tool_input(worker, tool_input) -> Optional[str]:
     """The tool's own input checks, run before the call: its JSON Schema and
     its precheck. Returns the problem, or None."""
-    from . import PRECHECKS
-
+    _, prechecks = _the_registry()
     if not isinstance(tool_input, dict):
         return "input must be a JSON object"
     try:
@@ -210,7 +242,7 @@ def _validate_tool_input(worker, tool_input) -> Optional[str]:
             return f"{where}: {error.message}"[:300]
     except ImportError:  # pragma: no cover - requirements.txt pins jsonschema
         pass
-    precheck_fn = PRECHECKS.get(worker.skill)
+    precheck_fn = prechecks.get(worker.skill)
     if precheck_fn is not None:
         try:
             precheck_fn(tool_input)
@@ -259,8 +291,7 @@ async def _plan(ctx, prompt: str, system: str) -> dict:
 
 
 async def _call_tool(ctx, worker, tool_input: dict, n: int) -> dict:
-    from . import REGISTRY
-
+    registry, _ = _the_registry()
     started = time.monotonic()
     step = {"n": n, "tool": worker.name, "input": tool_input, "ok": False, "summary": "",
             "seconds": 0.0, "_full": ""}
@@ -268,7 +299,7 @@ async def _call_tool(ctx, worker, tool_input: dict, n: int) -> dict:
     if problem:
         step["summary"] = f"input rejected: {problem}"
         return step
-    skill = REGISTRY.get(worker.skill)
+    skill = registry.get(worker.skill)
     if skill is None:  # pragma: no cover - catalog/registry guard tests cover this
         step["summary"] = "tool unavailable"
         return step

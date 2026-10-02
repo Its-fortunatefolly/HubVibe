@@ -32,6 +32,9 @@ LAYOUT
 
 from . import catalog, context, ledger, media_store, providers, router, runtime, skills  # noqa: F401
 
+# The agent lists and prices tools from this catalog (skills/agent.py).
+skills.agent.bind_catalog(catalog)
+
 configure = router.configure
 is_configured = router.is_configured
 

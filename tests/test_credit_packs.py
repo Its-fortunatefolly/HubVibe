@@ -23,8 +23,10 @@ STATIC = REPO_ROOT / "wcag-audit-engine" / "app" / "static"
 
 
 def _drop_cache():
+    # Configured siblings (billing, payments) are re-read per test; the shared
+    # workers package stays, because other test files hold references to it.
     for name in list(sys.modules):
-        if name.startswith("wcag_audit_engine_"):
+        if name.startswith("wcag_audit_engine_") and name != "wcag_audit_engine_workers":
             sys.modules.pop(name)
 
 

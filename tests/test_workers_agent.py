@@ -77,7 +77,7 @@ def _quote(product_id="BTC-USD"):
 
 
 @pytest.fixture
-def planner(monkeypatch):
+def planner(monkeypatch, _current_modules):
     def install(decisions, cost_micros=1000):
         p = _Planner(decisions, cost_micros)
         monkeypatch.setattr(A.gemini, "PROVIDERS", [p])
@@ -86,7 +86,16 @@ def planner(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _fake_quote(monkeypatch):
+def _current_modules():
+    """Other test files reload the app, which can leave a newer copy of the
+    workers package in sys.modules; patch the copy the agent will import."""
+    global W, A
+    W = _load_workers()
+    A = W.skills.agent
+
+
+@pytest.fixture(autouse=True)
+def _fake_quote(monkeypatch, _current_modules):
     """market.quote without the network: returns a fixed quote and counts calls."""
     calls = []
 
@@ -96,6 +105,10 @@ def _fake_quote(monkeypatch):
                 "url": "https://www.coinbase.com/price/bitcoin"}
 
     monkeypatch.setitem(W.skills.REGISTRY, "market.quote", quote)
+    # Availability depends on this machine's credentials and on provider
+    # health left behind by other test files; the agent's tier rules are what
+    # is under test here, so every catalog row counts as live.
+    monkeypatch.setattr(W.catalog, "live", lambda: list(W.catalog.CATALOG))
     monkeypatch.delenv("AGENT_COST_CEILINGS", raising=False)
     W.runtime.reset_breakers()
     return calls

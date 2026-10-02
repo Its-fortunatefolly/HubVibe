@@ -31,3 +31,5 @@ for _module in (agent, extract, llm, chain, market, data, composites, search, co
                 opendata, traffic, video, bluesky, mastodon, x_pulse, travel, news, macro, opendata_table, hotels, shipping, results, email, property, flight_status, company, weather, sanctions, osint, identity):
     REGISTRY.update(_module.SKILLS)
     PRECHECKS.update(getattr(_module, "PRECHECKS", {}))
+# The agent dispatches through exactly these two dicts.
+agent.bind(REGISTRY, PRECHECKS)
