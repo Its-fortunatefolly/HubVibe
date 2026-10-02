@@ -153,7 +153,8 @@ def _get_browser():
     return browser
 
 
-def with_page(fn: Callable[..., T], **context_kwargs) -> T:
+def with_page(fn: Callable[..., T], *, deadline_seconds: Optional[float] = None,
+              **context_kwargs) -> T:
     """Run `fn(page)` on a fresh context of this thread's pooled browser.
 
     Retries exactly once, and only when the pooled browser itself turns out
@@ -163,15 +164,18 @@ def with_page(fn: Callable[..., T], **context_kwargs) -> T:
     genuinely failing audit still fails honestly instead of being masked by a
     second attempt.
 
-    The whole job runs under the DEADLINE_SECONDS watchdog. When it fires,
+    The whole job runs under the DEADLINE_SECONDS watchdog, or under
+    `deadline_seconds` when the caller has a tighter budget of its own (the
+    bundle answers routers whose clients give up at 30 s). When it fires,
     this raises BrowserDeadlineExceeded (not retried: the same page would
     hang the same way) and the thread's dead browser is dropped.
     """
+    deadline = DEADLINE_SECONDS if deadline_seconds is None else deadline_seconds
     last_error: Exception
 
     for attempt in (1, 2):
         browser = _get_browser()
-        watchdog = _Watchdog(getattr(_state, "browser_pid", None), DEADLINE_SECONDS)
+        watchdog = _Watchdog(getattr(_state, "browser_pid", None), deadline)
         try:
             try:
                 context = browser.new_context(**context_kwargs)
@@ -179,7 +183,7 @@ def with_page(fn: Callable[..., T], **context_kwargs) -> T:
                 # Could not even open a context: treat the browser as dead.
                 _close_thread_browser()
                 if watchdog.fired:
-                    raise _deadline_error() from exc
+                    raise _deadline_error(deadline) from exc
                 last_error = exc
                 if attempt == 2:
                     raise
@@ -190,7 +194,7 @@ def with_page(fn: Callable[..., T], **context_kwargs) -> T:
                 return fn(page)
             except Exception as exc:
                 if watchdog.fired:
-                    raise _deadline_error() from exc
+                    raise _deadline_error(deadline) from exc
                 raise
             finally:
                 try:
@@ -207,7 +211,7 @@ def with_page(fn: Callable[..., T], **context_kwargs) -> T:
     raise last_error
 
 
-def _deadline_error() -> BrowserDeadlineExceeded:
+def _deadline_error(seconds: float = DEADLINE_SECONDS) -> BrowserDeadlineExceeded:
     return BrowserDeadlineExceeded(
-        f"the page did not finish loading and auditing within {DEADLINE_SECONDS:g} seconds"
+        f"the page did not finish loading and auditing within {seconds:g} seconds"
     )

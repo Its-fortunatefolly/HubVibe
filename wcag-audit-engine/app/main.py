@@ -1771,6 +1771,43 @@ def _run_axe(html: Optional[str], url: Optional[str]) -> dict:
     return browser_pool.with_page(_audit)
 
 
+# The bundle's whole answer must fit inside the 30 s the routers' clients
+# wait (Mercator's gateway gave up at exactly 30.0 s three times on
+# 2026-10-01, and each give-up was a sale lost). Payment verify and settle
+# need a few seconds of that, so the work itself gets this much.
+BUNDLE_BUDGET_SECONDS = float(os.environ.get("AUDIT_BUNDLE_BUDGET_SECONDS", "24"))
+# Navigation waits for the load event; network-idle is then waited for only
+# as long as the budget allows, rather than failing a page whose trackers
+# never go quiet. axe-core and the DOM count need the rest.
+_BUNDLE_LOAD_TIMEOUT_MS = 15000
+_BUNDLE_IDLE_CEILING_SECONDS = 8.0
+_BUNDLE_AXE_RESERVE_SECONDS = 5.0
+
+_bundle_document = threading.local()
+
+
+class _BrowserDocument:
+    """The page's own HTTP response, as Chromium received it.
+
+    Shaped like the httpx response the SEO and security audits read: the
+    final URL, the response headers, the raw body (the document as served,
+    not the rendered DOM) and the status. Used only when the plain HTTP GET
+    of the same URL was refused or failed: on 2026-10-01 four paid bundles
+    failed on `403 Forbidden` from the plain GET of pages Chromium had just
+    loaded. Same URL, same moment, same guard on every hop.
+    """
+
+    def __init__(self, url: str, status: int, headers: dict, text: str):
+        self.url = url
+        self.status_code = status
+        self.headers = headers
+        self.text = text
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise audits.TargetNotFetchable(f"responded HTTP {self.status_code}")
+
+
 def _run_axe_and_performance(url: str):
     """One page load serving BOTH the accessibility and performance audits.
 
@@ -1784,8 +1821,12 @@ def _run_axe_and_performance(url: str):
     Both browser-based checks need exactly the same thing: the page,
     rendered, once. The response listener must be attached before navigation
     or the measurement misses the requests it is meant to count.
+
+    The whole job runs inside the bundle budget. The main document's own
+    response is kept on this thread (see _BrowserDocument) for the caller.
     """
     stats = {"bytes": 0, "requests": 0, "unmeasured": 0}
+    _bundle_document.value = None
 
     def _on_response(response):
         stats["requests"] += 1
@@ -1798,17 +1839,91 @@ def _run_axe_and_performance(url: str):
             stats["bytes"] += measured
 
     def _both(page):
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+        started = time.monotonic()
         page.on("response", _on_response)
-        audits.goto_guarded(page, url, wait_until="networkidle", timeout=30000)
+        document = audits.goto_guarded(page, url, wait_until="load", timeout=_BUNDLE_LOAD_TIMEOUT_MS)
+        idle_for = min(
+            _BUNDLE_IDLE_CEILING_SECONDS,
+            BUNDLE_BUDGET_SECONDS - _BUNDLE_AXE_RESERVE_SECONDS - (time.monotonic() - started),
+        )
+        if idle_for > 0:
+            try:
+                page.wait_for_load_state("networkidle", timeout=int(idle_for * 1000))
+            except PlaywrightTimeoutError:
+                # Still busy (analytics, chat widgets, long-polling): audit
+                # the page as loaded rather than lose the whole call.
+                pass
+        try:
+            _bundle_document.value = _BrowserDocument(
+                document.url, document.status, document.all_headers(), document.text())
+        except Exception:
+            _bundle_document.value = None
         dom_node_count = page.evaluate("document.querySelectorAll('*').length")
         # axe runs against the already-loaded page rather than reloading it.
         return _run_axe_all_frames(page), dom_node_count
 
-    axe_raw, dom_node_count = browser_pool.with_page(_both, user_agent=audits.USER_AGENT)
+    axe_raw, dom_node_count = browser_pool.with_page(
+        _both, user_agent=audits.USER_AGENT, deadline_seconds=BUNDLE_BUDGET_SECONDS - 2)
     performance = audits.performance_result_from_metrics(
         dom_node_count, stats["bytes"], stats["requests"]
     )
     return axe_raw, performance
+
+
+def _bundle_inputs(url: str):
+    """Everything the four bundle audits read, inside BUNDLE_BUDGET_SECONDS.
+
+    The plain HTTP GET (SEO and security) runs alongside the browser load
+    (accessibility and performance) instead of after it. When that GET is
+    refused (403/429/5xx), fails, or is still waiting when the browser is
+    done, the document Chromium itself received serves SEO and security.
+    A redirect this service refuses to follow is never papered over: that
+    refusal is raised as it always was.
+
+    Returns (axe_raw, performance_result, shared_response).
+    """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
+    started = time.monotonic()
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bundle-get")
+    pending = pool.submit(audits.fetch_once, url)
+    pool.shutdown(wait=False)
+    _bundle_document.value = None
+    try:
+        axe_raw, performance_result = _run_axe_and_performance(url)
+    except Exception:
+        pending.cancel()
+        raise
+    browser_document = getattr(_bundle_document, "value", None)
+    _bundle_document.value = None
+
+    if browser_document is not None and browser_document.status_code < 400:
+        # Give the GET only what is left of the budget; Chromium's copy is
+        # already in hand.
+        wait = max(0.0, BUNDLE_BUDGET_SECONDS - (time.monotonic() - started))
+    else:
+        wait = max(0.5, BUNDLE_BUDGET_SECONDS - (time.monotonic() - started))
+    try:
+        shared_response = pending.result(timeout=wait)
+    except audits.TargetNotFetchable:
+        raise
+    except FutureTimeout:
+        if browser_document is None or browser_document.status_code >= 400:
+            raise RuntimeError(
+                f"the page did not answer within {BUNDLE_BUDGET_SECONDS:g} seconds") from None
+        return axe_raw, performance_result, browser_document
+    except Exception:
+        if browser_document is None or browser_document.status_code >= 400:
+            raise
+        return axe_raw, performance_result, browser_document
+
+    status = getattr(shared_response, "status_code", None)
+    if (isinstance(status, int) and status >= 400 and browser_document is not None
+            and browser_document.status_code < 400):
+        return axe_raw, performance_result, browser_document
+    return axe_raw, performance_result, shared_response
 
 
 def _remediation_notes(violations: list, language: Optional[str] = None) -> Optional[dict]:
@@ -3430,9 +3545,8 @@ def _mcp_run_tool(name: str, args: dict) -> dict:
     if name == "audit_performance":
         return audits.run_performance_audit(url)
     if name == "audit_bundle":
-        wcag_raw, performance = _run_axe_and_performance(url)
+        wcag_raw, performance, shared = _bundle_inputs(url)
         violations = wcag_raw.get("violations", [])
-        shared = audits.fetch_once(url)
         wcag = {
             "pass": len(violations) == 0,
             "violations": [
@@ -4531,9 +4645,8 @@ def report_page(session_id: str):
 
     url = order["url"]
     try:
-        wcag_raw, performance_result = _run_axe_and_performance(url)
+        wcag_raw, performance_result, shared_response = _bundle_inputs(url)
         wcag_violations = wcag_raw.get("violations", [])
-        shared_response = audits.fetch_once(url)
         result = {
             "wcag": {
                 "pass": len(wcag_violations) == 0,
@@ -4968,10 +5081,10 @@ def audit_bundle(
         return err
 
     try:
-        # Two fetches of the target, not four: one rendered page load feeding
-        # both browser-based checks, and one HTTP GET feeding both
-        # response-based checks. See _run_axe_and_performance.
-        wcag_raw, performance_result = _run_axe_and_performance(payload.url)
+        # Two fetches of the target, not four, run side by side: one rendered
+        # page load feeding both browser-based checks, and one HTTP GET
+        # feeding both response-based checks. See _bundle_inputs.
+        wcag_raw, performance_result, shared_response = _bundle_inputs(payload.url)
         wcag_violations = wcag_raw.get("violations", [])
         wcag_result = {
             "status": "ok",
@@ -4988,7 +5101,6 @@ def audit_bundle(
                 for v in wcag_violations
             ],
         }
-        shared_response = audits.fetch_once(payload.url)
         seo_result = audits.run_seo_audit(None, payload.url, response=shared_response)
         security_result = audits.run_security_audit(payload.url, response=shared_response)
     except Exception as exc:

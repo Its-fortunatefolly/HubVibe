@@ -2387,8 +2387,126 @@ class _FakePage:
     def goto(self, url, **kwargs):
         return None
 
+    def wait_for_load_state(self, state, **kwargs):
+        # The real Page has this; the bundle waits for network idle only as
+        # long as its budget allows.
+        return None
+
     def evaluate(self, script):
         return 42
+
+
+class _FakeDocument:
+    """The main document's response as Chromium received it."""
+
+    def __init__(self, status=200):
+        self.status = status
+        self.url = "https://example.com/"
+
+    def all_headers(self):
+        return {"strict-transport-security": "max-age=63072000", "content-type": "text/html"}
+
+    def text(self):
+        return "<html lang='en'><head><title>Example</title></head><body><h1>Hi</h1></body></html>"
+
+
+class _FakePageWithDocument(_FakePage):
+    def goto(self, url, **kwargs):
+        return _FakeDocument()
+
+
+def _bundle_with_get(monkeypatch, fetch):
+    """POST /audit/bundle with a real SEO/security pass over whatever
+    response the bundle hands them, the browser faked, and `fetch` standing
+    in for the plain HTTP GET."""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    seen = {}
+
+    def _seo(html, url, response=None):
+        seen["seo"] = response
+        response.raise_for_status()
+        return {"status": "ok", "pass": True, "findings": []}
+
+    def _security(url, response=None):
+        seen["security"] = response
+        return {"status": "ok", "pass": True, "findings": []}
+
+    with patch.object(module.browser_pool, "with_page",
+                      lambda fn, **kwargs: fn(_FakePageWithDocument())), patch.object(
+        module.audits, "fetch_once", fetch
+    ), patch.object(module.audits, "run_seo_audit", _seo), patch.object(
+        module.audits, "run_security_audit", _security
+    ), patch.object(module._axe, "run", return_value=_FakeAxeResult()):
+        client = TestClient(module.app)
+        response = client.post(
+            "/audit/bundle", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
+        )
+    return module, response, seen
+
+
+def test_bundle_uses_the_browsers_document_when_the_plain_get_is_refused(monkeypatch):
+    """2026-10-01: four paid bundles failed on `403 Forbidden` from the plain
+    GET of pages Chromium had just loaded. The document Chromium received now
+    serves SEO and security instead, and the call is delivered."""
+    blocked = type("Blocked", (), {"status_code": 403, "url": "https://example.com/",
+                                   "headers": {}, "text": "denied"})()
+    module, response, seen = _bundle_with_get(monkeypatch, lambda url: blocked)
+    assert response.status_code == 200
+    assert isinstance(seen["seo"], module._BrowserDocument)
+    assert seen["security"] is seen["seo"]
+    assert seen["seo"].headers["strict-transport-security"] == "max-age=63072000"
+
+
+def test_bundle_never_papers_over_a_refused_redirect(monkeypatch):
+    """A hop this service refuses to follow stays refused: the browser's copy
+    must not stand in for it."""
+    module_holder = {}
+
+    def _fetch(url):
+        raise module_holder["module"].audits.TargetNotFetchable("redirected to a URL that is private")
+
+    from unittest.mock import patch
+    from fastapi.testclient import TestClient
+
+    module = _load_main(monkeypatch, api_key="test-key")
+    module_holder["module"] = module
+    with patch.object(module.browser_pool, "with_page",
+                      lambda fn, **kwargs: fn(_FakePageWithDocument())), patch.object(
+        module.audits, "fetch_once", _fetch
+    ), patch.object(module._axe, "run", return_value=_FakeAxeResult()):
+        response = TestClient(module.app).post(
+            "/audit/bundle", json={"url": "https://example.com"}, headers={"X-API-Key": "test-key"}
+        )
+    assert response.status_code == 502
+
+
+def test_bundle_does_not_wait_out_a_slow_plain_get(monkeypatch):
+    """Routers' clients give up at 30 s. When the browser is done and the
+    plain GET is still waiting, the browser's copy answers."""
+    import threading
+
+    release = threading.Event()
+
+    def _slow(url):
+        release.wait(30)
+        return object()
+
+    import time as _time
+
+    started = _time.monotonic()
+    module = None
+    try:
+        monkeypatch.setenv("AUDIT_BUNDLE_BUDGET_SECONDS", "1")
+        module, response, seen = _bundle_with_get(monkeypatch, _slow)
+    finally:
+        release.set()
+    assert response.status_code == 200
+    assert isinstance(seen["seo"], module._BrowserDocument)
+    assert _time.monotonic() - started < 10
 
 
 class _FakeAxeResult:
