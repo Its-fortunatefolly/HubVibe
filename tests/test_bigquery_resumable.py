@@ -32,7 +32,7 @@ def _load_workers():
 
 
 W = _load_workers()
-BQ = sys.modules["wcag_audit_engine_workers.providers.bigquery"]
+BQ = W.providers.bigquery
 
 
 class _FakeBigQuery:
@@ -132,14 +132,13 @@ def test_still_computing_is_never_retried_in_call():
 
 
 def test_still_computing_maps_to_503():
-    router = sys.modules["wcag_audit_engine_workers.router"]
-    assert router._error_status(W.runtime.StillComputing.reason) == 503
+    assert W.router._error_status(W.runtime.StillComputing.reason) == 503
 
 
 def test_anomaly_count_covers_every_scored_point_not_just_returned_rows():
     """56 series x 30 points = 1,680 scored, 200 returned: the count must be
     the query's own total (47), not the anomalies among the 200 (15)."""
-    data = sys.modules["wcag_audit_engine_workers.skills.data"]
+    data = W.skills.data
     captured = {}
 
     class _Ctx:
