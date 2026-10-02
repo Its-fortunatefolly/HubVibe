@@ -25,6 +25,7 @@ since Stripe is the source of truth for both.
 import logging
 import os
 import secrets
+import time
 import uuid
 from typing import Optional
 
@@ -532,6 +533,96 @@ def issue_prepaid_key(credit_cents: int) -> str:
         }
     )
     return api_key
+
+
+# --- credit packs: the human front door ----------------------------------------
+#
+# A person (or a team funding its agents) buys a block of credit by card in a
+# Stripe-hosted payment window and leaves with a key. The key is an ordinary
+# prepaid key: every paid route and every agent tier spends from it, exactly
+# as a key bought over MPP or Solana does. Bigger packs carry bonus credit
+# (owner's decision 2026-10-02). One-time payments, never subscriptions.
+
+CREDIT_PACKS = {
+    "25": {"price_cents": 2500, "credit_cents": 2500, "name": "HubVibe credit: $25"},
+    "100": {"price_cents": 10000, "credit_cents": 10500, "name": "HubVibe credit: $100 (+$5 bonus)"},
+    "500": {"price_cents": 50000, "credit_cents": 55000, "name": "HubVibe credit: $500 (+$50 bonus)"},
+}
+
+
+def credit_packs_available() -> bool:
+    """A card pack can be sold here: a usable Stripe secret key. Nothing else
+    is needed -- no webhook, no plan prices: the key is issued when the buyer's
+    own success page confirms the payment with Stripe."""
+    return stripe_key_looks_valid()
+
+
+def create_credit_checkout(pack: str, success_url: str, cancel_url: str) -> str:
+    """Open Stripe's hosted payment window for one credit pack; returns its URL."""
+    offer = CREDIT_PACKS.get(str(pack))
+    if offer is None:
+        raise ValueError(f"Unknown pack {pack!r}. Choose one of: {', '.join(CREDIT_PACKS)}.")
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        line_items=[{
+            "quantity": 1,
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": offer["price_cents"],
+                "product_data": {
+                    "name": offer["name"],
+                    "description": "Prepaid credit for every HubVibe tool and the HubVibe Agent. One key, no subscription.",
+                },
+            },
+        }],
+        metadata={"kind": "credit_pack", "pack": str(pack), "credit_cents": str(offer["credit_cents"])},
+        success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=cancel_url,
+    )
+    return session.url
+
+
+def fulfill_credit_session(session_id: str) -> Optional[dict]:
+    """The key for a paid credit-pack checkout, minted exactly once.
+
+    Returns None while Stripe has not confirmed the payment (the page polls),
+    raises ValueError for a session that is not a credit pack. Asking twice --
+    a reload, a second tab -- returns the same key with `new` False, so a pack
+    can never be redeemed for two balances.
+    """
+    if not isinstance(session_id, str) or not session_id.startswith("cs_") or len(session_id) > 200:
+        raise ValueError("Not a checkout session id.")
+    session = stripe.checkout.Session.retrieve(session_id)
+    metadata = dict(getattr(session, "metadata", None) or {})
+    if metadata.get("kind") != "credit_pack":
+        raise ValueError("That checkout is not a HubVibe credit pack.")
+    if getattr(session, "status", None) != "complete" or getattr(session, "payment_status", None) != "paid":
+        return None
+    credit_cents = int(metadata.get("credit_cents") or 0)
+    if credit_cents <= 0:
+        raise ValueError("That credit pack carries no credit.")
+    db = _firestore()
+    record_ref = db.collection("credit_sessions").document(session_id)
+    minted = {}
+
+    def _redeem(transaction):
+        existing = record_ref.get(transaction=transaction)
+        if existing.exists:
+            minted.update(existing.to_dict(), new=False)
+            return
+        api_key = secrets.token_urlsafe(32)
+        transaction.set(db.collection("api_keys").document(api_key), {
+            "customer_id": None, "active": True, "plan": None,
+            "prepaid_balance_cents": credit_cents,
+        })
+        record = {"api_key": api_key, "credit_cents": credit_cents, "pack": metadata.get("pack"),
+                  "amount_cents": int(getattr(session, "amount_total", 0) or 0),
+                  "issued_at": time.time()}
+        transaction.set(record_ref, record)
+        minted.update(record, new=True)
+
+    _run_transactional(_redeem)
+    return minted
 
 
 def spend_prepaid(api_key: str, cents: int) -> bool:

@@ -881,6 +881,29 @@ def record_mpp_topup(auth) -> Optional[int]:
         return None
 
 
+def record_credit_pack(redeemed: dict, session_id: str, sale: dict) -> Optional[int]:
+    """Book a card credit pack the first time its key is issued. One row per
+    Stripe checkout (payment_ref is unique); the key is kept only as its
+    fingerprint and no card or email detail is stored."""
+    try:
+        bonus = int(redeemed.get("credit_cents") or 0) - int(redeemed.get("amount_cents") or 0)
+        row = {"ts": time.time(), "kind": "topup", "source": "live",
+               "node_version": _node_version, **_sale_fields(sale or {}),
+               "product": f"credit_pack_{redeemed.get('pack')}", "price_usd": (redeemed.get("amount_cents") or 0) / 100,
+               "received_usd": (redeemed.get("amount_cents") or 0) / 100, "rail": "stripe-checkout",
+               "method": "card", "network": "stripe", "tx_hash": None,
+               "payment_ref": f"stripe-checkout:{session_id}",
+               "api_key_hash": api_key_hash(redeemed.get("api_key")),
+               "outcome": "delivered", "call_id": None, "receipt_id": None,
+               "note": f"credit ${int(redeemed.get('credit_cents') or 0) / 100:.2f}"
+                       + (f" incl. ${bonus / 100:.2f} bonus" if bonus > 0 else "")}
+        row.update(geo(row.get("client_ip")))
+        return _book(row)
+    except Exception as exc:
+        _note(exc)
+        return None
+
+
 def record_solana_topup(result: dict, sale: dict) -> Optional[int]:
     """Book a Solana hash top-up redeemed for a prepaid key. The request kept
     is the transaction signature only: the challenge token is a bearer

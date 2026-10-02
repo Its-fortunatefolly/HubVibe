@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get started | HubVibe</title>
+<meta name="description" content="Buy HubVibe credit by card and get a key that works on every tool and agent task. No subscription.">
+<link rel="canonical" href="https://hubvibe-io.com/start">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #000000; --ink: #FFFFFF; --muted: #C9CBD6; --dim: #8E90A0; --line: #1E1E28; --card: #0B0B12;
+        --orange: #FF7B00; --peach: #FFE3D3; --purple: #8F7CFF; --green: #22E38A; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: var(--bg); }
+body { color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; padding: 0 16px; }
+main { max-width: 980px; margin: 0 auto; padding: 28px 0 64px; }
+header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 20px; }
+header a { color: var(--ink); text-decoration: none; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+header img { height: 34px; width: 34px; border-radius: 6px; }
+.hero { width: 100%; border-radius: 16px; display: block; margin: 8px 0 28px; }
+h1 { font-size: clamp(28px, 5vw, 44px); line-height: 1.1; letter-spacing: -0.01em; }
+h1 span { color: var(--peach); text-shadow: 0 0 18px rgba(255, 123, 0, 0.55); }
+.lead { color: var(--muted); font-size: 18px; margin: 12px 0 30px; max-width: 680px; }
+.packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.pack { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 22px; display: flex; flex-direction: column; gap: 10px; }
+.pack.best { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange), 0 0 28px rgba(255, 123, 0, 0.18); }
+.tag { align-self: flex-start; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #000; background: var(--orange); border-radius: 999px; padding: 3px 10px; }
+.price { font-size: 40px; font-weight: 800; }
+.credit { color: var(--green); font-weight: 700; }
+.pack p { color: var(--muted); font-size: 15px; }
+button { margin-top: auto; background: var(--orange); color: #000; border: 0; border-radius: 12px; padding: 14px 18px; font: inherit; font-weight: 800; font-size: 16px; cursor: pointer; }
+button:hover { filter: brightness(1.08); }
+button:disabled { opacity: 0.6; cursor: wait; }
+.error { color: #ff8a8a; margin-top: 16px; min-height: 1.4em; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 36px; }
+.fact { border-top: 1px solid var(--line); padding-top: 14px; }
+.fact b { display: block; margin-bottom: 4px; }
+.fact span { color: var(--muted); font-size: 15px; }
+footer { border-top: 1px solid var(--line); margin-top: 44px; padding-top: 20px; color: var(--dim); font-size: 13px; }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+<header><a href="/"><img src="/icon.png" alt="">HubVibe</a></header>
+<img class="hero" src="/hero.jpg" width="1024" height="460" alt="HubVibe">
+
+<h1>Put the <span>machine economy</span> to work.</h1>
+<p class="lead">Buy credit once and get a key. Every HubVibe tool and every agent task spends from it, from a 2-cent lookup to a full research job. No subscription, no account, nothing to renew.</p>
+
+<div class="packs">
+  <div class="pack">
+    <div class="price">$25</div>
+    <div class="credit">$25 of credit</div>
+    <p>Try everything. Enough for 1,250 crypto quotes, 250 web pages read, or a handful of agent tasks.</p>
+    <button data-pack="25">Pay $25</button>
+  </div>
+  <div class="pack best">
+    <div class="tag">Most popular</div>
+    <div class="price">$100</div>
+    <div class="credit">$105 of credit</div>
+    <p>For a team or an agent that works every day. $5 of bonus credit on us.</p>
+    <button data-pack="100">Pay $100</button>
+  </div>
+  <div class="pack">
+    <div class="price">$500</div>
+    <div class="credit">$550 of credit</div>
+    <p>For heavy workloads and agent fleets. $50 of bonus credit on us.</p>
+    <button data-pack="500">Pay $500</button>
+  </div>
+</div>
+<p class="error" id="error" role="alert"></p>
+
+<div class="facts">
+  <div class="fact"><b>Your key, instantly</b><span>Shown the moment the card payment clears. Send it as the <code>X-API-Key</code> header.</span></div>
+  <div class="fact"><b>Charged only for results</b><span>A call that fails costs nothing. Every delivery comes with a receipt.</span></div>
+  <div class="fact"><b>Secure checkout</b><span>Pay by card in Stripe's secure checkout. We never see your card.</span></div>
+</div>
+
+<footer>&copy; 2026 HubVibe &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="mailto:hubvibe@hubvibe-io.com">hubvibe@hubvibe-io.com</a></footer>
+</main>
+<script>
+document.querySelectorAll("button[data-pack]").forEach(function (button) {
+  button.addEventListener("click", async function () {
+    var error = document.getElementById("error");
+    error.textContent = "";
+    document.querySelectorAll("button[data-pack]").forEach(function (b) { b.disabled = true; });
+    try {
+      var response = await fetch("/billing/credits", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({pack: button.dataset.pack})
+      });
+      var data = await response.json();
+      if (response.ok && data.checkout_url) {
+        window.location.href = data.checkout_url;
+        return;
+      }
+      error.textContent = (data && data.detail) || "The payment window could not be opened. Please try again.";
+    } catch (e) {
+      error.textContent = "The payment window could not be opened. Please try again.";
+    }
+    document.querySelectorAll("button[data-pack]").forEach(function (b) { b.disabled = false; });
+  });
+});
+</script>
+</body>
+</html>

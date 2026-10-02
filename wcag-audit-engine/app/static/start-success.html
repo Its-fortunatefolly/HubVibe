@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your key | HubVibe</title>
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #000000; --ink: #FFFFFF; --muted: #C9CBD6; --dim: #8E90A0; --line: #1E1E28; --card: #0B0B12;
+        --orange: #FF7B00; --peach: #FFE3D3; --green: #22E38A; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: var(--bg); }
+body { color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; padding: 0 16px; }
+main { max-width: 760px; margin: 0 auto; padding: 36px 0 64px; }
+header a { color: var(--ink); text-decoration: none; font-weight: 700; display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+header img { height: 34px; width: 34px; border-radius: 6px; }
+h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.15; }
+h1 span { color: var(--peach); text-shadow: 0 0 18px rgba(255, 123, 0, 0.55); }
+.muted { color: var(--muted); margin: 10px 0 22px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; margin-bottom: 18px; }
+.balance { color: var(--green); font-weight: 800; font-size: 22px; }
+code.key { display: block; background: #000; border: 1px solid var(--orange); border-radius: 10px; padding: 14px; word-break: break-all; font-size: 15px; margin: 12px 0; color: var(--peach); }
+button { background: var(--orange); color: #000; border: 0; border-radius: 10px; padding: 11px 16px; font: inherit; font-weight: 800; cursor: pointer; }
+pre { background: #000; border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; font-size: 13.5px; color: var(--muted); margin-top: 10px; }
+h2 { font-size: 17px; margin-bottom: 4px; }
+.warn { color: var(--peach); font-weight: 600; margin-top: 8px; }
+footer { border-top: 1px solid var(--line); margin-top: 36px; padding-top: 18px; color: var(--dim); font-size: 13px; }
+footer a { color: var(--dim); }
+#ready { display: none; }
+</style>
+</head>
+<body>
+<main>
+<header><a href="/"><img src="/icon.png" alt="">HubVibe</a></header>
+
+<div id="waiting">
+  <h1 id="status-heading">Confirming your payment&hellip;</h1>
+  <p class="muted" id="status-text">This takes a few seconds.</p>
+</div>
+
+<div id="ready">
+  <h1>You're in. <span>Let's go.</span></h1>
+  <p class="muted">Your key is ready. <span class="balance" id="balance"></span> of credit, good on every HubVibe tool and agent task.</p>
+
+  <div class="card">
+    <h2>Your key</h2>
+    <code class="key" id="api-key"></code>
+    <button id="copy">Copy key</button>
+    <p class="warn">Save it now. This key is your balance; it is shown here for 24 hours.</p>
+  </div>
+
+  <div class="card">
+    <h2>Use it</h2>
+    <p class="muted" style="margin:4px 0 0">Send it as the <code>X-API-Key</code> header on any paid call.</p>
+    <pre id="example"></pre>
+  </div>
+
+  <div class="card">
+    <h2>Plug it into your agent</h2>
+    <p class="muted" style="margin:4px 0 0">MCP server: <code>https://hubvibe-io.com/mcp</code> with header <code>X-API-Key</code>. Every tool and its price: <a href="/.well-known/agent.json" style="color:var(--peach)">agent.json</a> &middot; <a href="/docs" style="color:var(--peach)">API docs</a>.</p>
+  </div>
+</div>
+
+<footer>&copy; 2026 HubVibe &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="mailto:hubvibe@hubvibe-io.com">hubvibe@hubvibe-io.com</a></footer>
+</main>
+<script>
+(async function () {
+  var params = new URLSearchParams(window.location.search);
+  var sessionId = params.get("session_id");
+  var heading = document.getElementById("status-heading");
+  var text = document.getElementById("status-text");
+  if (!sessionId) {
+    heading.textContent = "No payment found";
+    text.innerHTML = 'Start at <a href="/start" style="color:#FFE3D3">hubvibe-io.com/start</a>.';
+    return;
+  }
+  for (var attempt = 0; attempt < 30; attempt++) {
+    var response;
+    try {
+      response = await fetch("/billing/credits/key?session_id=" + encodeURIComponent(sessionId));
+    } catch (e) {
+      response = null;
+    }
+    if (response && response.status === 200) {
+      var data = await response.json();
+      document.getElementById("waiting").style.display = "none";
+      document.getElementById("ready").style.display = "block";
+      document.getElementById("api-key").textContent = data.api_key;
+      document.getElementById("balance").textContent = "$" + Number(data.credit_usd).toFixed(2);
+      document.getElementById("example").textContent =
+        'curl -X POST https://hubvibe-io.com/work/market/quote \\\n' +
+        '  -H "X-API-Key: ' + data.api_key + '" \\\n' +
+        '  -H "Content-Type: application/json" \\\n' +
+        '  -d \'{"product_id": "BTC-USD"}\'';
+      document.getElementById("copy").addEventListener("click", function () {
+        navigator.clipboard.writeText(data.api_key);
+        this.textContent = "Copied";
+      });
+      return;
+    }
+    if (response && response.status !== 202) {
+      var detail = "";
+      try { detail = (await response.json()).detail || ""; } catch (e) {}
+      heading.textContent = "We couldn't show a key";
+      text.textContent = detail || "Please refresh in a moment, or email hubvibe@hubvibe-io.com with your receipt.";
+      return;
+    }
+    await new Promise(function (resolve) { setTimeout(resolve, 2000); });
+  }
+  heading.textContent = "Still confirming";
+  text.textContent = "Your bank is taking a little longer. Refresh this page in a minute; your key will appear here.";
+})();
+</script>
+</body>
+</html>

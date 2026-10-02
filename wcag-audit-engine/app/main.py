@@ -4969,6 +4969,71 @@ def report_page(session_id: str):
     return HTMLResponse(_render_report(url, result))
 
 
+class CreditCheckoutRequest(BaseModel):
+    pack: str
+
+
+# The human front door ("Get started" on the homepage): buy a credit pack by
+# card in Stripe's hosted payment window, leave with a key every paid route
+# and agent tier accepts. See billing.CREDIT_PACKS.
+@app.get("/start", response_class=FileResponse, include_in_schema=False)
+async def start_page():
+    return _static_file("start.html", "text/html")
+
+
+@app.get("/start/success", response_class=FileResponse, include_in_schema=False)
+async def start_success_page():
+    return _static_file("start-success.html", "text/html")
+
+
+@app.post("/billing/credits", tags=["billing"])
+def start_credit_checkout(payload: CreditCheckoutRequest):
+    if not billing.credit_packs_available():
+        raise HTTPException(status_code=503, detail="Card payments are not available right now.")
+    base = PUBLIC_BASE_URL.rstrip("/")
+    try:
+        checkout_url = billing.create_credit_checkout(
+            payload.pack, success_url=f"{base}/start/success", cancel_url=f"{base}/start")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # Stripe unreachable or refused: say so, never a bare 500
+        logging.getLogger("hubvibe").error("credit checkout failed: %s", exc)
+        raise HTTPException(status_code=502, detail="The payment window could not be opened. Please try again.")
+    return {"checkout_url": checkout_url}
+
+
+# A key is shown again on reload for a day after it is issued, then never:
+# the success URL lingers in browser history and must not stay a key vending
+# machine forever.
+CREDIT_KEY_REVEAL_SECONDS = 24 * 3600
+
+
+@app.get("/billing/credits/key", tags=["billing"])
+def credit_pack_key(session_id: str, request: Request):
+    if not billing.credit_packs_available():
+        raise HTTPException(status_code=503, detail="Card payments are not available right now.")
+    try:
+        redeemed = billing.fulfill_credit_session(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logging.getLogger("hubvibe").error("credit key lookup failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Could not confirm the payment yet. Please refresh in a moment.")
+    if redeemed is None:
+        return JSONResponse(status_code=202, content={"status": "pending"})
+    if redeemed.get("new"):
+        sale = purchase_book.open_sale(request, price_usd=(redeemed.get("amount_cents") or 0) / 100,
+                                       route="/billing/credits", product=f"credit_pack_{redeemed.get('pack')}",
+                                       body={"session_id": session_id})
+        purchase_book.record_credit_pack(redeemed, session_id, sale)
+    elif time.time() - float(redeemed.get("issued_at") or 0) > CREDIT_KEY_REVEAL_SECONDS:
+        raise HTTPException(status_code=410, detail=(
+            "This key was issued more than a day ago and is not shown again. "
+            "Email hubvibe@hubvibe-io.com with your receipt if you need help."))
+    return {"api_key": redeemed["api_key"], "credit_usd": round(redeemed["credit_cents"] / 100, 2),
+            "paid_usd": round((redeemed.get("amount_cents") or 0) / 100, 2), "pack": redeemed.get("pack")}
+
+
 @app.get("/billing/api-key")
 def get_api_key(session_id: str):
     if not billing.is_configured():
