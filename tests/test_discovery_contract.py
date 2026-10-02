@@ -34,7 +34,7 @@ STATIC = REPO_ROOT / "wcag-audit-engine" / "app" / "static"
 ARD_SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "ard-entry.schema.json"
 
 TEST_PAY_TO = "0x837C40E2B4e976f43Ffb4451eE281A00fA9477dd"
-TITLE = "HubVibe: Pay-per-Call Tools for AI Agents: Web Search, Email Verify, KYC, Stocks, Crypto, News, Data"
+TITLE = "HubVibe: Pay-per-Call Agent Tools: Web Search, Email Verify, KYC Screening, Stocks, Crypto, News"
 
 
 def _load_workers():
@@ -474,3 +474,53 @@ def test_every_bazaar_example_satisfies_its_declared_formats(client):
         cls = jsonschema.validators.validator_for(ext["schema"])
         errors = list(cls(ext["schema"], format_checker=checker).iter_errors(ext["info"]))
         assert not errors, (path, [e.message for e in errors[:3]])
+
+
+# --- what a reviewer reads first: audit docs, examples, provenance ------------
+
+def test_every_audit_route_documents_its_result_with_a_real_example(client, app_module):
+    """The five audits documented their 200 as `{}`, three had no description
+    and one pointed at an /audit alias the spec does not list. Now each
+    carries its catalog description and its MCP output schema, with an example
+    that validates and whose `pass` agrees with its findings."""
+    doc = client.get("/openapi.json").json()
+    for path, schema in app_module._MCP_OUTPUT_SCHEMAS.items():
+        op = doc["paths"][path]["post"]
+        assert op.get("description") and "/audit --" not in op["description"], path
+        content = op["responses"]["200"]["content"]["application/json"]
+        example = content["example"]
+        _validator(schema).validate(example)
+        sections = [example[k] for k in ("wcag", "seo", "security", "performance") if k in example] or [example]
+        for section in sections:
+            flagged = section.get("violations") or section.get("findings") or []
+            assert section["pass"] is False and flagged, path
+        assert example["pass"] is False, path
+        assert "example" not in json.dumps(example).replace("example.com", ""), path
+
+
+def test_an_audit_402_example_is_the_real_one_not_placeholder_words(client, app_module):
+    from x402.http.utils import decode_payment_required_header
+    raw = client.post("/audit/wcag", json={"url": "https://example.com"}).headers.get("payment-required")
+    example = decode_payment_required_header(raw).extensions["bazaar"]["info"]["output"]["example"]
+    assert example["violations"][0]["id"] == "image-alt"
+    assert example["pass"] is False
+
+
+def test_each_tool_example_shows_its_own_provenance(app_module):
+    """Every /work example showed a Coinbase market-data step that had timed
+    out plus a "Translated by Google" credit, on email checks and video alike."""
+    W = app_module.workers
+    for worker in W.catalog.CATALOG:
+        example = W.catalog.response_example(worker)
+        text = json.dumps(example["provenance"])
+        assert "provider_timeout" not in text, worker.name
+        assert "attribution" not in example, worker.name
+        if not worker.name.startswith(("market.", "chain.")):
+            assert "coinbase-advanced-trade-public" not in text, worker.name
+        _validator(W.catalog.response_schema(worker)).validate(example)
+
+
+def test_the_email_verify_example_suggests_nothing_for_a_correct_address(app_module):
+    W = app_module.workers
+    example = W.catalog.output_example(W.catalog.BY_NAME["email.verify"])
+    assert example["domain"] == "github.com" and example["did_you_mean"] is None

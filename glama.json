@@ -16778,9 +16778,9 @@
                   "string",
                   "null"
                 ],
-                "description": "A likely intended address when the domain looks like a typo of a common provider.",
+                "description": "A likely intended address when the domain looks like a typo of a common provider (e.g. jane@gmial.com -> jane@gmail.com); null otherwise.",
                 "examples": [
-                  "jane@gmail.com"
+                  null
                 ]
               },
               "disposable_list_as_of": {
@@ -22537,7 +22537,7 @@
     {
       "name": "hubvibe_identity_check",
       "title": "Identity check: sanctions, email, phone and IP in one call",
-      "description": "Identity verification / KYC check in one call: a name screened against OFAC, UK and EU sanctions; an email's mailbox, disposable and role checks; a phone's validity, country and line type; an IP's country and network. Returns each result, fraud flags (sanctions hit, disposable email, VoIP, countries that disagree) and one risk level: low, review or high. Use it before onboarding a user or counterparty. Input: any of name, email, phone, ip; optional country, birth_year. $0.10 per call. Returns: input{}, risk (low | review | high), flags[{code, severity, detail}], checks{sanctions, email, phone, ip}, checks_run[], checks_failed[], notes[], checked_at.",
+      "description": "KYC screening / identity risk check in one call: a name screened against OFAC, UK and EU sanctions; an email's mailbox, disposable and role checks; a phone's validity, country and line type; an IP's country and network. Returns each result, fraud flags (sanctions hit, disposable email, VoIP, countries that disagree) and one risk level: low, review or high. Use it before onboarding a user or counterparty. Input: any of name, email, phone, ip; optional country, birth_year. $0.10 per call. Returns: input{}, risk (low | review | high), flags[{code, severity, detail}], checks{sanctions, email, phone, ip}, checks_run[], checks_failed[], notes[], checked_at.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

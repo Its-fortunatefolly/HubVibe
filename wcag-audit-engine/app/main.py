@@ -174,7 +174,7 @@ async def _lifespan(_app: "FastAPI"):
 # ard.json and (by hand, in the static files) mcp.json and the registry entry.
 # Crawlers scored this node as a five-tool audit service while it sold 37
 # more routes, because each surface carried its own audit-era title.
-SERVICE_TITLE = "HubVibe: Pay-per-Call Tools for AI Agents: Web Search, Email Verify, KYC, Stocks, Crypto, News, Data"
+SERVICE_TITLE = "HubVibe: Pay-per-Call Agent Tools: Web Search, Email Verify, KYC Screening, Stocks, Crypto, News"
 
 # openapi.json's info.contact. Discovery registries read it to reach the
 # operator, and MPPScan verifies who owns an origin through it.
@@ -188,7 +188,7 @@ app = FastAPI(
     description=(
         "63 pay-per-call tools for AI agents under /work -- web search and "
         "cited research, email verification, company enrichment, identity "
-        "verification (KYC) and sanctions screening, phone/IP/DNS lookups, stock "
+        "checks (KYC screening) and sanctions screening, phone/IP/DNS lookups, stock "
         "prices, SEC filings and insider trades, crypto prices and prediction-market "
         "odds, news in any language, economic and open data, US real-estate data, "
         "flight status, places and weather, web scraping, LLM completion and "
@@ -779,8 +779,8 @@ def _bazaar_extension_for_path(path: Optional[str]) -> dict:
     # copy of an audit still says so. Same object the MCP tool and the ARD
     # manifest publish, with an example generated from it.
     output_schema = _MCP_OUTPUT_SCHEMAS.get(path)
-    output_example = {"pass": True}
-    if output_schema is not None and workers is not None:
+    output_example = _AUDIT_OUTPUT_EXAMPLES.get(path) or {"pass": True}
+    if path not in _AUDIT_OUTPUT_EXAMPLES and output_schema is not None and workers is not None:
         try:
             output_example = workers.catalog.contract.example_from_schema(output_schema)
         except Exception:  # the record must never be why a 402 fails
@@ -2757,6 +2757,20 @@ def _build_openapi(priced: list) -> dict:
         operation.setdefault("responses", {}).setdefault(
             "402", {"description": "Payment Required"}
         )
+        if entry["path"] in _AUDIT_OUTPUT_EXAMPLES:
+            # The audits' route docstrings are written for maintainers (one
+            # pointed at an /audit alias the spec does not list) and three were
+            # empty; FastAPI documented their 200 as `{}`. The catalog text and
+            # the MCP output schema are what the 402 and the MCP tools already
+            # publish -- one source for all of them.
+            operation["description"] = entry["description"]
+            operation["responses"]["200"] = {
+                "description": "The audit result.",
+                "content": {"application/json": {
+                    "schema": copy.deepcopy(_MCP_OUTPUT_SCHEMAS[entry["path"]]),
+                    "example": copy.deepcopy(_AUDIT_OUTPUT_EXAMPLES[entry["path"]]),
+                }},
+            }
         # A concrete example, because the reference validator (and any
         # client that probes for a challenge) derives its probe body
         # from here: with only a schema to go on it generates a guess,
@@ -3459,6 +3473,68 @@ _MCP_OUTPUT_SCHEMAS = {
     "/audit/security": _MCP_FINDINGS_OUTPUT_SCHEMA,
     "/audit/performance": _MCP_PERFORMANCE_OUTPUT_SCHEMA,
     "/audit/bundle": _MCP_BUNDLE_OUTPUT_SCHEMA,
+}
+
+
+# One realistic example per audit, shown in the 402's Bazaar record and as the
+# openapi.json 200 example. Real axe-core rule ids and this service's own
+# finding ids, and `pass` agrees with the findings. The schema-generated one
+# it replaces read {"pass": true, "violations": [{"id": "example", "impact":
+# "example", ...}]} -- a pass that listed a violation, in placeholder words.
+_AXE_DOCS = "https://dequeuniversity.com/rules/axe/4.12/"
+_AUDIT_EXAMPLE_WCAG = {
+    "status": "ok", "pass": False, "engine": "axe-core",
+    "ruleset": "wcag2a, wcag2aa, wcag21a, wcag21aa",
+    "violations": [
+        {"id": "image-alt", "impact": "critical", "help": "Images must have alternative text",
+         "help_url": _AXE_DOCS + "image-alt", "nodes_affected": 3},
+        {"id": "color-contrast", "impact": "serious",
+         "help": "Elements must meet minimum color contrast ratio thresholds",
+         "help_url": _AXE_DOCS + "color-contrast", "nodes_affected": 7},
+    ],
+    "coverage": {"frames_audited": 2, "frames_unreachable": 0, "frames_not_loaded": 1,
+                 "page_finished_loading": True},
+}
+_AUDIT_EXAMPLE_SEO = {
+    "status": "ok", "pass": False,
+    "findings": [
+        {"id": "missing-meta-description", "severity": "critical", "detail": "No meta description found"},
+        {"id": "missing-canonical", "severity": "minor", "detail": "No canonical link found"},
+    ],
+}
+_AUDIT_EXAMPLE_SECURITY = {
+    "status": "ok", "pass": False,
+    "findings": [
+        {"id": "missing-hsts", "severity": "serious", "detail": "No Strict-Transport-Security header"},
+        {"id": "missing-csp", "severity": "moderate", "detail": "No Content-Security-Policy header"},
+    ],
+}
+_AUDIT_EXAMPLE_PERFORMANCE = {
+    "status": "ok", "pass": False,
+    "metrics": {"dom_node_count": 2097, "total_bytes_transferred": 3412000, "request_count": 118,
+                "unmeasured_responses": 0},
+    "findings": [
+        {"id": "high-dom-complexity", "severity": "moderate", "detail": "2097 DOM nodes (recommended <= 1500)"},
+        {"id": "heavy-page-weight", "severity": "moderate", "detail": "3.4 MB transferred (recommended <= 3 MB)"},
+        {"id": "high-request-count", "severity": "minor", "detail": "118 network requests (recommended <= 100)"},
+    ],
+    "disclosure": "Single-page-load measurement, not a full Lighthouse-style audit.",
+}
+_AUDIT_OUTPUT_EXAMPLES = {
+    "/audit/wcag": _AUDIT_EXAMPLE_WCAG,
+    "/audit/seo": _AUDIT_EXAMPLE_SEO,
+    "/audit/security": _AUDIT_EXAMPLE_SECURITY,
+    "/audit/performance": _AUDIT_EXAMPLE_PERFORMANCE,
+    # One finding per section: the bundle's 402 header carries this example
+    # and must stay under x402_payments.HEADER_BUDGET (6,252 bytes measured,
+    # budget 7,000) or the record in it is flattened.
+    "/audit/bundle": {
+        "status": "ok", "pass": False,
+        "wcag": {**_AUDIT_EXAMPLE_WCAG, "violations": _AUDIT_EXAMPLE_WCAG["violations"][:1]},
+        "seo": {**_AUDIT_EXAMPLE_SEO, "findings": _AUDIT_EXAMPLE_SEO["findings"][:1]},
+        "security": {**_AUDIT_EXAMPLE_SECURITY, "findings": _AUDIT_EXAMPLE_SECURITY["findings"][:1]},
+        "performance": {**_AUDIT_EXAMPLE_PERFORMANCE, "findings": _AUDIT_EXAMPLE_PERFORMANCE["findings"][:1]},
+    },
 }
 
 # Human-facing tool titles. MCP clients show `title` in preference to `name`,

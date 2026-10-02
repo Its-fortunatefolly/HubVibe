@@ -1197,8 +1197,9 @@ OUTPUT_SCHEMAS = {
         "disposable": _b("The domain is a known throwaway-mail domain.", False),
         "role_account": _b("The local part is a role (info, sales, support...), not a person.", True),
         "free_provider": _b("A free consumer mail provider (gmail.com, outlook.com...).", False),
-        "did_you_mean": _s("A likely intended address when the domain looks like a typo of a common provider.",
-                           "jane@gmail.com", nullable=True),
+        "did_you_mean": _s("A likely intended address when the domain looks like a typo of a common "
+                           "provider (e.g. jane@gmial.com -> jane@gmail.com); null otherwise.",
+                           None, nullable=True),
         "disposable_list_as_of": _s("Date of the disposable-domain list used.", "2026-09-28", nullable=True),
         "notes": _arr(_s("A caveat.", "Role address: it usually reaches a team or a shared inbox, not one person."),
                       "Caveats; empty when none.", []),
@@ -2228,12 +2229,30 @@ def output_example(worker) -> dict:
 
 
 def response_example(worker) -> dict:
-    """An example 200 body for this worker: the envelope around its result."""
+    """An example 200 body for this worker: the envelope around its result.
+
+    The provenance is this worker's own, not the schema's generic sample: every
+    route used to show a Coinbase market-data step that had timed out, plus a
+    "Translated by Google" credit -- on email checks, audits and video alike,
+    which reviewers read as the product description.
+    """
     envelope = example_from_schema(RESPONSE_ENVELOPE)
     envelope.pop("billing_warning", None)  # only present on a caveated charge
+    envelope.pop("attribution", None)      # only present when text was machine-translated
+    result = output_example(worker)
+    provider = result.get("source") if isinstance(result, dict) and isinstance(result.get("source"), str) else None
+    if not provider:
+        requires = getattr(worker, "requires", None) or ()
+        provider = requires[0] if requires else "hubvibe"
     envelope["worker"] = worker.name
     envelope["price_usd"] = worker.price_usd
-    envelope["result"] = output_example(worker)
+    envelope["result"] = result
+    envelope["provenance"] = {
+        "steps": [{"step": worker.name.split(".", 1)[-1], "ok": True, "provider": provider, "ms": 640}],
+        "providers_used": [provider],
+        "attempts": 1,
+        "elapsed_ms": 660,
+    }
     return envelope
 
 

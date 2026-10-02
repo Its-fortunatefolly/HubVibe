@@ -1224,7 +1224,7 @@ CATALOG = [
         name="identity.check", price_usd=0.10, tier="utility",
         title="Identity check: sanctions, email, phone and IP in one call",
         description=(
-            'Identity verification / KYC check in one call: a name screened against OFAC, UK '
+            'KYC screening / identity risk check in one call: a name screened against OFAC, UK '
             "and EU sanctions; an email's mailbox, disposable and role checks; a phone's "
             "validity, country and line type; an IP's country and network. Returns each "
             'result, fraud flags (sanctions hit, disposable email, VoIP, countries that '
