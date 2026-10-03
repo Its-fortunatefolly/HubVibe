@@ -25,6 +25,10 @@ catalog:
     Bazaar record rides the payment and passes the library's validator
   * ledger    -- the call is in worker_calls as ok + settled, with its
     provider attempts and cost in worker_provider_calls
+  * deliver later -- a job still running at the node's hand-back limit (22 s)
+    answers 202 with a link to collect; that is the product working, so the
+    job is collected the way a buyer would, and it must not have been charged
+    before it delivered
 
 Plus the refusal paths: invalid input is a 400 that never settles.
 
@@ -35,6 +39,9 @@ facilitator is the local stub and the recipient is a throwaway address.
 Usage (Cloud Shell or the box; markers unset so the node does not refuse):
     env -u CLOUD_SHELL -u DEVSHELL_PROJECT_ID python3 scripts/simulate-work-calls.py
     ... --only /work/llm/generate,/work/data/query     (a subset)
+An --only that is given but EMPTY is refused: it means the caller's list
+could not be built, and running the whole catalog instead would generate a
+video and an image nobody asked for.
 Exit 0 = every AVAILABLE bee passed every check. Writes a JSON report to
 .sim-work-calls/report.json.
 """
@@ -65,6 +72,11 @@ sim = _load("simulate_paid_call", "simulate-paid-call.py")
 seed = _load("seed_listings", "seed_listings.py")
 
 API_KEY = "simulate-work-calls"
+
+# The whole run's budget. scripts/box-checks.sh kills the sweep at 1,500 s
+# with no summary; stopping here first means the run reports what it checked
+# and which tools it did not reach.
+RUN_BUDGET_SECONDS = float(os.environ.get("SIM_RUN_BUDGET_SECONDS", "1380"))
 
 
 def _get(url: str):
@@ -103,6 +115,23 @@ def _bodies() -> dict:
             body["audio_base64"] = seed._tiny_wav_base64()
         bodies[path] = body
     return bodies
+
+
+def collect_job(http, url: str, seconds: float, sleep=time.sleep, clock=time.monotonic):
+    """Collect a handed-back job the way a buyer does: GET its link until it
+    stops answering 202, waiting what Retry-After asks (at most 5 s a time).
+    Returns the last response -- still the 202 if `seconds` ran out, which
+    the caller then reports as not delivered."""
+    deadline = clock() + seconds
+    while True:
+        response = http.get(url)
+        if response.status_code != 202 or clock() >= deadline:
+            return response
+        try:
+            wait = float(response.headers.get("Retry-After") or 2)
+        except ValueError:
+            wait = 2.0
+        sleep(max(0.5, min(wait, 5.0)))
 
 
 def _canonical_hash(value) -> str:
@@ -156,9 +185,13 @@ def _trimmed(value, limit=600):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--only", default="", help="comma-separated /work paths")
+    parser.add_argument("--only", default=None, help="comma-separated /work paths")
     args = parser.parse_args()
-    only = {p.strip() for p in args.only.split(",") if p.strip()}
+    only = {p.strip() for p in (args.only or "").split(",") if p.strip()}
+    if args.only is not None and not only:
+        print("--only was given but names no route; refusing to run the whole catalog instead.",
+              file=sys.stderr)
+        return 2
 
     import httpx
     from eth_account import Account
@@ -212,8 +245,15 @@ def main() -> int:
 
         http_client = _client(payer, max(w.price_usd for w in W.CATALOG))
         synth_audio = None
+        budget_ends = time.monotonic() + RUN_BUDGET_SECONDS
+        skipped = []
         for worker in W.CATALOG:
             if only and worker.path not in only:
+                continue
+            if time.monotonic() >= budget_ends:
+                # Out of time: say so and still print the summary, rather
+                # than being killed mid-run with nothing to show.
+                skipped.append(worker.name)
                 continue
             row = {"worker": worker.name, "path": worker.path, "price_usd": worker.price_usd,
                    "tier": worker.tier, "composes": list(worker.composes)}
@@ -260,6 +300,30 @@ def main() -> int:
                     row["error"] = f"connection broke on the paid call: {exc}"
                     checks.fail(f"paid call answered ({row['error']})")
                     continue
+                if paid.status_code == 202:
+                    # Deliver later: the job outlived the hand-back limit and
+                    # is running on. Nothing may be charged yet; collect it.
+                    try:
+                        handed = paid.json()
+                    except ValueError:
+                        handed = {}
+                    collect = handed.get("collect_url") if isinstance(handed, dict) else None
+                    early = [e for e in state.log[before:]
+                             if e.get("path") == "/settle" and e.get("transaction")]
+                    row["handed_back"] = checks.expect(
+                        bool(collect) and handed.get("billed") is False and not early,
+                        "handed back as a job to collect (202), nothing charged before delivery")
+                    if collect:
+                        # As long as the job may run, plus a margin, but never
+                        # past this run's own budget (see RUN_BUDGET_SECONDS).
+                        patience = min(worker.max_seconds + 30,
+                                       max(5.0, budget_ends - time.monotonic()))
+                        try:
+                            paid = collect_job(http, f"{base}{collect}", patience)
+                        except httpx.HTTPError as exc:
+                            row["error"] = f"connection broke while collecting the job: {exc}"
+                            checks.fail(f"handed-back job collected ({row['error']})")
+                            continue
                 row["latency_s"] = round(time.time() - started, 1)
 
             try:
@@ -326,6 +390,8 @@ def main() -> int:
                     f"ledger: ok, settled, {attempts} provider attempt(s), "
                     f"cost ${row.get('cost_usd', 0):.4f}{'' if row.get('cost_measured') else ' (estimated)'}")
 
+        if skipped:
+            checks.fail(f"out of time after {RUN_BUDGET_SECONDS:.0f} s; not checked: {', '.join(skipped)}")
         if not only or "/work/chain/rpc" in only:
             sim.step("Refusal path: invalid input is a 400 and never settles")
             before = len(state.log)
@@ -350,7 +416,8 @@ def main() -> int:
         if not row.get("live"):
             mark = "UNAVAILABLE"
         else:
-            mark = "OK" if all(row.get(k) for k in ("executed", "payment", "ledger", "discovery")) else "FAIL"
+            mark = "OK" if (all(row.get(k) for k in ("executed", "payment", "ledger", "discovery"))
+                            and row.get("handed_back", True)) else "FAIL"
         cost = f"${row['cost_usd']:.4f}" if "cost_usd" in row else "-"
         print(f"  {mark:<11} {row['worker']:<22} ${row['price_usd']:<5.2f} cost {cost:<9} "
               f"{row.get('latency_s', '-')}s  {row.get('provider') or row.get('reason', '')}")

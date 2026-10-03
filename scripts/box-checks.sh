@@ -69,19 +69,28 @@ skip = {"/work/video/generate", "/work/image/generate"}
 print(",".join(w["path"] for w in d["workers"] if w["path"] not in skip))
 ' 2>/dev/null)"
 fi
-sweep="$(docker exec -w "$WORK" \
-  -e KEY_STORE_SQLITE_PATH=/tmp/monitor-keys.db \
-  -e PURCHASE_BOOK_PATH=/tmp/monitor-purchases.db \
-  -e PURCHASE_ALERT_WEBHOOK= \
-  -e A2A_TASKS_PATH= \
-  "$CONTAINER" timeout 1500 env -u CLOUD_SHELL -u DEVSHELL_PROJECT_ID \
-  python3 scripts/simulate-work-calls.py --only "$only" 2>&1)"
-sweep_rc=$?
-sweep_line="$(grep -iE 'passed|failed' <<< "$sweep" | tail -1)"
-if [ "$sweep_rc" -ne 0 ]; then
+if [ -z "$only" ]; then
+  # The list of tools to check could not be built (the node's /work index
+  # did not answer). Passing an empty list on would run the WHOLE catalog,
+  # video and image generation included, so the sweep is not run at all.
   failures=$((failures + 1))
-  note "work sweep ($MODE) exit $sweep_rc: ${sweep_line:-no summary}"
-  sed 's/\x1b\[[0-9;]*m//g' <<< "$sweep" | grep -E 'FAIL' | head -15 >> "$DETAILS"
+  sweep_line="not run"
+  note "work sweep ($MODE) not run: the node's /work index could not be read, so there was no list of tools to check"
+else
+  sweep="$(docker exec -w "$WORK" \
+    -e KEY_STORE_SQLITE_PATH=/tmp/monitor-keys.db \
+    -e PURCHASE_BOOK_PATH=/tmp/monitor-purchases.db \
+    -e PURCHASE_ALERT_WEBHOOK= \
+    -e A2A_TASKS_PATH= \
+    "$CONTAINER" timeout 1500 env -u CLOUD_SHELL -u DEVSHELL_PROJECT_ID \
+    python3 scripts/simulate-work-calls.py --only "$only" 2>&1)"
+  sweep_rc=$?
+  sweep_line="$(grep -iE 'passed|failed' <<< "$sweep" | tail -1)"
+  if [ "$sweep_rc" -ne 0 ]; then
+    failures=$((failures + 1))
+    note "work sweep ($MODE) exit $sweep_rc: ${sweep_line:-no summary}"
+    sed 's/\x1b\[[0-9;]*m//g' <<< "$sweep" | grep -E 'FAIL' | head -15 >> "$DETAILS"
+  fi
 fi
 docker exec "$CONTAINER" rm -rf "$WORK" /tmp/monitor-keys.db /tmp/monitor-purchases.db >/dev/null 2>&1
 
