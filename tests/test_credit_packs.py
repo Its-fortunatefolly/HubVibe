@@ -185,3 +185,32 @@ def test_the_homepage_sends_people_to_the_payment_window():
         text = (STATIC / name).read_text()
         for leak in ("gmail", "fortunatefool", "Amanda", "github.com"):
             assert leak not in text, f"{name} names {leak}"
+
+
+def test_the_source_of_a_sale_is_carried_from_the_link_to_the_book(app, stripe_fake):
+    """A buyer who arrives on /start?ref=ads is counted as an ads sale: the
+    label rides through Stripe's metadata into the purchase book's note."""
+    client = _client(app)
+    client.post("/billing/credits", json={"pack": "25", "source": "ads"})
+    assert stripe_fake.created[0]["metadata"]["source"] == "ads"
+    stripe_fake.pay("cs_test_1")
+    assert client.get("/billing/credits/key?session_id=cs_test_1").status_code == 200
+    note = app.purchase_book.connect().execute("SELECT note FROM purchases").fetchone()[0]
+    assert note.startswith("source ads; credit $25.00")
+
+
+def test_a_bad_or_missing_source_is_simply_left_out(app, stripe_fake):
+    client = _client(app)
+    for source in (None, "", "x" * 41, "ads<script>", "a b", 7):
+        body = {"pack": "25"} if source is None else {"pack": "25", "source": source}
+        response = client.post("/billing/credits", json=body)
+        assert response.status_code in (200, 422), response.text
+    for created in stripe_fake.created:
+        assert "source" not in created["metadata"], created["metadata"]
+        assert created["metadata"]["kind"] == "credit_pack"
+
+
+def test_the_start_page_passes_the_ref_of_the_link():
+    start = (STATIC / "start.html").read_text()
+    assert "sourceTag()" in start and 'get("ref")' in start
+    assert "source label of the link" in (STATIC / "privacy.html").read_text()

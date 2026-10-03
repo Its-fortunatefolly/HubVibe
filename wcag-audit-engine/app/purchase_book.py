@@ -895,7 +895,8 @@ def record_credit_pack(redeemed: dict, session_id: str, sale: dict) -> Optional[
                "payment_ref": f"stripe-checkout:{session_id}",
                "api_key_hash": api_key_hash(redeemed.get("api_key")),
                "outcome": "delivered", "call_id": None, "receipt_id": None,
-               "note": f"credit ${int(redeemed.get('credit_cents') or 0) / 100:.2f}"
+               "note": (f"source {redeemed['source']}; " if redeemed.get("source") else "")
+                       + f"credit ${int(redeemed.get('credit_cents') or 0) / 100:.2f}"
                        + (f" incl. ${bonus / 100:.2f} bonus" if bonus > 0 else "")}
         row.update(geo(row.get("client_ip")))
         return _book(row)
