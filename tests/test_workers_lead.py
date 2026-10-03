@@ -455,3 +455,19 @@ def test_the_tool_is_listed_and_the_static_manifests_match(app_module, client):
     index = client.get("/work").json()
     row = next(w for w in index["workers"] if w["name"] == WORKER)
     assert row["price_usd"] == 0.25 and row["max_seconds"] == 20 and row["composes"] == ["domain.dns", "company.enrich"]
+
+
+
+def test_company_names_are_decoded_in_this_jobs_answer_only():
+    """A website's HTML can carry "&amp;" in the company name. This job shows
+    "&"; company.enrich itself is not changed."""
+    found = {"company": {"name": "Lex Cooling, Heating Plumbing &amp; Electrical", "legal_name": None,
+                         "description": "Fast &amp; fair", "website": "https://lex.example", "founded": None,
+                         "employees": None, "industries": ["Heating &amp; Air"],
+                         "headquarters": {"city": "Fort Worth", "country": None, "country_code": None, "address": None}},
+             "identifiers": {"wikidata": None, "lei": None, "cik": None},
+             "socials": {}, "sources": ["Company website (self-declared)"], "notes": []}
+    out = W.skills.lead.company_summary(found)
+    assert out["name"] == "Lex Cooling, Heating Plumbing & Electrical"
+    assert out["description"] == "Fast & fair" and out["industries"] == ["Heating & Air"]
+    assert W.skills.lead._title("<title>A &amp; B</title>") == "A & B"

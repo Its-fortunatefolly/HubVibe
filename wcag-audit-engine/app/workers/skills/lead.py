@@ -18,6 +18,7 @@ The page fetch is the only hard requirement. Every other step that fails is
 named in `sections_failed` and `notes`, and the result still ships.
 """
 
+import html as _html
 import asyncio
 import importlib.util
 import re
@@ -146,7 +147,7 @@ def _title(html: str):
     match = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
     if not match:
         return None
-    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip()
+    text = re.sub(r"\s+", " ", _html.unescape(re.sub(r"<[^>]+>", "", match.group(1)))).strip()
     return text[:200] or None
 
 
@@ -339,8 +340,23 @@ def email_summary(dns: dict) -> dict:
             "mail_provider": mailcheck.mail_provider(hosts), "spf": security["spf"], "dmarc": security["dmarc"]}
 
 
+def _plain(value):
+    """Text as a person reads it: HTML codes decoded ("&amp;" -> "&") and
+    whitespace collapsed. company.enrich returns some names exactly as the
+    website wrote them in its HTML; this job decodes them in its OWN answer
+    and leaves company.enrich itself untouched."""
+    if isinstance(value, str):
+        return re.sub(r"\s+", " ", _html.unescape(value)).strip()
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    return value
+
+
 def company_summary(found: dict) -> dict:
     company, ids = found["company"], found["identifiers"]
+    company = _plain(company)
     return {
         "name": company["name"], "legal_name": company["legal_name"], "description": company["description"],
         "website": company["website"], "founded": company["founded"], "employees": company["employees"],
