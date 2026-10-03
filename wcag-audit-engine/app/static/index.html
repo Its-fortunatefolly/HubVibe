@@ -122,88 +122,121 @@ a { color: inherit; text-decoration: none; }
 .foot .mail svg { width: 26px; height: 26px; stroke: var(--purple); fill: none; stroke-width: 1.6; }
 .foot .copy { font-size: 11px; color: var(--dim); text-align: right; line-height: 1.8; }
 
-/* ---- phones: one column, readable type, the artwork left clean ---- */
+/* Shown on phones only (see the block below). */
+.menu, .hero-cta { display: none; }
+
+/* ---- phones: the owner's original tall layout ------------------------------
+   Orange headings, warm light text, and the robot's blues for the small caps,
+   icons and card edges. Everything the desktop page says is here. */
 @media (max-width: 760px) {
-  body { min-width: 0; }
-  /* Everything the desktop header and artwork carry is kept, re-stacked: the
-     logo and Get started on top, the five links under them, the artwork
-     left clean, then the tagline and the two purple lines side by side. */
-  .hero { display: grid; grid-template-columns: 1fr 1fr; }
-  .nav { position: relative; order: -1; grid-column: 1 / -1; height: auto; padding: 12px 16px 4px;
-         flex-direction: column; align-items: stretch; gap: 6px; }
-  .brand { gap: 10px; min-height: 44px; }
-  .brand img { height: 44px; }
-  .nav .brand-name, .brand-sub { display: none; }
-  .links { gap: 0; justify-content: space-between; }
-  .links a:not(.pill) { font-size: 10.5px; letter-spacing: 0.12em; padding: 12px 2px; }
-  .links .pill { position: absolute; top: 14px; right: 16px; padding: 11px 18px; font-size: 12px; }
-  .hero-art { grid-column: 1 / -1; }
-  .tagline { position: static; order: 1; grid-column: 1 / -1; padding: 18px 20px 6px; }
-  .tagline h1 { font-size: 22px; line-height: 1.3; }
-  .tagline p { font-size: 10px; letter-spacing: 0.2em; line-height: 1.9; }
-  .side { position: static; order: 2; padding: 14px 20px 22px; font-size: 10px; letter-spacing: 0.22em; }
-  .side::after { margin-top: 10px; }
+  :root { --soft: #FFEBDD; --sky: #62C6FF; --robot: #2F8DFF; --mist: #A9CCFF; --pink: #FF4FD8;
+          --edge: #1C3166; --card: rgba(22, 40, 92, 0.34); }
+  html { background: #03060F; }
+  body { min-width: 0; color: var(--soft);
+         background: linear-gradient(180deg, #050B1E 0%, #060D24 38%, #040816 100%); }
 
-  .strip .wrap { grid-template-columns: 1fr 1fr; }
-  .feat { padding: 14px 16px; gap: 12px; border-left: 0; border-top: 1px solid var(--line); }
-  .feat:nth-child(-n+2) { border-top: 0; }
-  .feat:nth-child(even) { border-left: 1px solid var(--line); }
-  .feat svg { width: 26px; height: 26px; }
-  .feat span { font-size: 10px; letter-spacing: 0.14em; }
+  /* header: logo, menu. Nothing is drawn over the mascot. */
+  .hero { display: grid; grid-template-columns: 1fr; }
+  .nav { position: relative; order: -1; height: auto; padding: 12px 14px; }
+  /* The logo file has a black ground; on the navy page it is blended away. */
+  .brand img { height: 46px; mix-blend-mode: screen; }
+  .nav .brand-name, .brand-sub, .links { display: none; }
+  .menu { display: block; }
+  .menu summary { list-style: none; width: 46px; height: 46px; display: grid; place-items: center; cursor: pointer; border-radius: 10px; }
+  .menu summary::-webkit-details-marker { display: none; }
+  .menu summary svg { width: 30px; height: 30px; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; fill: none; }
+  .menu[open] summary { background: rgba(47, 141, 255, 0.16); }
+  .menu-links { position: absolute; z-index: 5; top: 66px; left: 12px; right: 12px; display: grid; padding: 6px;
+                background: #0A1330; border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55); }
+  .menu-links a { padding: 14px 14px; font-size: 13px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mist); border-radius: 9px; }
+  .menu-links a:active { background: rgba(47, 141, 255, 0.18); color: #fff; }
 
-  .sec { padding: 26px 20px 24px; }
+  /* artwork, a little taller, with the two lines beside the mascot */
+  .hero-art { height: 62vw; object-fit: cover; }
+  .side { top: calc(70px + 5vw); font-size: 2.35vw; letter-spacing: 0.2em; line-height: 1.9; color: var(--mist); }
+  .side::after { width: 30px; margin-top: 9px; background: var(--pink); }
+  .side.l { left: 16px; } .side.r { right: 16px; }
+  .tagline { position: static; order: 1; padding: 18px 20px 4px; }
+  .tagline h1 { font-size: 23px; font-weight: 400; line-height: 1.3; color: #fff; }
+  .tagline p { font-size: 10px; letter-spacing: 0.2em; line-height: 1.9; color: var(--sky); }
+  .tagline .dot { color: var(--orange); }
+  .hero-cta { display: flex; order: 2; justify-content: center; gap: 12px; padding: 16px 16px 24px; }
+  .pill { padding: 14px 20px; font-size: 12.5px; box-shadow: 0 0 16px rgba(255, 123, 0, 0.42), inset 0 0 12px rgba(255, 123, 0, 0.16); }
+  .pill.ghost { border-color: var(--robot); color: var(--mist); box-shadow: 0 0 14px rgba(47, 141, 255, 0.28), inset 0 0 10px rgba(47, 141, 255, 0.12); }
+
+  /* feature cards */
+  .strip { background: none; border: 0; }
+  .strip .wrap { grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 14px 22px; }
+  .feat { flex-direction: column; text-align: center; gap: 10px; padding: 16px 8px 14px; border: 1px solid var(--edge);
+          border-radius: 13px; background: var(--card); }
+  .feat:first-child { border-left: 1px solid var(--edge); }
+  .feat svg { width: 30px; height: 30px; stroke: var(--sky); }
+  .feat span { font-size: 10px; letter-spacing: 0.14em; color: #DCE8FF; }
+
+  /* sections */
+  .sec, .sec:first-of-type { padding: 26px 18px 24px; border-top: 1px solid #142457; }
   .label { font-size: 11px; }
-  .h2 { font-size: 23px; letter-spacing: 0.12em; white-space: normal; line-height: 1.25; }
+  .h2 { font-size: 23px; letter-spacing: 0.12em; white-space: normal; line-height: 1.25; color: var(--orange);
+        text-shadow: 0 0 22px rgba(255, 123, 0, 0.28); }
   .about { grid-template-columns: 1fr; gap: 20px; }
-  .quote { font-size: 12px; letter-spacing: 0.26em; margin-top: 16px; }
-  .about p { font-size: 16px; line-height: 1.55; margin-bottom: 12px; }
+  .quote { font-size: 12px; letter-spacing: 0.26em; margin-top: 16px; border-left-color: var(--orange); color: var(--mist); }
+  .quote::after { background: var(--pink); }
+  .about p { font-size: 16px; line-height: 1.55; margin-bottom: 12px; color: var(--soft); }
 
   .row5 { grid-template-columns: 1fr 1fr; gap: 18px 10px; margin-top: 18px; }
   .row5 > * { border-left: 0; padding: 4px 6px; }
   .row5 > *:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .proto .badge { font-size: 18px; }
-  .proto .name { font-size: 10px; letter-spacing: 0.16em; margin-top: 8px; }
-  .subtext { font-size: 15px; margin-top: 20px; line-height: 1.5; }
+  .proto .name { font-size: 10px; letter-spacing: 0.16em; margin-top: 8px; color: var(--mist); }
+  .subtext { font-size: 15px; margin-top: 20px; line-height: 1.5; color: var(--soft); }
 
-  .uc { padding: 4px 6px; }
-  .uc span { font-size: 10.5px; letter-spacing: 0.06em; white-space: normal; }
+  /* use cases and resources as cards */
+  #use-cases .row5 { gap: 10px; }
+  .row5 > .uc { padding: 13px 10px; gap: 10px; border: 1px solid var(--edge); border-radius: 13px; background: var(--card); }
+  .uc svg { stroke: var(--sky); }
+  .uc span { font-size: 10.5px; letter-spacing: 0.03em; white-space: normal; color: #DCE8FF; }
   .row5 > .uc:last-child:nth-child(odd) { justify-content: flex-start; }
 
-  #resources .row5 { grid-template-columns: 1fr; gap: 4px; }
-  .res { padding: 12px 6px; gap: 14px; }
-  .res .t { font-size: 12px; letter-spacing: 0.1em; }
-  .res .d { font-size: 13px; margin-top: 4px; }
+  #resources .row5 { grid-template-columns: 1fr; gap: 10px; }
+  .row5 > .res { padding: 14px 14px; gap: 14px; border: 1px solid var(--edge); border-radius: 13px; background: var(--card); }
+  .res svg { stroke: var(--sky); width: 26px; height: 26px; }
+  .res .t { font-size: 12px; letter-spacing: 0.1em; color: #fff; text-decoration-color: var(--robot); }
+  .res .d { font-size: 13px; margin-top: 4px; color: var(--mist); }
 
-  .cta { margin: 6px 16px 26px; padding: 22px 20px; flex-direction: column; align-items: flex-start; gap: 20px; }
+  .cta { margin: 8px 14px 28px; padding: 22px 20px; flex-direction: column; align-items: flex-start; gap: 20px;
+         border: 1px solid var(--edge); border-radius: 16px;
+         background: linear-gradient(180deg, rgba(26, 46, 104, 0.42), rgba(8, 15, 38, 0.6)); }
   .cta-l { gap: 16px; }
-  .cta-l svg { width: 40px; height: 40px; flex: none; }
-  .cta p { font-size: 15px; }
+  .cta-l svg { width: 42px; height: 42px; flex: none; filter: drop-shadow(0 0 8px rgba(255, 123, 0, 0.5)); }
+  .cta h3 { color: #fff; }
+  .cta p { font-size: 15px; color: var(--mist); }
   .cta-r { gap: 18px; flex-wrap: wrap; }
-  .cta-r .pill { padding: 14px 26px; font-size: 12px; }
-  .cta-r .explore { font-size: 12px; display: inline-block; padding: 12px 0; }
+  .cta-r .pill { padding: 14px 26px; font-size: 12.5px; }
+  .cta-r .or { color: var(--mist); }
+  .cta-r .explore { font-size: 12px; display: inline-block; padding: 12px 0; color: var(--mist); text-decoration-color: var(--robot); }
 
-  .foot { grid-template-columns: 1fr; gap: 20px; padding: 28px 20px 34px; justify-items: center; text-align: center; }
+  .foot { grid-template-columns: 1fr; gap: 20px; padding: 28px 20px 34px; justify-items: center; text-align: center; border-top-color: #142457; }
   .foot .brand { justify-content: center; text-align: left; }
   .foot .brand img { height: 48px; }
-  .foot .brand-sub2 { font-size: 12px; white-space: normal; }
-  .foot .small { font-size: 10px; }
+  .foot .brand-sub2 { font-size: 12px; white-space: normal; color: var(--mist); }
+  .foot .small { font-size: 10px; color: var(--sky); }
   .foot .mail { font-size: 12px; letter-spacing: 0.04em; }
-  .foot .copy { text-align: center; font-size: 13px; }
+  .foot .mail svg { stroke: var(--sky); }
+  .foot .copy { text-align: center; font-size: 13px; color: #8FA3CC; }
   .foot .copy a { display: inline-block; padding: 6px 4px; }
 }
 @media (max-width: 350px) {
-  .links .pill { padding: 10px 14px; font-size: 11px; letter-spacing: 0.1em; }
-  .links a:not(.pill) { font-size: 9.5px; letter-spacing: 0.06em; }
-  .side { font-size: 9px; letter-spacing: 0.16em; padding: 12px 14px 18px; }
   .tagline h1 { font-size: 20px; }
   .tagline p { font-size: 9px; letter-spacing: 0.1em; }
+  .hero-cta { gap: 8px; }
+  .pill { padding: 13px 13px; font-size: 11.5px; letter-spacing: 0.1em; }
   .h2 { font-size: 21px; letter-spacing: 0.08em; }
   .foot .mail { font-size: 11px; letter-spacing: 0.02em; }
   .strip .wrap > *, .row5 > * { min-width: 0; }
-  .feat { padding: 12px 10px; gap: 9px; }
-  .feat svg { width: 22px; height: 22px; }
+  .feat { padding: 14px 6px 12px; }
   .feat span { font-size: 9px; letter-spacing: 0.06em; }
-  .uc { gap: 9px; padding: 4px 2px; }
+  .uc { gap: 9px; }
+  .row5 > .uc { padding: 11px 8px; }
   .uc svg { width: 24px; height: 24px; }
   .uc span { font-size: 9.5px; letter-spacing: 0.03em; }
 }
@@ -228,12 +261,26 @@ a { color: inherit; text-decoration: none; }
       <a href="mailto:hubvibe@hubvibe-io.com">Contact</a>
       <a class="pill" href="/start">Get started &rarr;</a>
     </nav>
+    <details class="menu">
+      <summary aria-label="Menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></summary>
+      <div class="menu-links">
+        <a href="#about">About</a>
+        <a href="#technology">Technology</a>
+        <a href="/.well-known/agent.json">Pricing</a>
+        <a href="#resources">Docs</a>
+        <a href="mailto:hubvibe@hubvibe-io.com">Contact</a>
+      </div>
+    </details>
   </header>
   <div class="side l">Software<br>moves<br>the world.</div>
   <div class="side r">Machines<br>transact<br>a brighter<br>tomorrow.</div>
   <div class="tagline">
     <h1>Infrastructure for the machine economy.</h1>
-    <p>Agents &nbsp;&bull;&nbsp; APIs &nbsp;&bull;&nbsp; Payments &nbsp;&bull;&nbsp; Real work</p>
+    <p>Agents &nbsp;<span class="dot">&bull;</span>&nbsp; APIs &nbsp;<span class="dot">&bull;</span>&nbsp; Payments &nbsp;<span class="dot">&bull;</span>&nbsp; Real work</p>
+  </div>
+  <div class="hero-cta">
+    <a class="pill" href="/start">Get started &rarr;</a>
+    <a class="pill ghost" href="/docs">Explore docs</a>
   </div>
 </section>
 
