@@ -215,7 +215,7 @@ app = FastAPI(
     contact={"name": "HubVibe", "url": PUBLIC_BASE_URL, "email": CONTACT_EMAIL},
     terms_of_service=f"{PUBLIC_BASE_URL}/terms",
     description=(
-        "63 pay-per-call tools for AI agents under /work -- web search and "
+        "70+ pay-per-call tools for AI agents under /work -- the HubVibe Agent (one task in plain words, finished with these tools), web search and "
         "cited research, email verification, company enrichment, identity "
         "checks (KYC screening) and sanctions screening, phone/IP/DNS lookups, stock "
         "prices, SEC filings and insider trades, crypto prices and prediction-market "
@@ -3034,7 +3034,7 @@ async def agent_manifest(request: Request):
         "name": SERVICE_TITLE,
         "base_url": base,
         "description": (
-            "63 pay-per-call tools for AI agents (the `workers` section: web "
+            "70+ pay-per-call tools for AI agents (the `workers` section: the HubVibe Agent, web "
             "search and cited research, email verification, company enrichment, "
             "KYC and sanctions screening, phone/IP/DNS lookups, stock prices, SEC "
             "filings and insider trades, crypto and prediction-market odds, news, "
@@ -5229,7 +5229,7 @@ def audit(
     return _deliver(result, auth)
 
 
-@app.post("/audit/wcag")
+@app.post("/audit/wcag", summary="Website accessibility audit: WCAG 2.1 A/AA violations from a real browser (axe-core)")
 def audit_wcag(
     payload: AuditRequest,
     request: Request,
@@ -5295,7 +5295,7 @@ def audit_wcag(
     return _deliver(result, auth)
 
 
-@app.post("/audit/seo")
+@app.post("/audit/seo", summary="On-page SEO audit of a web page: title, meta, headings, canonical, OpenGraph, links")
 def audit_seo(
     payload: AuditRequest,
     request: Request,
@@ -5340,7 +5340,7 @@ def audit_seo(
     return _deliver(result, auth)
 
 
-@app.post("/audit/security")
+@app.post("/audit/security", summary="Website security headers check: HTTPS, HSTS, CSP, clickjacking and MIME protections")
 def audit_security(
     payload: UrlAuditRequest,
     request: Request,
@@ -5378,7 +5378,7 @@ def audit_security(
     return _deliver(result, auth)
 
 
-@app.post("/audit/performance")
+@app.post("/audit/performance", summary="Page speed and page weight audit from one real browser load")
 def audit_performance(
     payload: UrlAuditRequest,
     request: Request,
@@ -5416,7 +5416,7 @@ def audit_performance(
     return _deliver(result, auth)
 
 
-@app.post("/audit/bundle")
+@app.post("/audit/bundle", summary="Full website audit in one call: accessibility, SEO, security headers and page speed")
 def audit_bundle(
     payload: UrlAuditRequest,
     request: Request,
