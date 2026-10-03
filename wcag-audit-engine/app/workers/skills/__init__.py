@@ -16,7 +16,7 @@ rather than merely coexist.
 
 from . import (  # noqa: F401
     agent, bluesky, chain, code, commerce, composites, data, email, extract, fetch, finance, hotels, llm,
-    macro, maps, market, mastodon, media, monitor, news, opendata, opendata_table, osint, property, flight_status, company, weather, results, sanctions, identity, search, security, shipping, stats,
+    macro, maps, market, mastodon, media, monitor, news, opendata, opendata_table, osint, property, flight_status, company, weather, results, sanctions, identity, lead, search, security, shipping, stats,
     traffic, travel, verify, video, x_pulse,
 )
 
@@ -28,7 +28,7 @@ REGISTRY = {}
 PRECHECKS = {}
 for _module in (agent, extract, llm, chain, market, data, composites, search, code,
                 media, security, monitor, verify, fetch, maps, stats, commerce, finance,
-                opendata, traffic, video, bluesky, mastodon, x_pulse, travel, news, macro, opendata_table, hotels, shipping, results, email, property, flight_status, company, weather, sanctions, osint, identity):
+                opendata, traffic, video, bluesky, mastodon, x_pulse, travel, news, macro, opendata_table, hotels, shipping, results, email, property, flight_status, company, weather, sanctions, osint, identity, lead):
     REGISTRY.update(_module.SKILLS)
     PRECHECKS.update(getattr(_module, "PRECHECKS", {}))
 # The agent dispatches through exactly these two dicts.

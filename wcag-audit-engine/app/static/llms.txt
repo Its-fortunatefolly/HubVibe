@@ -190,6 +190,12 @@ Standard (inference and data, $0.25-$0.50):
   options, the one matching your variant, quantity and ship-to eligibility,
   evidence, checked_at (schema.org/Open Graph/Shopify JSON first; browser +
   Gemini only when the page has no structured data)
+- POST /work/lead/qualify -- qualify a business website as a sales lead in
+  one call: SEO and security-header findings, static accessibility signals,
+  platform and marketing tags (WordPress, Shopify, Google Analytics, Meta
+  Pixel...), the domain's mail setup (MX, SPF, DMARC), a company profile,
+  and a 0-100 opportunity score with outreach hooks (one plain HTTP fetch,
+  no browser)
 
 Advanced (several providers, one completed result, $5.00):
 - POST /work/data/question -- a plain-language question about a BigQuery

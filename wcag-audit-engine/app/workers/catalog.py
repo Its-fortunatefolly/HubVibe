@@ -1285,6 +1285,38 @@ CATALOG = [
         composes=["sanctions.screen", "email.verify", "phone.parse", "ip.lookup"],
         requires=("sanctions", "mailcheck", "phone", "iplookup")),
     Worker(
+        name="lead.qualify", price_usd=0.25, tier="standard",
+        title="Qualify a business website as a sales lead",
+        description=(
+            'Lead qualification in one call from a business website, fetched once by plain '
+            'HTTP (no browser): SEO and security-header findings, static accessibility signals '
+            '(images without alt, unlabelled fields, empty links), platform and marketing tags '
+            '(WordPress, Shopify, Wix, Google Analytics, Tag Manager, Google Ads, Meta Pixel, '
+            "TikTok, LinkedIn, chat), the domain's mail setup (MX, SPF, DMARC), a company "
+            'profile and a 0-100 opportunity score with outreach hooks. Input: url; optional '
+            'business_name.'),
+        tags=["lead-qualification", "lead-generation", "website-audit", "tech-stack", "sales-prospecting",
+              "agency", "seo"],
+        input_schema=_obj({
+            "url": {"type": "string", "description": "The business's website, http(s)."},
+            "business_name": {"type": "string", "minLength": 1, "maxLength": 200,
+                              "description": "The business's name, to help the company lookup. Optional."},
+        }, ["url"]),
+        returns=("url, business_name, domain, site{final_url, status, https, redirected, response_time_ms, "
+                 "content_type, bytes, title}, seo{pass, checks, findings[]}, security{pass, checks, findings[]}, "
+                 "accessibility_signals{images_total, images_without_alt, html_lang, html_lang_present, inputs_total, "
+                 "inputs_without_label, links_total, links_without_text, scope, full_audit}, tech{platform, generator, "
+                 "server, powered_by, analytics[], ad_pixels[], chat_widgets[], has_analytics, has_ad_pixel, has_chat, "
+                 "source}, email_domain{domain, exists, mx_present, mx[], mail_provider, spf, dmarc}, company{name, "
+                 "legal_name, description, website, founded, employees, industries[], headquarters, socials, "
+                 "identifiers, sources[], notes[]}, score, score_band, reasons[], score_breakdown[{rule, points, "
+                 "detail}], score_rule, sections_failed[], sources[], notes[], checked_at."),
+        skill="lead.qualify", max_seconds=20,
+        pricing_basis=("Provisional, standard tier; the price is the owner's decision. Provider cost zero: one HTTP "
+                       "GET of the page, DNS queries, and the Wikidata, GLEIF and SEC reads company.enrich makes."),
+        composes=["domain.dns", "company.enrich"],
+        requires=("web", "dnsintel", "company_data")),
+    Worker(
         name="commerce.shipping", price_usd=0.50, tier="standard",
         title="Shipping options, eligibility and cart total for a product",
         description=(
