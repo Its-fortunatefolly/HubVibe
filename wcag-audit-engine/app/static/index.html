@@ -3,6 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1024">
+<script>
+/* Phones get a layout of their own (the max-width:760px rules at the end of
+   the stylesheet). Every wider screen keeps the fixed 1024 design. */
+if (Math.min(screen.width, screen.height) <= 600) {
+  document.querySelector('meta[name="viewport"]').setAttribute("content", "width=device-width, initial-scale=1");
+}
+</script>
 <title>HubVibe: Pay-per-Call Agent Tools: Web Search, Email Verify, KYC Screening, Stocks, Crypto, News</title>
 <meta name="description" content="HubVibe: infrastructure for the machine economy. Agents, APIs, payments, real work.">
 <meta name="base:app_id" content="6a83832901463168d7e651ca" />
@@ -114,6 +121,92 @@ a { color: inherit; text-decoration: none; }
 .foot .mail { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; justify-content: center; white-space: nowrap; }
 .foot .mail svg { width: 26px; height: 26px; stroke: var(--purple); fill: none; stroke-width: 1.6; }
 .foot .copy { font-size: 11px; color: var(--dim); text-align: right; line-height: 1.8; }
+
+/* ---- phones: one column, readable type, the artwork left clean ---- */
+@media (max-width: 760px) {
+  body { min-width: 0; }
+  /* Everything the desktop header and artwork carry is kept, re-stacked: the
+     logo and Get started on top, the five links under them, the artwork
+     left clean, then the tagline and the two purple lines side by side. */
+  .hero { display: grid; grid-template-columns: 1fr 1fr; }
+  .nav { position: relative; order: -1; grid-column: 1 / -1; height: auto; padding: 12px 16px 4px;
+         flex-direction: column; align-items: stretch; gap: 6px; }
+  .brand { gap: 10px; min-height: 44px; }
+  .brand img { height: 44px; }
+  .nav .brand-name, .brand-sub { display: none; }
+  .links { gap: 0; justify-content: space-between; }
+  .links a:not(.pill) { font-size: 10.5px; letter-spacing: 0.12em; padding: 12px 2px; }
+  .links .pill { position: absolute; top: 14px; right: 16px; padding: 11px 18px; font-size: 12px; }
+  .hero-art { grid-column: 1 / -1; }
+  .tagline { position: static; order: 1; grid-column: 1 / -1; padding: 18px 20px 6px; }
+  .tagline h1 { font-size: 22px; line-height: 1.3; }
+  .tagline p { font-size: 10px; letter-spacing: 0.2em; line-height: 1.9; }
+  .side { position: static; order: 2; padding: 14px 20px 22px; font-size: 10px; letter-spacing: 0.22em; }
+  .side::after { margin-top: 10px; }
+
+  .strip .wrap { grid-template-columns: 1fr 1fr; }
+  .feat { padding: 14px 16px; gap: 12px; border-left: 0; border-top: 1px solid var(--line); }
+  .feat:nth-child(-n+2) { border-top: 0; }
+  .feat:nth-child(even) { border-left: 1px solid var(--line); }
+  .feat svg { width: 26px; height: 26px; }
+  .feat span { font-size: 10px; letter-spacing: 0.14em; }
+
+  .sec { padding: 26px 20px 24px; }
+  .label { font-size: 11px; }
+  .h2 { font-size: 23px; letter-spacing: 0.12em; white-space: normal; line-height: 1.25; }
+  .about { grid-template-columns: 1fr; gap: 20px; }
+  .quote { font-size: 12px; letter-spacing: 0.26em; margin-top: 16px; }
+  .about p { font-size: 16px; line-height: 1.55; margin-bottom: 12px; }
+
+  .row5 { grid-template-columns: 1fr 1fr; gap: 18px 10px; margin-top: 18px; }
+  .row5 > * { border-left: 0; padding: 4px 6px; }
+  .row5 > *:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .proto .badge { font-size: 18px; }
+  .proto .name { font-size: 10px; letter-spacing: 0.16em; margin-top: 8px; }
+  .subtext { font-size: 15px; margin-top: 20px; line-height: 1.5; }
+
+  .uc { padding: 4px 6px; }
+  .uc span { font-size: 10.5px; letter-spacing: 0.06em; white-space: normal; }
+  .row5 > .uc:last-child:nth-child(odd) { justify-content: flex-start; }
+
+  #resources .row5 { grid-template-columns: 1fr; gap: 4px; }
+  .res { padding: 12px 6px; gap: 14px; }
+  .res .t { font-size: 12px; letter-spacing: 0.1em; }
+  .res .d { font-size: 13px; margin-top: 4px; }
+
+  .cta { margin: 6px 16px 26px; padding: 22px 20px; flex-direction: column; align-items: flex-start; gap: 20px; }
+  .cta-l { gap: 16px; }
+  .cta-l svg { width: 40px; height: 40px; flex: none; }
+  .cta p { font-size: 15px; }
+  .cta-r { gap: 18px; flex-wrap: wrap; }
+  .cta-r .pill { padding: 14px 26px; font-size: 12px; }
+  .cta-r .explore { font-size: 12px; display: inline-block; padding: 12px 0; }
+
+  .foot { grid-template-columns: 1fr; gap: 20px; padding: 28px 20px 34px; justify-items: center; text-align: center; }
+  .foot .brand { justify-content: center; text-align: left; }
+  .foot .brand img { height: 48px; }
+  .foot .brand-sub2 { font-size: 12px; white-space: normal; }
+  .foot .small { font-size: 10px; }
+  .foot .mail { font-size: 12px; letter-spacing: 0.04em; }
+  .foot .copy { text-align: center; font-size: 13px; }
+  .foot .copy a { display: inline-block; padding: 6px 4px; }
+}
+@media (max-width: 350px) {
+  .links .pill { padding: 10px 14px; font-size: 11px; letter-spacing: 0.1em; }
+  .links a:not(.pill) { font-size: 9.5px; letter-spacing: 0.06em; }
+  .side { font-size: 9px; letter-spacing: 0.16em; padding: 12px 14px 18px; }
+  .tagline h1 { font-size: 20px; }
+  .tagline p { font-size: 9px; letter-spacing: 0.1em; }
+  .h2 { font-size: 21px; letter-spacing: 0.08em; }
+  .foot .mail { font-size: 11px; letter-spacing: 0.02em; }
+  .strip .wrap > *, .row5 > * { min-width: 0; }
+  .feat { padding: 12px 10px; gap: 9px; }
+  .feat svg { width: 22px; height: 22px; }
+  .feat span { font-size: 9px; letter-spacing: 0.06em; }
+  .uc { gap: 9px; padding: 4px 2px; }
+  .uc svg { width: 24px; height: 24px; }
+  .uc span { font-size: 9.5px; letter-spacing: 0.03em; }
+}
 
 </style>
 </head>
