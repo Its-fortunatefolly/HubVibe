@@ -1159,6 +1159,15 @@ def _authenticate(
 
     if authorization and authorization.startswith("Payment "):
         credential = authorization[len("Payment "):].strip()
+        # A credential priced for a cheaper route buys nothing on this one
+        # (mpp_payments.covers_price). Asked before anything is settled or
+        # marked as spent, so the payment stays good for its own route.
+        if credential and not mpp_payments.covers_price(credential, price_usd):
+            credential = ""
+            refusal = refusal or (
+                "payment_below_price",
+                f"That payment was issued for less than this route's price "
+                f"(${price_usd:.2f}). Pay the challenge this route returns.")
         # Top-up first: it is a different intent with a different meaning, and
         # letting it fall through to the per-call path would consume a $0.50
         # purchase as payment for one single audit.

@@ -908,6 +908,44 @@ def settlement_for(authorization_header: str) -> Optional[dict]:
         return None
 
 
+def covers_price(authorization_header: str, price_usd: Optional[float]) -> bool:
+    """Whether this credential's own challenge was issued for at least
+    `price_usd`. False ONLY for a credential that can be read and names a
+    smaller amount; anything unreadable is left to the verifiers, which
+    refuse it as they always have.
+
+    The challenge is signed by this node and carries its amount, but nothing
+    ties it to the route that issued it. Unchecked, the challenge from the
+    cheapest route, honestly paid, was accepted on every route: a ten-dollar
+    job for two cents. The gate asks this BEFORE any verifier runs, so a
+    refused credential is neither charged nor marked as spent and stays good
+    for the route it was priced for. The amount read here is only a claim;
+    the verifier that follows checks the signature over it, so a credential
+    that lies about its amount fails there.
+
+    Units follow the method: cents for `stripe` (a per-call charge or a
+    top-up), six-decimal token base units for `tempo` and `evm`.
+    """
+    if price_usd is None:
+        return True
+    try:
+        decoded = json.loads(_b64url_decode(authorization_header))
+        challenge = decoded["challenge"]
+        method = challenge.get("method")
+        request_obj = json.loads(_b64url_decode(challenge["request"]))
+    except Exception:
+        return True
+    try:
+        amount = int(request_obj["amount"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        # No amount, not a number, or not finite (JSON's Infinity is a float
+        # that int() refuses with OverflowError): it does not cover the price.
+        return False
+    if method == "stripe":
+        return amount >= round(price_usd * 100)
+    return amount >= round(price_usd * 1_000_000)
+
+
 def verify_and_settle_sync(authorization_header: str, realm: Optional[str] = None) -> bool:
     """Verify + settle an `Authorization: Payment <base64url-json>` header.
 
