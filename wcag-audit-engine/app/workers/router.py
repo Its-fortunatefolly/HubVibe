@@ -58,6 +58,17 @@ _authorize: Optional[Callable] = None
 _bill: Optional[Callable] = None
 _deliver: Optional[Callable] = None
 _failed: Optional[Callable] = None
+# What the core does for a paid request that is answered WITHOUT new work (a
+# replayed Idempotency-Key, a duplicate of a running request): hand back
+# whatever the gate took. And, for a job handed back to collect later, the
+# three halves of its prepaid hold (see billing.hold_prepaid). All optional:
+# a core that injects none simply has no rail that takes money at the gate.
+_not_charged: Optional[Callable] = None
+_hold_payment: Optional[Callable] = None
+_close_hold: Optional[Callable] = None
+_refund_hold: Optional[Callable] = None
+# Puts on a body the prepaid key a top-up bought with this very request.
+_attach_key: Optional[Callable] = None
 _configured = False
 # The node's SERVICE_VERSION, stamped on every ledger row so a receipt names
 # the build that ran the job. Injected because this module cannot import
@@ -80,10 +91,18 @@ _executor: Optional[ThreadPoolExecutor] = None
 
 def configure(authorize_and_rate_limit, bill, deliver, failed_response,
               with_page=None, goto_guarded=None, blocked_target_reason=None,
-              node_version=None, mpp_payment_facts=None) -> None:
+              node_version=None, mpp_payment_facts=None, not_charged=None,
+              hold_payment=None, close_hold=None, refund_hold=None,
+              attach_key=None) -> None:
     """Hand the worker network the core's payment gate and browser pool."""
     global _authorize, _bill, _deliver, _failed, _executor, _semaphore, _configured
     global _node_version, _mpp_payment_facts
+    global _not_charged, _hold_payment, _close_hold, _refund_hold, _attach_key
+    _attach_key = attach_key
+    _not_charged = not_charged
+    _hold_payment = hold_payment
+    _close_hold = close_hold
+    _refund_hold = refund_hold
     _node_version = node_version
     _mpp_payment_facts = mpp_payment_facts
     _authorize = authorize_and_rate_limit
@@ -378,8 +397,12 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
                     idempotency_key=idempotency_key)
 
     # Duplicate protection. A "done" key returns the stored result and
-    # NEVER calls _bill -- so the second payment stays verified but
-    # unsettled, and no money moves. That is why no refund path is needed.
+    # NEVER calls _bill -- so an x402 payment stays verified but unsettled,
+    # and no money moves. The rails that take money AT THE GATE are handed
+    # it back (_take_nothing): a prepaid key was debited before this check
+    # and an MPP payment was marked as spent, and a body that says "not
+    # charged" while keeping either was a second charge for one job --
+    # repeated on every poll of a running one.
     claimed = False
     if idempotency_key:
         state, stored = await asyncio.get_running_loop().run_in_executor(
@@ -395,12 +418,15 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
             content["note"] = (
                 "Returned the stored result for this Idempotency-Key. This "
                 "request was not charged.")
+            await _take_nothing(auth, content, "idempotent replay: stored result returned")
             return JSONResponse(status_code=200, content=content)
         if state == "in_progress":
-            return JSONResponse(status_code=409, headers={"Retry-After": "5"}, content={
+            content = {
                 "status": "error", "reason": "in_progress", "billed": False,
                 "detail": ("A request with this Idempotency-Key is still running. "
-                           "Retry shortly to collect its result.")})
+                           "Retry shortly to collect its result.")}
+            await _take_nothing(auth, content, "duplicate of a request that is still running")
+            return JSONResponse(status_code=409, headers={"Retry-After": "5"}, content=content)
         claimed = state == "claimed"
 
     ledger.open_call(call_id=call_id, worker=worker.name, path=worker.path,
@@ -418,8 +444,48 @@ async def serve(worker, payload: dict, request: Request, x_api_key, x_payment,
     if work in done:
         return work.result()
     # Still running at the caller's limit: a job to collect, charged only when
-    # it delivers.
-    return _defer(worker, work, call_id, auth)
+    # it delivers. A prepaid key was debited before the job ran, so its debit
+    # is first written down as a hold under the call id, in the store that
+    # holds the money -- whoever closes an interrupted job can then hand it
+    # back, once. Written off the event loop, and only for a call that has a
+    # debit: a job paid per call never reaches the key store.
+    held = False
+    if (_hold_payment is not None and getattr(auth, "prepaid_key", None)
+            and getattr(auth, "prepaid_cents", 0)):
+        write = asyncio.get_running_loop().run_in_executor(
+            _executor, lambda: bool(_hold_payment(auth, call_id)))
+        write.add_done_callback(lambda done: done.cancelled() or done.exception())
+        try:
+            # The 202 never waits long for the bookkeeping: if every worker
+            # thread is busy, the job is handed back without a hold in hand.
+            held = await asyncio.wait_for(asyncio.shield(write), _HOLD_WRITE_WAIT_SECONDS)
+        except asyncio.TimeoutError:
+            log.warning("the prepaid hold of call %s was not written within %.0f s; "
+                        "handing the job back without it", call_id, _HOLD_WRITE_WAIT_SECONDS)
+        except Exception:  # pragma: no cover - the core's helper does not raise
+            log.exception("could not record the prepaid hold of call %s", call_id)
+        if held and work.done():
+            # The job ended while its hold was being written. Whatever it
+            # owed back went back directly (it was not in _HELD yet), so the
+            # hold must not stay open for a later sweep to refund again.
+            held = False
+            if _close_hold is not None:
+                _off_loop(_close_hold, call_id)
+    return _defer(worker, work, call_id, auth, idempotency_key if claimed else None, held)
+
+
+async def _take_nothing(auth, content: dict, note: str) -> None:
+    """Hand back what the gate took for a request answered without new work,
+    and put on `content` anything the payer is owed regardless (a key a
+    top-up bought with this very request). Never raises: the answer itself
+    is free and must not fail on the bookkeeping."""
+    if _not_charged is None:
+        return
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            _executor, lambda: _not_charged(auth, content, note))
+    except Exception:  # pragma: no cover - the core's helper does not raise
+        log.exception("could not hand back the payment of an unbilled request")
 
 
 async def _complete(worker, payload: dict, call_id: str, auth, payer, claimed: bool,
@@ -442,11 +508,12 @@ async def _complete(worker, payload: dict, call_id: str, auth, payer, claimed: b
             ledger.release_idempotency(idempotency_key)
         status = _error_status(exc.reason)
         if status == 400:
-            # The caller's fault: nothing was billed, and _failed's 502
-            # wording would be wrong.
-            return JSONResponse(status_code=400, content={
-                "status": "error", "reason": exc.reason, "detail": exc.detail,
-                "input_schema": worker.input_schema, "billed": False})
+            # The caller's fault, found only once the job ran -- after the
+            # gate. It unwinds through the core like every other unbilled
+            # failure (this path used to answer "billed": false and keep a
+            # prepaid debit and an MPP payment); only the wording differs.
+            return _unbilled_failure(auth, worker, call_id, exc.reason, 400, exc.detail, extra={
+                "detail": exc.detail, "input_schema": worker.input_schema})
         # Everything else goes through the CORE's failure path, so an
         # unbilled worker failure unwinds exactly like an unbilled audit.
         response = _unbilled_failure(auth, worker, call_id, exc.reason, status, exc.detail)
@@ -460,6 +527,7 @@ async def _complete(worker, payload: dict, call_id: str, auth, payer, claimed: b
                           failure_stage="execute", payer=payer)
         if claimed and idempotency_key:
             ledger.release_idempotency(idempotency_key)
+        _refund_through_hold(auth, call_id)
         return _failed(auth, f"{worker.name} failed: {type(exc).__name__}")
 
     _record_attempts(call_id, ctx)
@@ -482,7 +550,10 @@ async def _complete(worker, payload: dict, call_id: str, auth, payer, claimed: b
             f"{worker.name} produced a result that does not match its published "
             f"output schema ({problem}); it was not delivered")
 
-    # Only now, with a real result in hand, is anything charged.
+    # Only now, with a real result in hand, is anything charged. From here
+    # the payment may have moved (the settle runs in a thread that cannot be
+    # cancelled), so a job cut off past this point is never unwound.
+    _BILLING.add(call_id)
     warning = await asyncio.get_running_loop().run_in_executor(
         _executor, lambda: _bill(auth, worker.price_usd))
 
@@ -538,6 +609,7 @@ async def _complete(worker, payload: dict, call_id: str, auth, payer, claimed: b
             ledger.release_idempotency(idempotency_key)
         else:
             ledger.complete_idempotency(idempotency_key, json.dumps(content))
+    _BILLING.discard(call_id)
     return delivered
 
 
@@ -552,6 +624,15 @@ async def _complete(worker, payload: dict, call_id: str, auth, payer, claimed: b
 # exactly as it would have inline. A job that fails is never charged.
 
 _DEFERRED: dict = {}
+# Call ids of handed-back jobs whose prepaid debit is written down as a hold
+# (billing.hold_prepaid). For these the refund goes THROUGH the hold, which
+# can be turned into credit exactly once -- see _refund_through_hold.
+_HELD: set = set()
+# Call ids whose billing has started (see _complete). A job cut off after
+# that point may already have been charged.
+_BILLING: set = set()
+# How long a 202 waits for its prepaid hold to be written (see serve).
+_HOLD_WRITE_WAIT_SECONDS = 2.0
 
 
 def deliver_later_after() -> float:
@@ -562,18 +643,22 @@ def deliver_later_after() -> float:
         return 22.0
 
 
-def _defer(worker, work, call_id: str, auth) -> JSONResponse:
+def _defer(worker, work, call_id: str, auth, idempotency_key=None, held: bool = False) -> JSONResponse:
     job_id = uuid.uuid4().hex
     receipt_id = ledger.receipt_id_for(call_id)
     rail = _rail_of(auth)
     # MPP push payments moved money before the job ran; their hash is kept so
     # a restart that interrupts the job can release it (reconcile_interrupted).
     mpp_tx = _payment_facts_of(auth).get("tx_hash") if rail == "mpp" else None
+    # `held`: this call's prepaid debit is written down as a hold (see serve).
+    if held:
+        _HELD.add(call_id)
     ledger.open_deferred(job_id, call_id, worker.name, rail=rail, mpp_tx=mpp_tx)
     _DEFERRED[job_id] = work
-    work.add_done_callback(lambda task: _finish_deferred(job_id, task))
+    work.add_done_callback(
+        lambda task: _finish_deferred(job_id, task, auth, call_id, idempotency_key))
     collect = f"/work/jobs/{job_id}"
-    return JSONResponse(status_code=202, headers={"Retry-After": "10", "Location": collect}, content={
+    content = {
         "status": "processing",
         "worker": worker.name,
         "price_usd": worker.price_usd,
@@ -587,7 +672,17 @@ def _defer(worker, work, call_id: str, auth) -> JSONResponse:
             f"{worker.name} is still running. You have not been charged: payment is taken "
             f"only when the result is ready, and nothing is charged if it fails. GET "
             f"{collect} (free, no payment) to collect it; it is kept for 48 hours."),
-    })
+    }
+    # A key a top-up bought with this very request is the buyer's from this
+    # moment, whatever becomes of the job: it used to arrive only with the
+    # finished result, and an interrupted job never delivered one.
+    if _attach_key is not None:
+        try:
+            _attach_key(content, auth)
+        except Exception:  # pragma: no cover - the core's helper does not raise
+            log.exception("could not put the top-up key on the 202 of job %s", job_id)
+    return JSONResponse(status_code=202, headers={"Retry-After": "10", "Location": collect},
+                        content=content)
 
 
 def _response_parts(response) -> tuple:
@@ -602,17 +697,95 @@ def _response_parts(response) -> tuple:
     return status, body, json.dumps(headers)
 
 
-def _finish_deferred(job_id: str, task) -> None:
+def _finish_deferred(job_id: str, task, auth=None, call_id: Optional[str] = None,
+                     idempotency_key: Optional[str] = None) -> None:
     _DEFERRED.pop(job_id, None)
     try:
         response = task.result()
-    except BaseException as exc:  # pragma: no cover - _complete answers its own failures
-        log.error("deferred job %s crashed: %s: %s", job_id, type(exc).__name__, exc)
-        response = JSONResponse(status_code=502, content={
-            "status": "error", "reason": "internal_error", "billed": False,
-            "detail": "The job failed before it could deliver. Nothing was charged."})
+    except BaseException as exc:
+        # _complete answers its own failures, so this is a job CUT OFF: the
+        # task was cancelled (a shutdown whose drain ran out) or crashed
+        # outside its own handling. It delivered nothing, so it is closed the
+        # way a restart-interrupted job is -- and by the same single step out
+        # of 'running', so the payment is handed back at most once.
+        billing = call_id in _BILLING
+        _BILLING.discard(call_id)
+        # Billing moves money only for a payment that settles AFTER delivery
+        # (x402, a metered subscription). A prepaid debit or an MPP payment
+        # was taken at the gate, so a cut-off there is unwound like any other.
+        if billing and (auth is None or getattr(auth, "pending_payment", None) is not None
+                        or getattr(auth, "stripe_billable", False)):
+            # Cut off WHILE its payment was being finalised. The settle may
+            # have gone through, so nothing is handed back, the idempotency
+            # key stays taken (a resend must not become a second charge) and
+            # the buyer is told the truth: check the receipt.
+            _HELD.discard(call_id)
+            log.error("deferred job %s (call %s) was cut off while its payment was being "
+                      "finalised: %s. Its result was lost; reconcile it by hand.",
+                      job_id, call_id, type(exc).__name__)
+            receipt_id = ledger.receipt_id_for(call_id)
+            ledger.close_interrupted(job_id, json.dumps({
+                "status": "error", "reason": "interrupted_during_billing", "billed": None,
+                "receipt_id": receipt_id, "receipt_url": f"/work/receipts/{receipt_id}",
+                "detail": ("The job was cut off while its payment was being finalised, and its "
+                           "result was lost. It may have been charged: check the receipt "
+                           "before sending the request again, and write to "
+                           "hubvibe@hubvibe-io.com with the receipt id if it was.")}))
+            return
+        log.error("deferred job %s was cut off: %s: %s", job_id, type(exc).__name__, exc)
+        closed = ledger.close_interrupted(job_id, json.dumps({
+            "status": "error", "reason": "interrupted", "billed": False,
+            "detail": ("The job was cut off before it finished. Nothing was charged; "
+                       "send the request again.")}))
+        if closed:
+            _unwind_cut_off(auth, call_id, idempotency_key)
+        else:
+            _HELD.discard(call_id)  # another copy closed it and handed it back
+        return
     status, body, headers = _response_parts(response)
     ledger.finish_deferred(job_id, status, body, headers)
+    # The job ended and its billing is final. A hold still open here belongs
+    # to a job that delivered (the debit is kept): close it, so nothing can
+    # refund it later. Only for a call that has one -- a job paid per call
+    # never reaches the key store -- and off the event loop, which every
+    # other request is served from.
+    _BILLING.discard(call_id)
+    held = call_id in _HELD
+    _HELD.discard(call_id)
+    if held and _close_hold is not None:
+        _off_loop(_close_hold, call_id)
+
+
+def _off_loop(fn, *args) -> None:
+    """Run a small blocking bookkeeping call on the workers' own executor
+    rather than on the event loop. Never raises."""
+    def run():
+        try:
+            fn(*args)
+        except Exception:  # pragma: no cover - the core's helpers do not raise
+            log.exception("background bookkeeping failed: %s", getattr(fn, "__name__", fn))
+    try:
+        _executor.submit(run)
+    except Exception:  # the executor is gone (shutdown): do it here
+        run()
+
+
+def _unwind_cut_off(auth, call_id: Optional[str], idempotency_key: Optional[str]) -> None:
+    """A handed-back job this process was running ended without an answer:
+    close its ledger row failed, hand back what the gate took (the core's
+    unbilled-failure path: prepaid debit through its hold, MPP credential
+    released, the call booked as unbilled) and free its idempotency key."""
+    if call_id:
+        ledger.close_call(call_id, "failed", failure_reason="interrupted",
+                          failure_stage="execute")
+    if auth is not None and _failed is not None:
+        try:
+            _refund_through_hold(auth, call_id)
+            _failed(auth, "The job was cut off before it finished")
+        except Exception:
+            log.exception("could not hand back the payment of a cut-off job")
+    if idempotency_key:
+        ledger.release_idempotency(idempotency_key)
 
 
 @router.get("/work/jobs/{job_id}", tags=["workers"])
@@ -668,9 +841,9 @@ _OWNERLESS_GRACE_SECONDS = 600.0
 
 def reconcile_interrupted(release_mpp_hash: Optional[Callable] = None) -> int:
     """Every job whose process is gone -- a crash, a restart, a shutdown drain
-    that ran out -- is closed as failed and unbilled, its MPP payment (the one
-    rail that moves money before delivery) released, its idempotency key
-    freed. A job that another live copy of the node is still running is never
+    that ran out -- is closed as failed and unbilled, what it took before
+    delivery handed back (an MPP payment released, a prepaid debit refunded
+    through its hold), its idempotency key freed. A job that another live copy of the node is still running is never
     touched (ledger "instance liveness"): during a deploy two copies share the
     volume, and closing the other's job would release a payment for work that
     is about to be delivered. Returns how many were closed."""
@@ -698,6 +871,20 @@ def reconcile_interrupted(release_mpp_hash: Optional[Callable] = None) -> int:
                 release_mpp_hash(row["mpp_tx"])
             except Exception as exc:  # pragma: no cover
                 log.error("could not release MPP payment %s: %s", row["mpp_tx"], exc)
+        # A prepaid key debited for the job gets the debit back through the
+        # hold written when the job was handed back. Only a job with no
+        # per-call rail can have one: x402 and MPP jobs are never asked about.
+        if _refund_hold is not None and not row.get("rail"):
+            try:
+                outcome = _refund_hold(row["call_id"])
+                if outcome:
+                    log.warning("refunded the prepaid debit of interrupted job %s", row["job_id"])
+                elif outcome is None:
+                    log.error("the prepaid hold of interrupted job %s (call %s) could not be "
+                              "refunded and is left open; the buyer may be owed it",
+                              row["job_id"], row["call_id"])
+            except Exception as exc:  # pragma: no cover
+                log.error("could not refund the prepaid debit of job %s: %s", row["job_id"], exc)
         if row.get("idempotency_key"):
             ledger.release_idempotency(row["idempotency_key"])
         count += 1
@@ -730,10 +917,39 @@ async def keep_reconciled(release_mpp_hash: Optional[Callable] = None,
             log.error("job reconciliation failed: %s", exc)
 
 
-def _unbilled_failure(auth, worker, call_id: str, reason: str, status: int, detail: str):
+def _refund_through_hold(auth, call_id: Optional[str]) -> None:
+    """Before the core unwinds a failed job: if this job's prepaid debit was
+    written down as a hold (it was handed back to collect later), refund it
+    through the hold -- the one refund that can happen only once, whichever
+    copy of the node gets there first -- and leave the core nothing to refund
+    directly. A job that was never handed back has no hold and the core
+    refunds it as it always has."""
+    if not call_id or call_id not in _HELD:
+        return
+    # Out of _HELD first: the hold is then never CLOSED by _finish_deferred,
+    # so if this refund fails the record of what the buyer is owed survives
+    # (key and cents, still 'held') and can be made good.
+    _HELD.discard(call_id)
+    outcome = None
+    try:
+        outcome = _refund_hold(call_id) if _refund_hold is not None else False
+    except Exception:  # pragma: no cover - the core's helper does not raise
+        log.exception("could not refund the prepaid hold of call %s", call_id)
+    if outcome is None:
+        log.error("the prepaid hold of call %s could not be refunded and is left open; "
+                  "the buyer is owed it", call_id)
+    try:
+        auth.prepaid_cents = 0
+    except Exception:  # pragma: no cover
+        pass
+
+
+def _unbilled_failure(auth, worker, call_id: str, reason: str, status: int, detail: str,
+                      extra: Optional[dict] = None):
     """The failed-job response: the core's unbilled failure (prepaid debit
     refunded, MPP credential released, nothing settled) with the worker's
-    reason, name and receipt id added to the body."""
+    reason, name and receipt id added to the body, then `extra`."""
+    _refund_through_hold(auth, call_id)
     response = _failed(auth, detail)
     response.status_code = status
     try:
@@ -741,6 +957,7 @@ def _unbilled_failure(auth, worker, call_id: str, reason: str, status: int, deta
         body["reason"] = reason
         body["worker"] = worker.name
         body["receipt_id"] = ledger.receipt_id_for(call_id)
+        body.update(extra or {})
         # The core's headers minus the ones describing ITS body: the body
         # just grew, and a copied Content-Length made every failed worker
         # call die mid-response instead of a clean 502.

@@ -50,6 +50,39 @@ _RESUMABLE_WAIT = float(os.environ.get("WORKER_BQ_RESUMABLE_WAIT_SECONDS", "150"
 # start, so a resumed answer is never older than this.
 _JOB_REUSE_SECONDS = 600
 _BYTES_PER_GIB = 1024 ** 3
+
+
+def node_ceiling_gib() -> float:
+    """The most a BUYER's query may scan on this node (WORKER_BQ_MAX_SCAN_GIB)."""
+    return _MAX_GIB
+
+
+def scan_ceiling_gib(max_gib=None) -> float:
+    """The scan ceiling for one query, in GiB: `max_gib` when this node's own
+    code names one, otherwise the node's ceiling.
+
+    `max_gib` is never a buyer's raw value. A buyer's `max_scan_gib` is
+    validated and capped to the node's ceiling in skills/data.py before it
+    gets here (it used to arrive as sent, so a $0.50 call could run with a
+    ceiling of 100,000 GiB); a skill of ours, like news.search, passes its
+    own constant, which stays what it was.
+
+    Anything that is not a positive, finite number means "no preference".
+    That is the backstop that keeps a string from ever reaching the
+    arithmetic, where `"5" * 2**30` is a gigabyte of text."""
+    if isinstance(max_gib, bool) or not isinstance(max_gib, (int, float)):
+        return _MAX_GIB
+    try:
+        number = float(max_gib)
+    except OverflowError:  # an integer too large to be a float
+        return _MAX_GIB
+    if number != number or number <= 0 or number == float("inf"):
+        return _MAX_GIB
+    return number
+
+
+def scan_ceiling_bytes(max_gib=None) -> int:
+    return int(scan_ceiling_gib(max_gib) * _BYTES_PER_GIB)
 _BYTES_PER_TIB = 1024 ** 4
 
 # Read-only by construction. BigQuery permissions should enforce this too, but
@@ -158,8 +191,8 @@ class _BigQuery:
         if not google_auth.configured():
             raise runtime.ProviderUnavailable(google_auth.unavailable_reason())
 
-        ceiling_gib = max_gib if max_gib is not None else _MAX_GIB
-        ceiling_bytes = int(ceiling_gib * _BYTES_PER_GIB)
+        ceiling_gib = scan_ceiling_gib(max_gib)
+        ceiling_bytes = scan_ceiling_bytes(max_gib)
 
         estimated = await self.estimate(sql)
         if estimated > ceiling_bytes:
@@ -168,7 +201,7 @@ class _BigQuery:
             # number so it can narrow the query itself.
             raise runtime.InvalidRequest(
                 f"Query would scan {estimated / _BYTES_PER_GIB:.2f} GiB, over this "
-                f"worker's {ceiling_gib:.0f} GiB limit. Narrow it (fewer columns, "
+                f"worker's {ceiling_gib:g} GiB limit. Narrow it (fewer columns, "
                 f"a partition filter, or a LIMIT on a subquery).")
 
         return await self._run(sql, ceiling_bytes, estimated)
@@ -228,14 +261,14 @@ class _BigQuery:
         if not google_auth.configured():
             raise runtime.ProviderUnavailable(google_auth.unavailable_reason())
 
-        ceiling_gib = max_gib if max_gib is not None else _MAX_GIB
-        ceiling_bytes = int(ceiling_gib * _BYTES_PER_GIB)
+        ceiling_gib = scan_ceiling_gib(max_gib)
+        ceiling_bytes = scan_ceiling_bytes(max_gib)
         dry = await self._post({"query": sql, "useLegacySql": False, "dryRun": True})
         estimated = int(dry.get("totalBytesProcessed") or 0)
         if estimated > ceiling_bytes:
             raise runtime.InvalidRequest(
                 f"Query would scan {estimated / _BYTES_PER_GIB:.2f} GiB, over this "
-                f"worker's {ceiling_gib:.0f} GiB limit. Narrow it (fewer columns, "
+                f"worker's {ceiling_gib:g} GiB limit. Narrow it (fewer columns, "
                 f"a partition filter, or a LIMIT on a subquery).")
         location = (dry.get("jobReference") or {}).get("location") or dry.get("location")
 

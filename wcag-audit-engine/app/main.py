@@ -1435,6 +1435,44 @@ def _unbill_failed_audit(auth, reason: Optional[str] = None) -> None:
     _book(auth, outcome="failed_unbilled", note=reason)
 
 
+def _not_charged(auth, content: dict, note: str) -> None:
+    """For a paid route that answers WITHOUT doing new work -- the stored
+    result for a repeated Idempotency-Key, or "that request is still
+    running". The body says the request was not charged, so nothing
+    authentication took may be kept: the prepaid debit goes back and the MPP
+    payment can be presented again. A key a top-up bought with this very
+    request is still handed over on `content`, holding everything it bought.
+
+    Booked only when money actually arrived with the request (an MPP
+    transfer): the book then shows it as received and unclaimed, exactly as
+    it does for a failed call. Nothing else changed hands, so there is
+    nothing else to book.
+
+    Used only by the /work routes (workers/router.py). The audit routes take
+    no Idempotency-Key and never reach it."""
+    key = getattr(auth, "prepaid_key", None)
+    cents = getattr(auth, "prepaid_cents", 0) or 0
+    if key and cents:
+        billing.refund_prepaid(key, cents)
+    credential = getattr(auth, "mpp_credential", None)
+    if credential:
+        mpp_payments.release_credential(credential)
+        _book(auth, outcome="failed_unbilled", note=note)
+    _attach_issued_key(content, auth)
+
+
+def _hold_for_later(auth, hold_id: str) -> bool:
+    """A /work job handed back to collect later outlives its request. Write
+    its prepaid debit down under the job's call id, so a restart that
+    interrupts the job can still hand the money back (billing.hold_prepaid).
+    True if a hold was written; the router then refunds through the hold."""
+    key = getattr(auth, "prepaid_key", None)
+    cents = getattr(auth, "prepaid_cents", 0) or 0
+    if key and cents:
+        return billing.hold_prepaid(hold_id, key, cents)
+    return False
+
+
 def _failed_audit_response(auth, detail: str) -> JSONResponse:
     """The 502 every paid route answers with when the audit could not run:
     nothing charged, and anything the payer is owed regardless -- the prepaid
@@ -5515,6 +5553,11 @@ if workers is not None:
             bill=_bill,
             deliver=_deliver,
             failed_response=_failed_audit_response,
+            not_charged=_not_charged,
+            hold_payment=_hold_for_later,
+            close_hold=billing.close_prepaid_hold,
+            refund_hold=billing.refund_prepaid_hold,
+            attach_key=_attach_issued_key,
             with_page=browser_pool.with_page,
             goto_guarded=getattr(audits, "goto_guarded", None),
             # The SAME rule the audit routes refuse targets with. Injected

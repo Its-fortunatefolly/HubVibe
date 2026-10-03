@@ -13,6 +13,7 @@ Both run through the adapter's dry-run gate, so neither can scan more than
 the configured ceiling no matter what SQL is produced.
 """
 
+import math
 import re
 
 from .. import runtime
@@ -30,15 +31,36 @@ _SQL_AUTHOR = (
 )
 
 
+def _scan_ceiling(payload: dict):
+    """The caller's optional `max_scan_gib`: absent, or a positive number,
+    capped to the node's own ceiling. A buyer can lower the ceiling for their
+    own query and can never raise it: the value used to be passed on as sent,
+    so a $0.50 query could run with a ceiling of 100,000 GiB."""
+    value = payload.get("max_scan_gib")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise runtime.InvalidRequest("`max_scan_gib` must be a number.")
+    ceiling = bigquery.node_ceiling_gib()
+    try:
+        number = float(value)
+    except OverflowError:  # an integer too large to be a float: far above any ceiling
+        return ceiling
+    if not math.isfinite(number) or number <= 0:
+        raise runtime.InvalidRequest("`max_scan_gib` must be a positive number of GiB.")
+    return min(number, ceiling)
+
+
+def precheck_scan_ceiling(payload: dict) -> None:
+    """Before the payment gate: a ceiling that is not a positive number is
+    the caller's mistake, refused free and before any payment is read."""
+    _scan_ceiling(payload)
+
+
 async def run_sql(ctx, payload: dict) -> dict:
     """Execute caller-supplied read-only SQL under the byte ceiling."""
     sql = bigquery.validate_sql(payload.get("sql"))
-    max_gib = payload.get("max_scan_gib")
-    if max_gib is not None:
-        try:
-            max_gib = float(max_gib)
-        except (TypeError, ValueError):
-            raise runtime.InvalidRequest("`max_scan_gib` must be a number.")
+    max_gib = _scan_ceiling(payload)
 
     async def call(provider):
         return await provider.query(sql, max_gib=max_gib)
@@ -181,7 +203,7 @@ async def forecast(ctx, payload: dict) -> dict:
         f"horizon => {horizon}{id_cols_sql})")
 
     async def call(provider):
-        return await provider.query_resumable(sql, max_gib=payload.get("max_scan_gib"))
+        return await provider.query_resumable(sql, max_gib=_scan_ceiling(payload))
 
     # One attempt. The caller is handed the job to collect at 22 s (deliver
     # later); a model job still running at 150 s answers "still computing".
@@ -254,7 +276,7 @@ async def detect_anomalies(ctx, payload: dict) -> dict:
         f"ORDER BY is_anomaly DESC, anomaly_probability DESC")
 
     async def call(provider):
-        return await provider.query_resumable(sql, max_gib=payload.get("max_scan_gib"))
+        return await provider.query_resumable(sql, max_gib=_scan_ceiling(payload))
 
     value = await ctx.run("detect_anomalies", bigquery.PROVIDERS, call,
                           per_attempt_seconds=_MODEL_JOB_ATTEMPT_SECONDS, max_attempts=1)
@@ -279,4 +301,6 @@ async def detect_anomalies(ctx, payload: dict) -> dict:
 
 SKILLS = {"data.query": run_sql, "data.question": answer_question,
           "data.forecast": forecast, "data.anomalies": detect_anomalies}
-PRECHECKS = {"data.question": llm_skill.validate_language}
+PRECHECKS = {"data.question": llm_skill.validate_language,
+             "data.query": precheck_scan_ceiling, "data.forecast": precheck_scan_ceiling,
+             "data.anomalies": precheck_scan_ceiling}

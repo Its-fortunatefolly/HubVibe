@@ -702,6 +702,87 @@ def refund_prepaid(api_key: str, cents: int) -> bool:
     return refunded
 
 
+# --- holds: a debit that may still have to go back ---------------------------
+#
+# A job that outlives its caller's patience is handed back to collect later
+# (workers/router.py, "deliver later") and finishes after the request that
+# paid for it has been answered. If the node is restarted or killed before it
+# finishes, the process that knew which key had been debited is gone -- so
+# the debit is written down here, in the store that holds the money, under
+# the job's call id. Whoever then closes the job (the job itself, a sweep in
+# this process, or another copy of the node) hands it back through the hold,
+# and the hold can be turned into credit exactly once.
+
+def hold_prepaid(hold_id: str, api_key: str, cents: int) -> bool:
+    """Write down a debit ALREADY taken from `api_key`, so it can be handed
+    back if the job it paid for never finishes. True if it was written."""
+    if not hold_id or not api_key or cents <= 0:
+        return False
+    try:
+        _firestore().collection("prepaid_holds").document(hold_id).set(
+            {"api_key": api_key, "cents": int(cents), "state": "held", "at": time.time()})
+        return True
+    except Exception:
+        logging.getLogger(__name__).error(
+            "could not record the hold %s for a handed-back prepaid job; if it is "
+            "interrupted, %d cents will need refunding by hand.", hold_id, cents)
+        return False
+
+
+def close_prepaid_hold(hold_id: str) -> None:
+    """The job ended and its billing is final: the hold can no longer be
+    refunded, and the key it named is forgotten. Never raises."""
+    if not hold_id:
+        return
+    try:
+        ref = _firestore().collection("prepaid_holds").document(hold_id)
+
+        def _close(transaction):
+            snapshot = ref.get(transaction=transaction)
+            if snapshot.exists and snapshot.to_dict().get("state") == "held":
+                transaction.set(ref, {"state": "closed", "at": time.time()})
+
+        _run_transactional(_close)
+    except Exception:
+        logging.getLogger(__name__).error("could not close the prepaid hold %s", hold_id)
+
+
+def refund_prepaid_hold(hold_id: str) -> Optional[bool]:
+    """Hand a held debit back to its key. True only for the one call that
+    did it: a hold that was closed, already refunded, or never written gives
+    nothing (False), so no path can refund the same debit twice. None when
+    the key store could not answer: the hold is then still as it was, and
+    the buyer may still be owed it. Never raises."""
+    if not hold_id:
+        return False
+    try:
+        db = _firestore()
+        hold_ref = db.collection("prepaid_holds").document(hold_id)
+
+        def _refund(transaction):
+            snapshot = hold_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return False
+            hold = snapshot.to_dict()
+            if hold.get("state") != "held":
+                return False
+            key_ref = db.collection("api_keys").document(hold["api_key"])
+            key = key_ref.get(transaction=transaction)
+            if not key.exists or key.to_dict().get("prepaid_balance_cents") is None:
+                return False
+            transaction.update(key_ref, {
+                "prepaid_balance_cents": int(key.to_dict()["prepaid_balance_cents"]) + int(hold["cents"])})
+            transaction.set(hold_ref, {"state": "refunded", "cents": int(hold["cents"]), "at": time.time()})
+            return True
+
+        return bool(_run_transactional(_refund))
+    except Exception as exc:
+        logging.getLogger(__name__).error(
+            "the prepaid hold %s could not be read or refunded (%s); if it is still held, "
+            "the buyer is owed it.", hold_id, type(exc).__name__)
+        return None
+
+
 _prepaid_store_warned = False
 
 
