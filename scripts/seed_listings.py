@@ -111,6 +111,7 @@ ROUTES = [
     ("utility", "/work/ip/lookup", {"ip": "8.8.8.8"}),
     ("utility", "/work/domain/dns", {"domain": "github.com"}),
     ("utility", "/work/identity/check", {"name": "Jane Smith", "email": "jane@stripe.com", "phone": "+44 20 7031 3000", "ip": "8.8.8.8", "country": "GB"}),
+    ("standard", "/work/lead/qualify", {"url": "https://example.com"}),
     ("standard", "/work/commerce/shipping", {"url": "https://www.allbirds.com/products/mens-wool-runners", "variant": "size 10", "ship_to": {"country": "US", "province": "NY", "postal_code": "10001"}}),
     ("standard", "/work/travel/hotels", {"place": "hotel near Shibuya station Tokyo", "days_ahead": 30, "nights": 2, "max_hotels": 3}),
     ("standard", "/work/travel/flights", {"origin": "LHR", "destination": "JFK", "days_ahead": 30, "max_offers": 3}),
