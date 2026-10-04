@@ -557,7 +557,22 @@ def credit_packs_available() -> bool:
     return stripe_key_looks_valid()
 
 
-def create_credit_checkout(pack: str, success_url: str, cancel_url: str) -> str:
+_SOURCE_TAG = __import__("re").compile(r"^[A-Za-z0-9._-]{1,40}$")
+
+
+def clean_source_tag(value) -> Optional[str]:
+    """A marketing source tag such as "ads" or "google-ads-agency", from the
+    ?ref= of the link a buyer arrived on. Letters, digits, dot, dash and
+    underscore only, at most 40 characters; anything else is dropped. It is
+    a label for counting where sales come from, never a person's data."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if _SOURCE_TAG.match(value) else None
+
+
+def create_credit_checkout(pack: str, success_url: str, cancel_url: str,
+                           source: Optional[str] = None) -> str:
     """Open Stripe's hosted payment window for one credit pack; returns its URL."""
     offer = CREDIT_PACKS.get(str(pack))
     if offer is None:
@@ -575,7 +590,8 @@ def create_credit_checkout(pack: str, success_url: str, cancel_url: str) -> str:
                 },
             },
         }],
-        metadata={"kind": "credit_pack", "pack": str(pack), "credit_cents": str(offer["credit_cents"])},
+        metadata={"kind": "credit_pack", "pack": str(pack), "credit_cents": str(offer["credit_cents"]),
+                  **({"source": clean_source_tag(source)} if clean_source_tag(source) else {})},
         success_url=f"{success_url}?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=cancel_url,
     )
@@ -616,6 +632,7 @@ def fulfill_credit_session(session_id: str) -> Optional[dict]:
             "prepaid_balance_cents": credit_cents,
         })
         record = {"api_key": api_key, "credit_cents": credit_cents, "pack": metadata.get("pack"),
+                  "source": clean_source_tag(metadata.get("source")),
                   "amount_cents": int(getattr(session, "amount_total", 0) or 0),
                   "issued_at": time.time()}
         transaction.set(record_ref, record)

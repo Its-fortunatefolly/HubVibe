@@ -5018,6 +5018,9 @@ def report_page(session_id: str):
 
 class CreditCheckoutRequest(BaseModel):
     pack: str
+    # Where the buyer came from (the ?ref= of their link, e.g. "ads"), so the
+    # purchase book can tell which marketing brought each sale. Optional.
+    source: Optional[str] = None
 
 
 # The human front door ("Get started" on the homepage): buy a credit pack by
@@ -5040,7 +5043,8 @@ def start_credit_checkout(payload: CreditCheckoutRequest):
     base = PUBLIC_BASE_URL.rstrip("/")
     try:
         checkout_url = billing.create_credit_checkout(
-            payload.pack, success_url=f"{base}/start/success", cancel_url=f"{base}/start")
+            payload.pack, success_url=f"{base}/start/success", cancel_url=f"{base}/start",
+            source=payload.source)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:  # Stripe unreachable or refused: say so, never a bare 500

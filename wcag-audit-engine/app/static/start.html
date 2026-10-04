@@ -84,6 +84,14 @@ footer a { color: var(--dim); }
 <footer>&copy; 2026 HubVibe &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="mailto:hubvibe@hubvibe-io.com">hubvibe@hubvibe-io.com</a></footer>
 </main>
 <script>
+// The ?ref= of the link the buyer arrived on (for example ?ref=ads), so we can
+// count which marketing brings sales. Only a short label is kept.
+function sourceTag() {
+  try {
+    var ref = new URLSearchParams(window.location.search).get("ref") || "";
+    return /^[A-Za-z0-9._-]{1,40}$/.test(ref) ? ref : null;
+  } catch (e) { return null; }
+}
 document.querySelectorAll("button[data-pack]").forEach(function (button) {
   button.addEventListener("click", async function () {
     var error = document.getElementById("error");
@@ -93,7 +101,7 @@ document.querySelectorAll("button[data-pack]").forEach(function (button) {
       var response = await fetch("/billing/credits", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({pack: button.dataset.pack})
+        body: JSON.stringify({pack: button.dataset.pack, source: sourceTag()})
       });
       var data = await response.json();
       if (response.ok && data.checkout_url) {
