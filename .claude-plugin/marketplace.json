@@ -1,0 +1,16 @@
+{
+  "name": "hubvibe",
+  "description": "HubVibe's pay-per-call tools for Claude Code, paid from a prepaid HubVibe credit key.",
+  "owner": {
+    "name": "HubVibe",
+    "email": "hubvibe@hubvibe-io.com",
+    "url": "https://hubvibe-io.com"
+  },
+  "plugins": [
+    {
+      "name": "hubvibe",
+      "source": "./plugins/hubvibe",
+      "description": "Qualify a business website as a sales lead, audit websites, verify emails, look up companies, screen sanctions, search the web, read pages, and get stock, SEC, crypto and news data. Each call is charged from your prepaid HubVibe credit."
+    }
+  ]
+}
