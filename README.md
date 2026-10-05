@@ -214,7 +214,11 @@ Three rails, all fail-closed — no valid credential means no job runs:
   Base Account and other EIP-7702 / ERC-4337 wallets that x402 facilitators
   reject) can buy through this rail. It is advertised in every 402 under
   `other_rails` and in the `WWW-Authenticate: Payment` challenge.
-- **`X-API-Key`** — prepaid key; in the code, not enabled on the public node.
+- **`X-API-Key`** — prepaid key, live on the public node. Buy credit by card
+  at https://hubvibe-io.com/start (credit packs, no subscription) or with a
+  USDC transfer on Solana (`solana_topup` in the agent manifest), then send
+  the key as `X-API-Key` on any paid route, including tool calls to `/mcp`.
+  Each call is debited at its listed price; a call that fails is refunded.
 
 Read `accepts` and `other_rails` in any 402, or `payment` in the agent
 manifest — both list only what actually settles on that deployment. Workers
