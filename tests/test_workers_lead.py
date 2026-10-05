@@ -12,6 +12,7 @@ HTTP + MCP; the static manifests.
 """
 
 import asyncio
+import base64
 import importlib.util
 import json
 import re
@@ -458,6 +459,21 @@ def test_the_tool_is_listed_and_the_static_manifests_match(app_module, client):
     row = next(w for w in index["workers"] if w["name"] == WORKER)
     assert row["price_usd"] == 0.25 and row["max_seconds"] == 20 and row["composes"] == ["domain.dns", "company.enrich"]
 
+
+
+def test_the_price_quote_keeps_the_example_answer_with_room_for_a_second_rail(app_module, client):
+    """Coinbase's catalog reads the example answer from the PAYMENT-REQUIRED
+    header, which is cut to fit HEADER_BUDGET. Measured live 2026-10-05: with
+    the Base and Solana rails both advertised, this tool's example did not fit,
+    was cut, and Coinbase's validator reported "Missing output example". The
+    quote must keep it with room left for the Solana rail (388 bytes live)."""
+    response = client.post(PATH, json={"url": "https://example.com"})
+    assert response.status_code == 402
+    header = response.headers["payment-required"]
+    challenge = json.loads(base64.b64decode(header + "==="))
+    output = challenge["extensions"]["bazaar"]["info"]["output"]
+    assert output.get("example"), "the example answer was cut from the price quote"
+    assert len(header) + 500 <= app_module.x402_payments.HEADER_BUDGET, len(header)
 
 
 def test_company_names_are_decoded_in_this_jobs_answer_only():

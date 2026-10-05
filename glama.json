@@ -23508,7 +23508,7 @@
                     "type": "string",
                     "description": "What these signals are and are not.",
                     "examples": [
-                      "Static signals read from the HTML only; not a WCAG audit. The full browser WCAG audit (axe-core on the rendered page) is POST /audit/wcag."
+                      "Static HTML signals only; the full WCAG audit is POST /audit/wcag."
                     ]
                   },
                   "full_audit": {
@@ -23553,7 +23553,7 @@
                     ],
                     "description": "The page's meta generator, as written.",
                     "examples": [
-                      "WordPress 6.6"
+                      null
                     ]
                   },
                   "server": {
@@ -23573,7 +23573,7 @@
                     ],
                     "description": "X-Powered-By header.",
                     "examples": [
-                      "PHP/8.2"
+                      null
                     ]
                   },
                   "analytics": {
@@ -23588,8 +23588,7 @@
                     "description": "Analytics tags found.",
                     "examples": [
                       [
-                        "Google Analytics",
-                        "Google Tag Manager"
+                        "Google Analytics"
                       ]
                     ]
                   },
@@ -23646,7 +23645,7 @@
                     "type": "string",
                     "description": "Where the detection comes from.",
                     "examples": [
-                      "Detected from the page's own HTML and response headers only; no ad platform or registry was asked."
+                      "The page's own HTML and response headers only."
                     ]
                   }
                 },
@@ -23793,7 +23792,7 @@
                         ],
                         "description": "sp= policy.",
                         "examples": [
-                          "reject"
+                          null
                         ]
                       },
                       "percent": {
@@ -23813,7 +23812,7 @@
                         ],
                         "description": "rua= address.",
                         "examples": [
-                          "mailto:dmarc@example.com"
+                          null
                         ]
                       }
                     },
@@ -23861,7 +23860,7 @@
                     ],
                     "description": "Registered legal name.",
                     "examples": [
-                      "EXAMPLE, INC."
+                      null
                     ]
                   },
                   "description": {
@@ -23986,7 +23985,7 @@
                         ],
                         "description": "Registered address.",
                         "examples": [
-                          "1 Main St, Austin, 78701"
+                          null
                         ]
                       }
                     },
@@ -24028,7 +24027,7 @@
                         ],
                         "description": "facebook account.",
                         "examples": [
-                          "https://www.facebook.com/example"
+                          null
                         ]
                       },
                       "instagram": {
@@ -24124,9 +24123,7 @@
                     },
                     "description": "Sources that answered.",
                     "examples": [
-                      [
-                        "Company website (self-declared)"
-                      ]
+                      []
                     ]
                   },
                   "notes": {
@@ -24195,8 +24192,7 @@
                 "examples": [
                   [
                     "No meta description",
-                    "3 images have no alt text",
-                    "No Meta Pixel, Google Ads, TikTok or LinkedIn tag found"
+                    "3 images have no alt text"
                   ]
                 ]
               },
@@ -24249,7 +24245,7 @@
                 "type": "string",
                 "description": "The published scoring rule, so the number can be checked by hand.",
                 "examples": [
-                  "Fixed points per finding, summed and capped at 100; higher means more for an agency to fix."
+                  "Fixed points per finding, summed and capped at 100."
                 ]
               },
               "sections_failed": {
@@ -24272,13 +24268,13 @@
                   "type": "string",
                   "description": "A source used.",
                   "examples": [
-                    "The page itself: one plain HTTP GET of the URL (HTML and response headers), no browser"
+                    "One plain HTTP GET of the page, no browser"
                   ]
                 },
                 "description": "Where the result comes from.",
                 "examples": [
                   [
-                    "The page itself: one plain HTTP GET of the URL (HTML and response headers), no browser"
+                    "One plain HTTP GET of the page, no browser"
                   ]
                 ]
               },
