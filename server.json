@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Its-fortunatefolly/hubvibe",
   "title": "HubVibe: Pay-per-Call Agent Tools: Web Search, Email Verify, KYC Screening, Stocks, Crypto, News",
-  "description": "Web search, email verify, KYC screening, sanctions, stocks, SEC, crypto, news: 63 pay-per-call tools",
-  "version": "1.31.1",
+  "description": "70+ pay-per-call tools for AI agents: web search, email verify, KYC, stocks, crypto, news, data",
+  "version": "1.31.2",
   "icons": [
     {
       "src": "https://hubvibe-io.com/icon.png",
@@ -32,7 +32,7 @@
       "headers": [
         {
           "name": "X-API-Key",
-          "description": "Optional prepaid key. Tool discovery is free; each audit is billed per call over HTTP 402 on the rails listed in https://hubvibe-io.com/.well-known/agent.json. The 65 /work capabilities and every price are in https://hubvibe-io.com/openapi.json.",
+          "description": "Optional prepaid key. Tool discovery is free; each call is billed over HTTP 402 on the rails listed in https://hubvibe-io.com/.well-known/agent.json. All 70+ tools and every price are in https://hubvibe-io.com/openapi.json.",
           "isRequired": false,
           "isSecret": true
         }
