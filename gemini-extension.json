@@ -1,6 +1,6 @@
 {
   "name": "hubvibe",
-  "version": "1.31.2",
+  "version": "1.31.3",
   "description": "HubVibe: pay-per-call tools for agents over MCP: web search and cited research, email verification, company enrichment, KYC and sanctions screening, stock prices, SEC filings and insider trades, crypto and prediction-market odds, news in any language, economic and open data, places, weather and site audits. The tool list is free; each call is priced.",
   "mcpServers": {
     "hubvibe": {

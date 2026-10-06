@@ -3,7 +3,7 @@
   "name": "io.github.Its-fortunatefolly/hubvibe",
   "title": "HubVibe: Pay-per-Call Agent Tools: Web Search, Email Verify, KYC Screening, Stocks, Crypto, News",
   "description": "70+ pay-per-call tools for AI agents: web search, email verify, KYC, stocks, crypto, news, data",
-  "version": "1.31.2",
+  "version": "1.31.3",
   "icons": [
     {
       "src": "https://hubvibe-io.com/icon.png",
@@ -32,7 +32,7 @@
       "headers": [
         {
           "name": "X-API-Key",
-          "description": "Optional prepaid key. Tool discovery is free; each call is billed over HTTP 402 on the rails listed in https://hubvibe-io.com/.well-known/agent.json. All 70+ tools and every price are in https://hubvibe-io.com/openapi.json.",
+          "description": "Optional prepaid key. Buy one by card at https://hubvibe-io.com/start ($25, $100 or $500 of credit; the key is shown when the payment clears). Without a key, each call is paid over HTTP 402 on the rails in https://hubvibe-io.com/.well-known/agent.json. Tool discovery is free; all 70+ tools and every price are in https://hubvibe-io.com/openapi.json.",
           "isRequired": false,
           "isSecret": true
         }
