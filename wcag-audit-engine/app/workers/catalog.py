@@ -1854,7 +1854,9 @@ _EXAMPLE_VALUES = {
     "company": "Anthropic",
     "method": "eth_blockNumber",
     "currency": "USD",
-    "slug": "example-prediction-market-slug",
+    # A real, open Polymarket market that stays open until 2028-11-08, so the
+    # example runs: a made-up slug failed a paying tester's check (2026-10-06).
+    "slug": "will-lebron-james-win-the-2028-us-presidential-election",
     "origin": "San Francisco, CA",
     "destination": "Oakland, CA",
     "location": "San Francisco, CA",
