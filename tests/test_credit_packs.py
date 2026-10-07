@@ -16,6 +16,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import stripe
+
+# The real class, captured before any fixture swaps Session out for the fake.
+_REAL_SESSION = stripe.checkout.Session
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAIN_PATH = REPO_ROOT / "wcag-audit-engine" / "app" / "main.py"
@@ -68,7 +72,10 @@ class _Stripe:
     def retrieve(self, sid):
         if sid not in self.sessions:
             raise RuntimeError("No such checkout.session")
-        return self.sessions[sid]
+        # The real library's object, not the namespace: stripe-python 15's
+        # StripeObject is no longer a dict, and a fake that hands back plain
+        # dicts is how the first real card payment came back without its key.
+        return _REAL_SESSION.construct_from(dict(vars(self.sessions[sid])), "sk_test_x")
 
     def pay(self, sid):
         self.sessions[sid].status = "complete"

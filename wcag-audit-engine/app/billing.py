@@ -598,6 +598,16 @@ def create_credit_checkout(pack: str, success_url: str, cancel_url: str,
     return session.url
 
 
+def _plain_dict(value) -> dict:
+    """A plain dict of a Stripe object's fields, or of a dict. stripe-python
+    15 dropped StripeObject's dict base class, so dict(obj) raises instead --
+    which is how the first real card payment came back without its key."""
+    if value is None:
+        return {}
+    to_dict = getattr(value, "to_dict", None)
+    return dict(to_dict()) if callable(to_dict) else dict(value)
+
+
 def fulfill_credit_session(session_id: str) -> Optional[dict]:
     """The key for a paid credit-pack checkout, minted exactly once.
 
@@ -609,7 +619,7 @@ def fulfill_credit_session(session_id: str) -> Optional[dict]:
     if not isinstance(session_id, str) or not session_id.startswith("cs_") or len(session_id) > 200:
         raise ValueError("Not a checkout session id.")
     session = stripe.checkout.Session.retrieve(session_id)
-    metadata = dict(getattr(session, "metadata", None) or {})
+    metadata = _plain_dict(getattr(session, "metadata", None))
     if metadata.get("kind") != "credit_pack":
         raise ValueError("That checkout is not a HubVibe credit pack.")
     if getattr(session, "status", None) != "complete" or getattr(session, "payment_status", None) != "paid":
