@@ -3054,6 +3054,20 @@ async def ard_manifest():
     )
 
 
+# brick.blue (an agent registry) lets a domain owner claim the listings its
+# crawler built for that domain by publishing the owner's ed25519 public key
+# here. Only the PUBLIC half lives in the code; the private half is kept off
+# the node (owner's Secret Manager). Not in the OpenAPI document, so no
+# catalog, quote or listing changes. The key is not put in the _agent DNS
+# record on purpose: AID clients must then run an endpoint-proof handshake.
+_BRICK_BLUE_KEY = "7Z24L7awCNrG77RFA9js8oBadBXttoiLRfaqKG1tRkyu"
+
+
+@app.get("/.well-known/brick-blue.json", include_in_schema=False)
+async def brick_blue_key():
+    return {"key": _BRICK_BLUE_KEY, "owner": f"key:{_BRICK_BLUE_KEY}"}
+
+
 @app.get("/.well-known/x402", tags=["discovery"])
 async def x402_discovery():
     """x402scan's discovery fan-out: `{"version": 1, "resources": [...]}`.
