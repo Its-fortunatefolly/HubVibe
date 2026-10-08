@@ -145,7 +145,7 @@ API, the 402 and the manifests, unchanged.
 | Segment | Customers | Price | MRR |
 |---|---|---|---|
 | Deadline Program (health + gov) | 120 | $799 | $95.9k |
-| Agency Partner | 100 | $499 | $49,900 |
+| Agency Partner | 100 | $499 | 49,900 USD |
 | Evidence Monitor | 150 | $199 | $29.9k |
 | **Total** | **370** | | **$175.7k ≈ $2.1M ARR** |
 
