@@ -13,16 +13,29 @@ and mostly prepaid annually.
 | Fact | Evidence |
 |---|---|
 | Engineering is done: 70 paid jobs, all rails live (x402 Base/Solana, MPP evm/Stripe/Tempo, prepaid card key), blue/green deploys, verifiable receipts | `/health`, `scripts/payment-status.sh`, 2026-10-08 |
-| Revenue so far is close to zero: $11.49 USDC across both wallets, and part of that is the node's own listing refreshes | Base, read 2026-10-08 (see §1a) |
+| Outside revenue is at most $50.77 in 45 days (about $34/month); $11.49 USDC is in the wallets now | Base logs, read 2026-10-08 (see §1a) |
 | The one recurring product was switched off on 2026-09-06 ("why would anyone pay that when the scans are 5 cents") | `wcag-audit-engine/app/billing.py:148` |
 | Outbound tooling already exists: `prospect_scan.py` and `draft_outreach.py` | `scripts/` |
 
 ### 1a. Inflow breakdown (who actually paid)
 
-Wallet balances on 2026-10-08: primary $10.56, alternate $0.93. A sweep of
-every USDC transfer into the pay-to wallet over the last 45 days, grouped by
-sender to separate outside buyers from self-tests, is running and will be
-added here.
+Every USDC transfer into the pay-to wallet over the 45 days to 2026-10-08,
+read from Base logs and grouped by sender:
+
+| Sender | Transfers | USDC | What it is |
+|---|---|---|---|
+| `0x104f…bdd35` | 250 | $266.77 | **Our own payer wallet** (listing refreshes, self-tests; `PURCHASE_INTERNAL_PAYERS`) |
+| `0x0780…560f` | 1 | $80.00 | One-off funding transfer, not a sale |
+| `0x1231…f4eae` | 1 | $2.97 | LI.FI bridge, our own funds moving |
+| `0x3755…38c0` | 3 | $2.50 | Owner's alternate wallet |
+| `0x4b5c…34f6` | 11 | $27.06 | Unidentified: possible buyer |
+| `0x72c5…159b` | 115 | $17.25 | Unidentified: $0.15 calls, a bundle/CI-style buyer, active today |
+| 10 other senders | 58 | $6.46 | Unidentified, mostly cents |
+| **Total in** | **439** | **$403.01** | |
+
+**Revenue from senders not identified as ours: at most $50.77 in 45 days**,
+about $34 a month. That is an upper bound: some of it may still be our own
+wallets. The wallet holds $10.56 because the rest was moved out.
 
 ### 1b. Why agent payments can't reach millions in 12 months
 
