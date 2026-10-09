@@ -551,9 +551,9 @@ CREDIT_PACKS = {
 
 
 def credit_packs_available() -> bool:
-    """A card pack can be sold here: a usable Stripe secret key. Nothing else
-    is needed -- no webhook, no plan prices: the key is issued when the buyer's
-    own success page confirms the payment with Stripe."""
+    """A card pack can be sold here: a usable Stripe secret key. The key is
+    released the moment Stripe reports the payment (POST /billing/webhook),
+    and the buyer's success page shows it too, whichever comes first."""
     return stripe_key_looks_valid()
 
 
@@ -649,7 +649,99 @@ def fulfill_credit_session(session_id: str) -> Optional[dict]:
         minted.update(record, new=True)
 
     _run_transactional(_redeem)
+    details = getattr(session, "customer_details", None)
+    # Where the key is mailed. Read from Stripe on every call, never stored:
+    # the purchase book keeps no card or email detail.
+    minted["buyer_email"] = getattr(details, "email", None) if details is not None else None
     return minted
+
+
+def credit_webhook_ready() -> bool:
+    """Stripe can tell this node the moment a card pack is paid: a usable
+    secret key and the signing secret of the endpoint Stripe posts to. Unlike
+    is_configured(), no subscription price is needed -- a pack is not a plan."""
+    return bool(stripe_key_looks_valid() and _WEBHOOK_SECRET)
+
+
+# The key goes to the buyer by email the moment the payment clears, so a
+# closed tab, a slow bank or a lost link never costs anyone their credit.
+# Plain SMTP to the mailbox host (Hostinger: smtp.hostinger.com, 465, SSL);
+# unset, nothing is mailed and the success page still shows the key.
+_MAIL_SMTP_HOST = (os.environ.get("MAIL_SMTP_HOST") or "").strip() or None
+_MAIL_SMTP_PORT = int((os.environ.get("MAIL_SMTP_PORT") or "465").strip() or 465)
+_MAIL_SMTP_USER = (os.environ.get("MAIL_SMTP_USER") or "").strip() or None
+_MAIL_SMTP_PASSWORD = os.environ.get("MAIL_SMTP_PASSWORD") or None
+_MAIL_FROM = (os.environ.get("MAIL_FROM") or "").strip() or _MAIL_SMTP_USER
+
+
+def key_mail_ready() -> bool:
+    return bool(_MAIL_SMTP_HOST and _MAIL_SMTP_USER and _MAIL_SMTP_PASSWORD and _MAIL_FROM)
+
+
+def key_email_text(redeemed: dict) -> tuple:
+    """(subject, body) of the email that carries a card pack's key."""
+    credit = int(redeemed.get("credit_cents") or 0) / 100
+    key = redeemed["api_key"]
+    subject = f"Your HubVibe key (${credit:,.2f} credit)"
+    body = (
+        "Thank you for your purchase.\n\n"
+        f"Your HubVibe key: {key}\n"
+        f"Credit: ${credit:,.2f}\n\n"
+        "Send it as the X-API-Key header on any HubVibe tool. For example:\n\n"
+        "curl -X POST https://hubvibe-io.com/work/market/quote \\\n"
+        f"  -H \"X-API-Key: {key}\" \\\n"
+        "  -H \"Content-Type: application/json\" \\\n"
+        "  -d '{\"product_id\": \"BTC-USD\"}'\n\n"
+        "Keep this key private: anyone who has it can spend your credit.\n"
+        "Questions? Reply to this email.\n\n"
+        "HubVibe\nhttps://hubvibe-io.com\n"
+    )
+    return subject, body
+
+
+def send_key_email(to_address: str, redeemed: dict) -> bool:
+    """Mail a card pack's key to its buyer. False when mail is not set up
+    here; raises when the mail server refuses, so the caller can retry."""
+    if not key_mail_ready() or not to_address:
+        return False
+    import smtplib
+    import ssl
+    from email.message import EmailMessage
+    from email.utils import formatdate, make_msgid
+
+    subject, body = key_email_text(redeemed)
+    message = EmailMessage()
+    message["From"] = f"HubVibe <{_MAIL_FROM}>"
+    message["To"] = to_address
+    message["Subject"] = subject
+    message["Date"] = formatdate(localtime=False)
+    message["Message-ID"] = make_msgid(domain=_MAIL_FROM.split("@")[-1])
+    message.set_content(body)
+    context = ssl.create_default_context()
+    if _MAIL_SMTP_PORT == 465:
+        with smtplib.SMTP_SSL(_MAIL_SMTP_HOST, _MAIL_SMTP_PORT, context=context, timeout=30) as smtp:
+            smtp.login(_MAIL_SMTP_USER, _MAIL_SMTP_PASSWORD)
+            smtp.send_message(message)
+    else:
+        with smtplib.SMTP(_MAIL_SMTP_HOST, _MAIL_SMTP_PORT, timeout=30) as smtp:
+            smtp.starttls(context=context)
+            smtp.login(_MAIL_SMTP_USER, _MAIL_SMTP_PASSWORD)
+            smtp.send_message(message)
+    return True
+
+
+def mail_credit_key_once(session_id: str, redeemed: dict) -> bool:
+    """Email a pack's key unless it already went out. True once it has.
+    Stripe repeats a notice it thinks failed, so this must be safe to call
+    again: the record remembers when the key was mailed."""
+    record_ref = _firestore().collection("credit_sessions").document(session_id)
+    existing = record_ref.get()
+    if existing.exists and (existing.to_dict() or {}).get("emailed_at"):
+        return True
+    if not send_key_email(redeemed.get("buyer_email"), redeemed):
+        return False
+    record_ref.set({"emailed_at": time.time()}, merge=True)
+    return True
 
 
 def spend_prepaid(api_key: str, cents: int) -> bool:

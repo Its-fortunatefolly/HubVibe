@@ -66,6 +66,7 @@ class _Stripe:
         self.sessions[sid] = SimpleNamespace(
             id=sid, status="open", payment_status="unpaid",
             metadata=kwargs.get("metadata") or {},
+            customer_details={"email": "buyer@example.com"},
             amount_total=kwargs["line_items"][0]["price_data"]["unit_amount"])
         return SimpleNamespace(url=f"https://checkout.stripe.com/c/pay/{sid}", id=sid)
 
@@ -172,14 +173,16 @@ def test_each_pack_is_booked_once_without_card_data(app, stripe_fake):
     assert "bonus" in note and key_hash and len(key_hash) < 100
 
 
-def test_an_old_key_is_not_shown_again(app, stripe_fake, monkeypatch):
+def test_the_buyers_own_link_shows_their_key_any_time(app, stripe_fake, monkeypatch):
+    """No lockout: a buyer who comes back weeks later still gets their key."""
     client = _client(app)
     client.post("/billing/credits", json={"pack": "25"})
     stripe_fake.pay("cs_test_1")
-    client.get("/billing/credits/key?session_id=cs_test_1")
+    first = client.get("/billing/credits/key?session_id=cs_test_1").json()["api_key"]
     real_time = time.time
-    monkeypatch.setattr(app.time, "time", lambda: real_time() + app.CREDIT_KEY_REVEAL_SECONDS + 60)
-    assert client.get("/billing/credits/key?session_id=cs_test_1").status_code == 410
+    monkeypatch.setattr(app.time, "time", lambda: real_time() + 60 * 24 * 3600)
+    later = client.get("/billing/credits/key?session_id=cs_test_1")
+    assert later.status_code == 200 and later.json()["api_key"] == first
 
 
 def test_the_homepage_sends_people_to_the_payment_window():
@@ -221,3 +224,174 @@ def test_the_start_page_passes_the_ref_of_the_link():
     start = (STATIC / "start.html").read_text()
     assert "sourceTag()" in start and 'get("ref")' in start
     assert "source label of the link" in (STATIC / "privacy.html").read_text()
+
+
+# --- released on purchase: Stripe's notice issues and mails the key ---------
+
+WEBHOOK_SECRET = "whsec_test_" + "s" * 24
+
+
+@pytest.fixture
+def notice_app(monkeypatch, tmp_path):
+    monkeypatch.setenv("KEY_STORE", "sqlite")
+    monkeypatch.setenv("KEY_STORE_SQLITE_PATH", str(tmp_path / "keys.db"))
+    monkeypatch.setenv("WORKER_LEDGER_PATH", str(tmp_path / "workers.db"))
+    monkeypatch.setenv("PURCHASE_BOOK_PATH", str(tmp_path / "purchases.db"))
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_" + "x" * 24)
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET)
+    monkeypatch.setenv("MAIL_SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("MAIL_SMTP_USER", "hubvibe@hubvibe-io.com")
+    monkeypatch.setenv("MAIL_SMTP_PASSWORD", "mail-password")
+    monkeypatch.setenv("SANCTIONS_PREFETCH", "0")
+    monkeypatch.setenv("A2A_TASKS_PATH", "")
+    for var in ("AUDIT_API_KEY", "X402_FACILITATOR_URL", "X402_PAY_TO_ADDRESS", "MAIL_SMTP_PORT", "MAIL_FROM"):
+        monkeypatch.delenv(var, raising=False)
+    _drop_cache()
+    spec = importlib.util.spec_from_file_location("wcag_main_credit_notice", MAIN_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    yield module
+    _drop_cache()
+
+
+class _Mailbox:
+    """Stands in for smtplib.SMTP_SSL; `fail` makes the server refuse."""
+
+    def __init__(self):
+        self.sent, self.fail = [], False
+
+    def factory(self, host, port, context=None, timeout=None):
+        box = self
+
+        class _Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def login(self, user, password):
+                assert (host, port, user, password) == (
+                    "smtp.example.test", 465, "hubvibe@hubvibe-io.com", "mail-password")
+
+            def send_message(self, message):
+                if box.fail:
+                    raise OSError("mail server refused")
+                box.sent.append(message)
+
+        return _Conn()
+
+
+@pytest.fixture
+def notice_stripe(notice_app, monkeypatch):
+    fake = _Stripe()
+    monkeypatch.setattr(notice_app.billing.stripe.checkout, "Session",
+                        SimpleNamespace(create=fake.create, retrieve=fake.retrieve))
+    return fake
+
+
+@pytest.fixture
+def mailbox(monkeypatch):
+    import smtplib
+
+    box = _Mailbox()
+    monkeypatch.setattr(smtplib, "SMTP_SSL", box.factory)
+    return box
+
+
+def _notice(client, session_id, event_type="checkout.session.completed", secret=WEBHOOK_SECRET):
+    import hashlib
+    import hmac
+    import json
+
+    payload = json.dumps({
+        "id": "evt_test", "object": "event", "type": event_type,
+        "data": {"object": {"id": session_id, "object": "checkout.session",
+                            "metadata": {"kind": "credit_pack"}}},
+    })
+    stamp = int(time.time())
+    signature = hmac.new(secret.encode(), f"{stamp}.{payload}".encode(), hashlib.sha256).hexdigest()
+    return client.post("/billing/webhook", content=payload,
+                       headers={"stripe-signature": f"t={stamp},v1={signature}",
+                                "content-type": "application/json"})
+
+
+def test_payment_releases_and_mails_the_key_without_the_buyers_page(notice_app, notice_stripe, mailbox):
+    client = _client(notice_app)
+    client.post("/billing/credits", json={"pack": "100"})
+    notice_stripe.pay("cs_test_1")
+    assert _notice(client, "cs_test_1").status_code == 200
+    assert len(mailbox.sent) == 1
+    message = mailbox.sent[0]
+    assert message["To"] == "buyer@example.com"
+    assert message["From"] == "HubVibe <hubvibe@hubvibe-io.com>"
+    assert message["Subject"] == "Your HubVibe key ($105.00 credit)"
+    # The page shows the very key that was mailed, and it carries the credit.
+    key = client.get("/billing/credits/key?session_id=cs_test_1").json()["api_key"]
+    assert key in message.get_content()
+    assert notice_app.billing.lookup_key(key)["prepaid_balance_cents"] == 10500
+    rows = notice_app.purchase_book.connect().execute("SELECT product FROM purchases").fetchall()
+    assert [tuple(row) for row in rows] == [("credit_pack_100",)], "booked once, by whichever path came first"
+
+
+def test_a_repeated_notice_issues_and_mails_nothing_new(notice_app, notice_stripe, mailbox):
+    client = _client(notice_app)
+    client.post("/billing/credits", json={"pack": "25"})
+    notice_stripe.pay("cs_test_1")
+    for _ in range(3):
+        assert _notice(client, "cs_test_1").status_code == 200
+    assert len(mailbox.sent) == 1
+    assert notice_app.purchase_book.connect().execute("SELECT COUNT(*) FROM purchases").fetchone()[0] == 1
+
+
+def test_a_slow_payment_is_released_when_it_clears(notice_app, notice_stripe, mailbox):
+    client = _client(notice_app)
+    client.post("/billing/credits", json={"pack": "25"})
+    notice_stripe.sessions["cs_test_1"].status = "complete"   # checkout done, money not yet in
+    assert _notice(client, "cs_test_1").status_code == 200
+    assert mailbox.sent == [] and client.get("/billing/credits/key?session_id=cs_test_1").status_code == 202
+    notice_stripe.pay("cs_test_1")
+    assert _notice(client, "cs_test_1", "checkout.session.async_payment_succeeded").status_code == 200
+    assert len(mailbox.sent) == 1
+
+
+def test_a_refused_email_is_retried_and_never_mints_twice(notice_app, notice_stripe, mailbox):
+    client = _client(notice_app)
+    client.post("/billing/credits", json={"pack": "25"})
+    notice_stripe.pay("cs_test_1")
+    mailbox.fail = True
+    assert _notice(client, "cs_test_1").status_code == 500, "a non-2xx makes Stripe send it again"
+    key = client.get("/billing/credits/key?session_id=cs_test_1").json()["api_key"]
+    mailbox.fail = False
+    assert _notice(client, "cs_test_1").status_code == 200
+    assert len(mailbox.sent) == 1 and key in mailbox.sent[0].get_content()
+
+
+def test_the_buyers_page_first_still_gets_the_key_mailed(notice_app, notice_stripe, mailbox):
+    client = _client(notice_app)
+    client.post("/billing/credits", json={"pack": "25"})
+    notice_stripe.pay("cs_test_1")
+    key = client.get("/billing/credits/key?session_id=cs_test_1").json()["api_key"]
+    assert _notice(client, "cs_test_1").status_code == 200
+    assert len(mailbox.sent) == 1 and key in mailbox.sent[0].get_content()
+    assert notice_app.purchase_book.connect().execute("SELECT COUNT(*) FROM purchases").fetchone()[0] == 1
+
+
+def test_a_forged_notice_is_refused(notice_app, notice_stripe, mailbox):
+    client = _client(notice_app)
+    client.post("/billing/credits", json={"pack": "25"})
+    notice_stripe.pay("cs_test_1")
+    assert _notice(client, "cs_test_1", secret="whsec_wrong_" + "w" * 20).status_code == 400
+    assert mailbox.sent == []
+    assert notice_app.purchase_book.connect().execute("SELECT COUNT(*) FROM purchases").fetchone()[0] == 0
+
+
+def test_other_notices_are_acknowledged_and_ignored(notice_app, notice_stripe, mailbox):
+    client = _client(notice_app)
+    assert _notice(client, "cs_test_9", event_type="charge.succeeded").status_code == 200
+    assert mailbox.sent == []
+
+
+def test_without_a_signing_secret_the_notice_door_stays_shut(app):
+    assert _notice(_client(app), "cs_test_1").status_code == 501
+

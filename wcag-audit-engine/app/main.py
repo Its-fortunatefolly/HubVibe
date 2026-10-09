@@ -5067,10 +5067,27 @@ def start_credit_checkout(payload: CreditCheckoutRequest):
     return {"checkout_url": checkout_url}
 
 
-# A key is shown again on reload for a day after it is issued, then never:
-# the success URL lingers in browser history and must not stay a key vending
-# machine forever.
-CREDIT_KEY_REVEAL_SECONDS = 24 * 3600
+def _book_credit_pack(redeemed: dict, session_id: str, request) -> None:
+    """Book a card pack in the purchase book the first time its key exists,
+    whichever path released it: Stripe's notice or the buyer's own page."""
+    if redeemed.get("new"):
+        sale = purchase_book.open_sale(request, price_usd=(redeemed.get("amount_cents") or 0) / 100,
+                                       route="/billing/credits", product=f"credit_pack_{redeemed.get('pack')}",
+                                       body={"session_id": session_id})
+        purchase_book.record_credit_pack(redeemed, session_id, sale)
+
+
+def _release_credit_pack(session_id: str, request) -> Optional[dict]:
+    """Stripe says a card pack was paid: issue its key now and mail it to the
+    buyer. None while the payment has not cleared (a slow method); Stripe
+    sends a second notice when it does. Raises if the email could not be
+    sent, so Stripe repeats the notice; the key itself is issued only once."""
+    redeemed = billing.fulfill_credit_session(session_id)
+    if redeemed is None:
+        return None
+    _book_credit_pack(redeemed, session_id, request)
+    billing.mail_credit_key_once(session_id, redeemed)
+    return redeemed
 
 
 @app.get("/billing/credits/key", tags=["billing"])
@@ -5086,15 +5103,7 @@ def credit_pack_key(session_id: str, request: Request):
         raise HTTPException(status_code=502, detail="Could not confirm the payment yet. Please refresh in a moment.")
     if redeemed is None:
         return JSONResponse(status_code=202, content={"status": "pending"})
-    if redeemed.get("new"):
-        sale = purchase_book.open_sale(request, price_usd=(redeemed.get("amount_cents") or 0) / 100,
-                                       route="/billing/credits", product=f"credit_pack_{redeemed.get('pack')}",
-                                       body={"session_id": session_id})
-        purchase_book.record_credit_pack(redeemed, session_id, sale)
-    elif time.time() - float(redeemed.get("issued_at") or 0) > CREDIT_KEY_REVEAL_SECONDS:
-        raise HTTPException(status_code=410, detail=(
-            "This key was issued more than a day ago and is not shown again. "
-            "Email hubvibe@hubvibe-io.com with your receipt if you need help."))
+    _book_credit_pack(redeemed, session_id, request)
     return {"api_key": redeemed["api_key"], "credit_usd": round(redeemed["credit_cents"] / 100, 2),
             "paid_usd": round((redeemed.get("amount_cents") or 0) / 100, 2), "pack": redeemed.get("pack")}
 
@@ -5111,9 +5120,16 @@ def get_api_key(session_id: str):
     return {"api_key": api_key}
 
 
+# Stripe posts here the moment a checkout is paid. A card pack's key is
+# issued and mailed right then -- it does not wait for the buyer's browser.
+# Slow payment methods (crypto, Pix, ...) complete first and are paid later:
+# checkout.session.async_payment_succeeded is that second notice.
+_CHECKOUT_PAID_EVENTS = ("checkout.session.completed", "checkout.session.async_payment_succeeded")
+
+
 @app.post("/billing/webhook")
 async def stripe_webhook(request: Request):
-    if not billing.is_configured():
+    if not billing.credit_webhook_ready():
         raise HTTPException(status_code=501, detail="Billing is not configured on this deployment")
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
@@ -5121,8 +5137,21 @@ async def stripe_webhook(request: Request):
         event = billing.verify_webhook(payload, sig_header)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid webhook signature: {exc}")
-    if event["type"] == "checkout.session.completed":
-        billing.activate_customer(event["data"]["object"])
+    if event["type"] not in _CHECKOUT_PAID_EVENTS:
+        return {"received": True}
+    checkout = event["data"]["object"]
+    metadata = billing._plain_dict(getattr(checkout, "metadata", None))
+    if metadata.get("kind") == "credit_pack":
+        from starlette.concurrency import run_in_threadpool
+
+        try:
+            await run_in_threadpool(_release_credit_pack, checkout.id, request)
+        except Exception as exc:  # Stripe repeats the notice on a non-2xx
+            logging.getLogger("hubvibe").error("credit pack release failed: %s", exc)
+            raise HTTPException(status_code=500, detail="Could not release the key yet; Stripe will retry.")
+        return {"received": True}
+    if billing.is_configured() and event["type"] == "checkout.session.completed":
+        billing.activate_customer(checkout)
     return {"received": True}
 
 

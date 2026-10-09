@@ -50,7 +50,7 @@ footer a { color: var(--dim); }
     <h2>Your key</h2>
     <code class="key" id="api-key"></code>
     <button id="copy">Copy key</button>
-    <p class="warn">Save it now. This key is your balance; it is shown here for 24 hours.</p>
+    <p class="warn">Save it now. This key is your balance: anyone who has it can spend it. We have emailed it to you as well.</p>
   </div>
 
   <div class="card">
@@ -78,7 +78,9 @@ footer a { color: var(--dim); }
     text.innerHTML = 'Start at <a href="/start" style="color:#FFE3D3">hubvibe-io.com/start</a>.';
     return;
   }
-  for (var attempt = 0; attempt < 30; attempt++) {
+  // Keep asking for up to 15 minutes: a slow payment method can take that
+  // long to clear, and a passing error must never cost a buyer their key.
+  for (var attempt = 0; attempt < 450; attempt++) {
     var response;
     try {
       response = await fetch("/billing/credits/key?session_id=" + encodeURIComponent(sessionId));
@@ -102,17 +104,17 @@ footer a { color: var(--dim); }
       });
       return;
     }
-    if (response && response.status !== 202) {
+    if (response && response.status === 404) {
       var detail = "";
       try { detail = (await response.json()).detail || ""; } catch (e) {}
       heading.textContent = "We couldn't show a key";
-      text.textContent = detail || "Please refresh in a moment, or email hubvibe@hubvibe-io.com with your receipt.";
+      text.textContent = detail || "Email hubvibe@hubvibe-io.com with your receipt and we will sort it out.";
       return;
     }
     await new Promise(function (resolve) { setTimeout(resolve, 2000); });
   }
   heading.textContent = "Still confirming";
-  text.textContent = "Your bank is taking a little longer. Refresh this page in a minute; your key will appear here.";
+  text.textContent = "Your payment is taking longer to clear. Your key will be emailed to you the moment it does, and this page will show it when you refresh.";
 })();
 </script>
 </body>
