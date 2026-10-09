@@ -665,8 +665,13 @@ def credit_webhook_ready() -> bool:
 
 # The key goes to the buyer by email the moment the payment clears, so a
 # closed tab, a slow bank or a lost link never costs anyone their credit.
-# Plain SMTP to the mailbox host (Hostinger: smtp.hostinger.com, 465, SSL);
-# unset, nothing is mailed and the success page still shows the key.
+# Sent from the HubVibe mailbox through Hostinger's Mail API (an API token
+# from the Hostinger panel, scoped to that mailbox) or, failing that, plain
+# SMTP (smtp.hostinger.com, 465, SSL). Neither set: nothing is mailed and
+# the success page still shows the key.
+_MAIL_API_TOKEN = (os.environ.get("MAIL_HOSTINGER_TOKEN") or "").strip() or None
+_MAIL_API_MAILBOX = (os.environ.get("MAIL_HOSTINGER_MAILBOX") or "").strip() or None
+_MAIL_API_URL = (os.environ.get("MAIL_HOSTINGER_API_URL") or "https://api.mail.hostinger.com").rstrip("/")
 _MAIL_SMTP_HOST = (os.environ.get("MAIL_SMTP_HOST") or "").strip() or None
 _MAIL_SMTP_PORT = int((os.environ.get("MAIL_SMTP_PORT") or "465").strip() or 465)
 _MAIL_SMTP_USER = (os.environ.get("MAIL_SMTP_USER") or "").strip() or None
@@ -674,8 +679,12 @@ _MAIL_SMTP_PASSWORD = os.environ.get("MAIL_SMTP_PASSWORD") or None
 _MAIL_FROM = (os.environ.get("MAIL_FROM") or "").strip() or _MAIL_SMTP_USER
 
 
+def _mail_api_ready() -> bool:
+    return bool(_MAIL_API_TOKEN and _MAIL_API_MAILBOX)
+
+
 def key_mail_ready() -> bool:
-    return bool(_MAIL_SMTP_HOST and _MAIL_SMTP_USER and _MAIL_SMTP_PASSWORD and _MAIL_FROM)
+    return _mail_api_ready() or bool(_MAIL_SMTP_HOST and _MAIL_SMTP_USER and _MAIL_SMTP_PASSWORD and _MAIL_FROM)
 
 
 def key_email_text(redeemed: dict) -> tuple:
@@ -704,12 +713,27 @@ def send_key_email(to_address: str, redeemed: dict) -> bool:
     here; raises when the mail server refuses, so the caller can retry."""
     if not key_mail_ready() or not to_address:
         return False
+    subject, body = key_email_text(redeemed)
+    if _mail_api_ready():
+        import json as _json
+        import urllib.request
+
+        request = urllib.request.Request(
+            f"{_MAIL_API_URL}/api/v1/mailboxes/{_MAIL_API_MAILBOX}/send",
+            data=_json.dumps({"to": [to_address], "subject": subject, "text": body,
+                              "displayName": "HubVibe"}).encode("utf-8"),
+            headers={"Authorization": f"Bearer {_MAIL_API_TOKEN}", "Content-Type": "application/json",
+                     "Accept": "application/json"},
+            method="POST")
+        with urllib.request.urlopen(request, timeout=30) as response:  # non-2xx raises
+            if response.status >= 300:
+                raise OSError(f"mail API answered {response.status}")
+        return True
     import smtplib
     import ssl
     from email.message import EmailMessage
     from email.utils import formatdate, make_msgid
 
-    subject, body = key_email_text(redeemed)
     message = EmailMessage()
     message["From"] = f"HubVibe <{_MAIL_FROM}>"
     message["To"] = to_address

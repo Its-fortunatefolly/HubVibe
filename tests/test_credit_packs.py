@@ -244,7 +244,8 @@ def notice_app(monkeypatch, tmp_path):
     monkeypatch.setenv("MAIL_SMTP_PASSWORD", "mail-password")
     monkeypatch.setenv("SANCTIONS_PREFETCH", "0")
     monkeypatch.setenv("A2A_TASKS_PATH", "")
-    for var in ("AUDIT_API_KEY", "X402_FACILITATOR_URL", "X402_PAY_TO_ADDRESS", "MAIL_SMTP_PORT", "MAIL_FROM"):
+    for var in ("AUDIT_API_KEY", "X402_FACILITATOR_URL", "X402_PAY_TO_ADDRESS", "MAIL_SMTP_PORT", "MAIL_FROM",
+                "MAIL_HOSTINGER_TOKEN", "MAIL_HOSTINGER_MAILBOX"):
         monkeypatch.delenv(var, raising=False)
     _drop_cache()
     spec = importlib.util.spec_from_file_location("wcag_main_credit_notice", MAIN_PATH)
@@ -394,4 +395,38 @@ def test_other_notices_are_acknowledged_and_ignored(notice_app, notice_stripe, m
 
 def test_without_a_signing_secret_the_notice_door_stays_shut(app):
     assert _notice(_client(app), "cs_test_1").status_code == 501
+
+
+def test_the_key_can_go_out_through_hostingers_mail_api(monkeypatch, tmp_path, notice_app):
+    """With a Hostinger Mail API token the key is sent from the HubVibe mailbox
+    over HTTPS, no mailbox password on the server."""
+    import json
+    import urllib.request
+
+    billing = notice_app.billing
+    monkeypatch.setattr(billing, "_MAIL_API_TOKEN", "hapi_token")
+    monkeypatch.setattr(billing, "_MAIL_API_MAILBOX", "ACmailbox")
+    sent = []
+
+    class _Response:
+        status = 204
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        sent.append((request.full_url, request.get_header("Authorization"), json.loads(request.data)))
+        return _Response()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    redeemed = {"api_key": "key_abc", "credit_cents": 2500}
+    assert billing.send_key_email("buyer@example.com", redeemed)
+    url, auth, body = sent[0]
+    assert url == "https://api.mail.hostinger.com/api/v1/mailboxes/ACmailbox/send"
+    assert auth == "Bearer hapi_token"
+    assert body["to"] == ["buyer@example.com"] and body["displayName"] == "HubVibe"
+    assert body["subject"] == "Your HubVibe key ($25.00 credit)" and "key_abc" in body["text"]
 
