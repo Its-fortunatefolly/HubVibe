@@ -418,6 +418,7 @@ def test_the_key_can_go_out_through_hostingers_mail_api(monkeypatch, tmp_path, n
             return False
 
     def fake_urlopen(request, timeout=None):
+        assert request.get_header("User-agent", "").startswith("HubVibe/"), "Hostinger refuses Python-urllib"
         sent.append((request.full_url, request.get_header("Authorization"), json.loads(request.data)))
         return _Response()
 

@@ -722,8 +722,10 @@ def send_key_email(to_address: str, redeemed: dict) -> bool:
             f"{_MAIL_API_URL}/api/v1/mailboxes/{_MAIL_API_MAILBOX}/send",
             data=_json.dumps({"to": [to_address], "subject": subject, "text": body,
                               "displayName": "HubVibe"}).encode("utf-8"),
+            # A named User-Agent: Hostinger's edge refuses Python's default
+            # one (Cloudflare error 1010), which is how the first live send failed.
             headers={"Authorization": f"Bearer {_MAIL_API_TOKEN}", "Content-Type": "application/json",
-                     "Accept": "application/json"},
+                     "Accept": "application/json", "User-Agent": "HubVibe/1.0 (+https://hubvibe-io.com)"},
             method="POST")
         with urllib.request.urlopen(request, timeout=30) as response:  # non-2xx raises
             if response.status >= 300:
