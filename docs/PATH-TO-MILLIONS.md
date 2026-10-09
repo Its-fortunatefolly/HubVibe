@@ -189,6 +189,26 @@ API, the 402 and the manifests, unchanged.
      an RFP. Start now: onboarding takes months, and the buying spike is
      Feb–Apr 2027.
 
+4. **Google Cloud Marketplace (procurement shortcut, weeks 4–8).** Buyers
+   with a Google Cloud spending commitment (large health systems, states,
+   enterprises) can pay for HubVibe from that commitment, with no new-vendor
+   onboarding. A marketplace listing doesn't bring buyers; it removes a
+   procurement step for the buyers HubVibe already found.
+   - The fee is reported at 3% of each sale (third-party figure,
+     [Clazar](https://clazar.io/blog/google-cloud-marketplace-fees); confirm
+     in Producer Portal).
+   - The live A2A agent card already has the fields Google requires (base
+     URL, provider, A2A 1.0).
+   - Still to build: OAuth 2.0 or public access; Procurement API + Pub/Sub
+     entitlement handling, with a marketplace entitlement issuing a prepaid
+     `X-API-Key`; Partner Network membership and the Marketplace Vendor
+     Agreement.
+   - List the three plans, not 72 skills: enterprises buy one clear thing.
+   - Google's rule is that A2A agent listings can't bill professional
+     services ([docs](https://docs.cloud.google.com/marketplace/docs/partners/ai-agents)).
+   - Professional services must go through US-only private offers that link
+     to a product listing.
+
 **Kill list (money pits):**
 
 - Adding more `/work` workers. There are 70 already and no demand signal.
@@ -198,6 +218,9 @@ API, the 402 and the manifests, unchanged.
 - Overlays.
 - Cheap white-label price wars.
 - Any "100% compliant" claim.
+- Hand-delivered cloud security/IAM consulting at $5k–$25k per review. It's
+  a human consulting business that needs credentials, insurance and access
+  to clients' cloud accounts, and it's not what the node does.
 
 ---
 
