@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- HV monogram drawn as geometry rather than text: a favicon renders in
+       environments with no guarantee about available fonts, and a missing
+       font would silently fall back to something off-brand. -->
+  <defs>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="3.2" result="blur"/>
+      <feFlood flood-color="#FF8A2A" flood-opacity="0.95"/>
+      <feComposite in2="blur" operator="in" result="glowColor"/>
+      <feMerge>
+        <feMergeNode in="glowColor"/>
+        <feMergeNode in="glowColor"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="100" height="100" fill="#000000"/>
+  <g fill="#FDE4CE" filter="url(#glow)">
+    <!-- H -->
+    <rect x="9" y="22" width="10" height="56" rx="1"/>
+    <rect x="34" y="22" width="10" height="56" rx="1"/>
+    <rect x="9" y="45" width="35" height="10" rx="1"/>
+    <!-- V -->
+    <polygon points="50,22 61,22 70.5,57 80,22 91,22 77,78 64,78"/>
+  </g>
+</svg>

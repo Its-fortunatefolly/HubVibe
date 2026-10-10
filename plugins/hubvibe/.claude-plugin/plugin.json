@@ -1,0 +1,27 @@
+{
+  "name": "hubvibe",
+  "displayName": "HubVibe",
+  "version": "1.0.0",
+  "description": "HubVibe's pay-per-call tools in Claude Code: qualify a business website as a sales lead, audit a website (accessibility, SEO, security headers, page speed), verify an email, get a company profile, screen sanctions lists, run an identity check, search the web, read a page, and get stock, SEC, crypto and news data. Each call is charged from your prepaid HubVibe credit at its listed price; a call that fails is not charged.",
+  "author": {
+    "name": "HubVibe",
+    "email": "hubvibe@hubvibe-io.com",
+    "url": "https://hubvibe-io.com"
+  },
+  "homepage": "https://hubvibe-io.com",
+  "keywords": [
+    "mcp",
+    "lead-qualification",
+    "website-audit",
+    "accessibility",
+    "seo",
+    "email-verification",
+    "company-data",
+    "sanctions-screening",
+    "web-search",
+    "stocks",
+    "sec-filings",
+    "crypto",
+    "news"
+  ]
+}

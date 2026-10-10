@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "hubvibe": {
+      "type": "http",
+      "url": "https://hubvibe-io.com/mcp",
+      "headers": {
+        "X-API-Key": "${HUBVIBE_API_KEY:-}"
+      },
+      "timeout": 180000
+    }
+  }
+}
