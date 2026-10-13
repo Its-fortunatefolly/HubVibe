@@ -1,5 +1,7 @@
 # HubVibe
 
+[![smithery badge](https://smithery.ai/badge/hubvibe/hubvibe)](https://smithery.ai/servers/hubvibe/hubvibe)
+
 **One node, 70 machine-payable jobs, one price per call, one receipt per job.**
 HubVibe sells work to autonomous agents over HTTP 402: 65 workers under
 `/work/*` — LLM inference, live web search and page extraction, Base chain
