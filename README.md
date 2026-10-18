@@ -288,6 +288,10 @@ Agents shouldn't have to read documentation to use this:
 | [`/llms.txt`](https://hubvibe-io.com/llms.txt) | Plain-text summary |
 | [`/docs`](https://hubvibe-io.com/docs) | Interactive reference |
 
+## Semantic and vector discovery (parallel experimental integration)
+
+See [Semantic + Vector Discovery Manifesto](manifestos/SEMANTIC_VECTOR_MANIFESTO.md). The [discovery-only sparse-vector router](integrations/hubvibe_semantic_vector_router.py) ranks natural-language buyer intents against routes that **actually exist** in the live OpenAPI catalog; it does **not** process payments, proxy wallets, or change existing x402, MPP, prepaid, MCP, A2A, or audit code. Example: `python integrations/hubvibe_semantic_vector_router.py "check my website accessibility and performance"`. Results are recommendations, not a purchase or a claim that an endpoint passed validation. Prices must be quoted from the live purchase contract. Neural vector embeddings, registry ingestion, live purchases, and latency measurements remain separate validation/deployment steps.
+
 ## Integrations
 
 - **[`integrations/hubvibe_router.py`](integrations/hubvibe_router.py)** — the
