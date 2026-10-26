@@ -1,6 +1,6 @@
 # HubVibe
 
-[![smithery badge](https://smithery.ai/badge/hubvibe/hubvibe)](https://smithery.ai/servers/hubvibe/hubvibe)
+[![LightNow capabilities](https://lightnow.ai/badge/io.github.Its-fortunatefolly/hubvibe)](https://lightnow.ai/servers/io.github.Its-fortunatefolly/hubvibe)
 
 **One node, 70 machine-payable jobs, one price per call, one receipt per job.**
 HubVibe sells work to autonomous agents over HTTP 402: 65 workers under
