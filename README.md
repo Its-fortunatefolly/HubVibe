@@ -291,20 +291,30 @@ Agents shouldn't have to read documentation to use this:
 ## Integrations
 
 - **[`integrations/hubvibe_router.py`](integrations/hubvibe_router.py)** — the
-  buyer-side gateway: an agent runs it on its own machine, points HTTP calls at
+  **v1.3.0** buyer-side gateway: an agent runs it on its own machine, points HTTP calls at
   `http://127.0.0.1:8402/work/...`, and the router clears each 402 by signing
   with the agent's own wallet (USDC on Base or on Solana, key never leaves the
   machine), retries, and returns the result. Analytical routes (`/work/data/*`,
   `/work/stats/*`) are cached locally for 24 hours so a loop pays once per
-  distinct query. Per-call, per-process and per-day caps refuse before any
-  signature exists. `python hubvibe_router.py quote|call|serve|status|ledger`.
+  distinct query. Atomic per-call, per-process and per-day reservations prevent
+  concurrent agents from spending past a shared cap. Durable idempotency,
+  settlement and delivery-receipt verification, and explicit composite-plan
+  authorization prevent unsafe retries and duplicate component purchases.
+  Walletless agents can discover, quote and verify for free; a paid call without
+  a configured wallet or prepaid key fails closed. See the
+  **[installation and agent adoption guide](docs/buyer-router.md)**.
+  `python integrations/hubvibe_router.py quote|call|verify|serve|status|ledger`.
   As a library (the wallet comes from `HUBVIBE_WALLET_KEY` /
   `HUBVIBE_SOLANA_KEY` or the key files, never from code):
 
   ```python
-  from hubvibe_router import HubVibeRouter
+  from integrations.hubvibe_router import HubVibeRouter
   client = HubVibeRouter(endpoint="https://hubvibe-io.com", wallet_type="base")
-  response = client.execute_task(tool="stats.probability", payload={...})
+  response = client.execute_task(
+      tool="stats.probability",
+      payload={...},
+      idempotency_key="agent-42:probability:job-781",
+  )
   ```
 - **[`action.yml`](action.yml)** — the GitHub Action (`uses: Its-fortunatefolly/HubVibe@v1`).
   It retries transient failures but never a 4xx (repeating a 402 on a metered

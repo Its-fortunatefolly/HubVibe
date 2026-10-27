@@ -17,14 +17,20 @@ node's A2A endpoint:
   2b. Then clear it locally: sign the payment with the agent's OWN wallet
      (USDC on Base or on Solana, the private key never leaves this machine)
      using the official x402 client library, and retry once with the
-     PAYMENT-SIGNATURE header. The 200 carries the result and the
-     settlement receipt.
+     PAYMENT-SIGNATURE header. A durable Idempotency-Key binds retries to
+     one request. A 202 is collected from its free collect_url without a
+     second payment. The result is accepted only after its delivery receipt
+     matches the route, amount, transaction and result hash.
   3. For the analytical routes (BigQuery-backed: /work/data/*, /work/stats/*)
      keep the delivered result in a local cache for 24 hours, keyed by an
      MD5 of route + body, so a looping agent that asks the same question
      twice pays once and gets the second answer instantly.
-  4. Refuse, before any signature exists, anything over the per-call cap,
-     the process budget, or the daily cap. Fail closed, never open.
+  4. Atomically reserve budget before any signature exists. Concurrent
+     threads and processes cannot pass the same shared cap, and an unknown
+     settlement keeps its reservation until the payment window expires.
+     Refuse anything over the per-call cap, process budget or daily cap.
+  5. An explicit multi-worker plan freezes its total before execution and
+     rejects a composite plus any component the composite already includes.
 
 Nothing of the agent's passes through any server but the HubVibe node it is
 buying from: the request goes straight to the route, the payment goes
@@ -53,7 +59,7 @@ The same object under its plain name:
     from hubvibe_router import Router
     r = Router.from_env()
     quote = r.quote("/work/market/quote", {"product_id": "BTC-USD"})   # free
-    out = r.call("/work/market/quote", {"product_id": "BTC-USD"})      # pays $0.02
+    out = r.call("/work/market/quote", {"product_id": "BTC-USD"})      # pays $0.10
 
 As a local proxy (the ClawRouter shape -- point any HTTP-speaking agent at
 it and it never has to know x402 exists):
@@ -93,19 +99,22 @@ from __future__ import annotations
 
 import argparse
 import base64
+import fcntl
 import hashlib
 import json
 import os
 import sys
 import threading
 import time
+import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 import httpx
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 _ATOMIC_PER_USD = 1_000_000  # USDC has 6 decimals on Base and on Solana
 _DEFAULT_CACHE_PATHS = ("/work/data/", "/work/stats/")
@@ -149,6 +158,18 @@ class CapExceeded(RouterError):
 
 class PaymentRefused(RouterError):
     reason = "payment_refused"
+
+
+class ReceiptVerificationFailed(RouterError):
+    reason = "receipt_verification_failed"
+
+
+class PaymentUncertain(RouterError):
+    reason = "payment_status_uncertain"
+
+
+class PendingJob(RouterError):
+    reason = "job_still_processing"
 
 
 class Upstream(RouterError):
@@ -224,16 +245,21 @@ class Router:
         self.cache_paths = tuple(cache_paths)
         self.home = Path(os.path.expanduser(home or os.environ.get("HUBVIBE_HOME") or "~/.hubvibe-router"))
         self.cache_dir = self.home / "cache"
+        self.idempotency_dir = self.home / "idempotency"
         self.ledger_path = self.home / "ledger.jsonl"
+        self.ledger_lock_path = self.home / "ledger.lock"
         self.timeout = timeout
         self._http = httpx.Client(timeout=timeout, headers={"User-Agent": user_agent})
         self._x402_http = None
         self._x402_core = None
         self._contracts: dict = {}
-        self._lock = threading.Lock()
+        self._authorizations: dict[str, dict] = {}
+        self._lock = threading.RLock()
         self._spent_usd = 0.0
+        self._reservations: dict[str, float] = {}
         self.home.mkdir(parents=True, exist_ok=True)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.idempotency_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- construction --------------------------------------------------------
 
@@ -337,34 +363,129 @@ class Router:
 
     # ---- caps ------------------------------------------------------------------
 
-    def _spent_today(self) -> float:
-        total, today = 0.0, _utc_day()
+    def _read_ledger_unlocked(self) -> list:
         if not self.ledger_path.is_file():
-            return 0.0
+            return []
+        rows = []
         with self.ledger_path.open(encoding="utf-8") as handle:
             for line in handle:
                 try:
-                    row = json.loads(line)
+                    rows.append(json.loads(line))
                 except Exception:
                     continue
-                if row.get("day") == today and row.get("settled"):
-                    total += float(row.get("price_usd") or 0)
-        return total
+        return rows
 
-    def _check_caps(self, price_usd: float, path: str) -> None:
+    @contextmanager
+    def _ledger_lock(self):
+        """Serialize cap decisions and ledger appends across local processes."""
+        with self.ledger_lock_path.open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _append_unlocked(self, row: dict) -> None:
+        row = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "day": _utc_day(), **row}
+        with self.ledger_path.open("a", encoding="utf-8") as handle:
+            handle.write(_canonical(row) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    @staticmethod
+    def _ledger_totals(rows: list) -> tuple[float, dict[str, float]]:
+        """Today's settled spend and reservations that are still live."""
+        today, now = _utc_day(), time.time()
+        settled = 0.0
+        reservations: dict[str, float] = {}
+        released = set()
+        consumed: dict[str, float] = {}
+        for row in rows:
+            reservation_id = row.get("reservation_id")
+            if reservation_id and row.get("kind") == "reservation_release":
+                released.add(reservation_id)
+            if reservation_id and row.get("settled"):
+                amount = float(row.get("price_usd") or 0)
+                consumed[reservation_id] = consumed.get(reservation_id, 0.0) + amount
+            if row.get("day") == today and row.get("settled"):
+                settled += float(row.get("price_usd") or 0)
+        for row in rows:
+            reservation_id = row.get("reservation_id")
+            if (row.get("kind") == "reservation" and reservation_id not in released
+                    and float(row.get("expires_at") or 0) > now):
+                remaining = max(0.0, float(row.get("price_usd") or 0)
+                                - consumed.get(reservation_id, 0.0))
+                if remaining:
+                    reservations[reservation_id] = remaining
+        return settled, reservations
+
+    def _spent_today(self) -> float:
+        with self._lock:
+            with self._ledger_lock():
+                settled, _reservations = self._ledger_totals(self._read_ledger_unlocked())
+                return settled
+
+    def _check_per_call(self, price_usd: float, path: str) -> None:
         if price_usd > self.max_price_usd:
             raise CapExceeded(
                 f"{path} costs ${price_usd:.2f}, above the per-call cap of ${self.max_price_usd:.2f}",
                 price_usd=price_usd, cap_usd=self.max_price_usd, cap="per_call")
+
+    def _reserve(self, price_usd: float, path: str, idempotency_key: str,
+                 *, enforce_per_call: bool = True) -> str:
+        """Atomically reserve budget before a payment signature can exist."""
+        if enforce_per_call:
+            self._check_per_call(price_usd, path)
         with self._lock:
-            if self._spent_usd + price_usd > self.budget_usd:
+            process_committed = self._spent_usd + sum(self._reservations.values())
+            if process_committed + price_usd > self.budget_usd:
                 raise CapExceeded(
                     f"${price_usd:.2f} would take this process past its ${self.budget_usd:.2f} budget "
-                    f"(spent ${self._spent_usd:.2f})", price_usd=price_usd, cap_usd=self.budget_usd, cap="process_budget")
-            if self._spent_today() + price_usd > self.daily_cap_usd:
-                raise CapExceeded(
-                    f"${price_usd:.2f} would take this machine past its ${self.daily_cap_usd:.2f} daily cap",
-                    price_usd=price_usd, cap_usd=self.daily_cap_usd, cap="daily")
+                    f"(committed ${process_committed:.2f})", price_usd=price_usd,
+                    cap_usd=self.budget_usd, cap="process_budget")
+            with self._ledger_lock():
+                settled, reservations = self._ledger_totals(self._read_ledger_unlocked())
+                if settled + sum(reservations.values()) + price_usd > self.daily_cap_usd:
+                    raise CapExceeded(
+                        f"${price_usd:.2f} would take this machine past its ${self.daily_cap_usd:.2f} daily cap",
+                        price_usd=price_usd, cap_usd=self.daily_cap_usd, cap="daily")
+                reservation_id = uuid.uuid4().hex
+                self._append_unlocked({
+                    "kind": "reservation", "reservation_id": reservation_id,
+                    "idempotency_key": idempotency_key, "path": path,
+                    "price_usd": price_usd, "expires_at": time.time() + max(self.timeout, 300.0) + 60.0,
+                })
+            self._reservations[reservation_id] = price_usd
+            return reservation_id
+
+    def _release_reservation(self, reservation_id: Optional[str], outcome: str) -> None:
+        if not reservation_id:
+            return
+        with self._lock:
+            price = self._reservations.pop(reservation_id, None)
+            with self._ledger_lock():
+                self._append_unlocked({"kind": "reservation_release", "reservation_id": reservation_id,
+                                       "price_usd": price, "settled": False, "outcome": outcome})
+
+    def _commit_reservation(self, reservation_id: str, row: dict, *,
+                            amount: Optional[float] = None, final: bool = True) -> None:
+        with self._lock:
+            remaining = self._reservations.get(reservation_id)
+            if remaining is None:
+                raise PaymentUncertain("the local budget reservation disappeared before settlement was recorded")
+            price = remaining if amount is None else float(amount)
+            if price < 0 or price > remaining + 1e-9:
+                raise PaymentUncertain("a settlement exceeded its local budget reservation")
+            new_remaining = max(0.0, remaining - price)
+            if final or new_remaining == 0:
+                self._reservations.pop(reservation_id, None)
+            else:
+                self._reservations[reservation_id] = new_remaining
+            self._spent_usd += price
+            with self._ledger_lock():
+                self._append_unlocked({**row, "kind": "reservation_consume",
+                                       "reservation_id": reservation_id, "price_usd": price,
+                                       "settled": True})
 
     # ---- cache -----------------------------------------------------------------
 
@@ -410,22 +531,16 @@ class Router:
     # ---- ledger ----------------------------------------------------------------
 
     def _record(self, row: dict) -> None:
-        row = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "day": _utc_day(), **row}
         with self._lock:
-            with self.ledger_path.open("a", encoding="utf-8") as handle:
-                handle.write(_canonical(row) + "\n")
+            with self._ledger_lock():
+                self._append_unlocked(row)
 
     def ledger(self, limit: int = 50) -> list:
         if not self.ledger_path.is_file():
             return []
-        lines = self.ledger_path.read_text(encoding="utf-8").splitlines()
-        out = []
-        for line in lines[-limit:]:
-            try:
-                out.append(json.loads(line))
-            except Exception:
-                continue
-        return out
+        with self._lock:
+            with self._ledger_lock():
+                return self._read_ledger_unlocked()[-limit:]
 
     # ---- the loop ----------------------------------------------------------------
 
@@ -598,16 +713,344 @@ class Router:
             return f"/work/{group}/{name}" if name else f"/work/{group}"
         return "/work/" + tool.replace(".", "/")
 
-    def execute_task(self, tool: str, payload: Any = None, *, use_cache: bool = True) -> dict:
+    def execute_task(self, tool: str, payload: Any = None, *, use_cache: bool = True,
+                     idempotency_key: Optional[str] = None) -> dict:
         """Buy one job by tool name or route. Same loop as `call`."""
-        return self.call(self.route_for(tool), payload if payload is not None else {}, use_cache=use_cache)
+        return self.call(self.route_for(tool), payload if payload is not None else {}, use_cache=use_cache,
+                         idempotency_key=idempotency_key)
 
-    def call(self, path: str, body: Any, *, use_cache: bool = True) -> dict:
+    def prepare_plan(self, tasks: list[dict]) -> dict:
+        """Resolve an explicit task list against the live catalog without buying.
+
+        Discovery or an agent supplies the candidates; this step only freezes
+        their current paths, prices and composite relationships for review.
+        """
+        if not isinstance(tasks, list) or not tasks:
+            raise VerificationFailed("a purchase plan needs at least one task")
+        catalog = self.get("/work")
+        workers = catalog.get("workers") if isinstance(catalog, dict) else None
+        if not isinstance(workers, list):
+            raise VerificationFailed("the node's live worker catalog is unreadable")
+        by_name = {worker.get("name"): worker for worker in workers if worker.get("name")}
+        by_path = {worker.get("path"): worker for worker in workers if worker.get("path")}
+        steps, seen = [], set()
+        for task in tasks:
+            if not isinstance(task, dict) or not isinstance(task.get("tool"), str):
+                raise VerificationFailed('every plan task must contain "tool" and optional "payload"')
+            route = self.route_for(task["tool"])
+            worker = by_name.get(task["tool"]) or by_path.get(route)
+            if worker is None:
+                raise VerificationFailed(f"{task['tool']} is not in the live worker catalog")
+            payload = task.get("payload") if task.get("payload") is not None else {}
+            identity = (worker["name"], _canonical(payload))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            steps.append({
+                "worker": worker["name"], "path": worker["path"],
+                "price_usd": float(worker.get("price_usd") or 0), "payload": payload,
+                "composes": list(worker.get("composes") or ()),
+            })
+        selected = {step["worker"] for step in steps}
+        duplicates = sorted({component for step in steps for component in step["composes"]
+                             if component in selected})
+        if duplicates:
+            raise VerificationFailed(
+                "the plan separately buys components already included by a composite: "
+                + ", ".join(duplicates), duplicate_components=duplicates)
+        document = {
+            "plan_id": f"plan-{uuid.uuid4().hex}", "steps": steps,
+            "total_price_usd": round(sum(step["price_usd"] for step in steps), 6),
+        }
+        document["plan_hash"] = "sha256:" + hashlib.sha256(_canonical(document).encode("utf-8")).hexdigest()
+        return document
+
+    def authorize_plan(self, plan: dict, *, max_total_usd: float, expires_in: float = 300.0) -> dict:
+        """Create explicit, local consent for exactly the reviewed plan."""
+        if expires_in <= 0:
+            raise VerificationFailed("plan authorization must expire in the future")
+        unsigned = {key: value for key, value in plan.items() if key != "plan_hash"}
+        actual_hash = "sha256:" + hashlib.sha256(_canonical(unsigned).encode("utf-8")).hexdigest()
+        if plan.get("plan_hash") != actual_hash:
+            raise VerificationFailed("the purchase plan changed before authorization")
+        total = float(plan.get("total_price_usd") or 0)
+        if total > float(max_total_usd):
+            raise CapExceeded(f"the ${total:.2f} plan exceeds its ${max_total_usd:.2f} authorization",
+                              price_usd=total, cap_usd=float(max_total_usd), cap="workflow")
+        authorization = {
+            "authorization_id": f"auth-{uuid.uuid4().hex}", "plan_hash": actual_hash,
+            "max_total_usd": float(max_total_usd), "expires_at": time.time() + expires_in,
+            "workers": [step["worker"] for step in plan.get("steps") or []],
+        }
+        with self._lock:
+            self._authorizations[authorization["authorization_id"]] = dict(authorization)
+        return authorization
+
+    def execute_plan(self, plan: dict, authorization: dict, *, use_cache: bool = True) -> list:
+        """Execute only a plan carrying exact, unexpired buyer authorization."""
+        unsigned = {key: value for key, value in plan.items() if key != "plan_hash"}
+        actual_hash = "sha256:" + hashlib.sha256(_canonical(unsigned).encode("utf-8")).hexdigest()
+        authorization_id = authorization.get("authorization_id")
+        with self._lock:
+            stored_authorization = self._authorizations.get(authorization_id)
+        if stored_authorization is None or _canonical(stored_authorization) != _canonical(authorization):
+            raise VerificationFailed("the plan has no matching local buyer authorization")
+        if plan.get("plan_hash") != actual_hash or authorization.get("plan_hash") != actual_hash:
+            raise VerificationFailed("the plan does not match its authorization")
+        if float(authorization.get("expires_at") or 0) <= time.time():
+            raise VerificationFailed("the purchase plan authorization expired")
+        total = float(plan.get("total_price_usd") or 0)
+        if total > float(authorization.get("max_total_usd") or 0):
+            raise CapExceeded("the plan total exceeds its authorization", price_usd=total,
+                              cap_usd=float(authorization.get("max_total_usd") or 0), cap="workflow")
+        steps = plan.get("steps") or []
+        if [step.get("worker") for step in steps] != authorization.get("workers"):
+            raise VerificationFailed("the authorized worker sequence changed")
+        for step in steps:
+            self._check_per_call(float(step["price_usd"]), step["path"])
+        reservation_id = self._reserve(total, "workflow:" + plan["plan_id"], plan["plan_id"],
+                                       enforce_per_call=False)
+        outputs = []
+        try:
+            for index, step in enumerate(steps):
+                outputs.append(self.call(
+                    step["path"], step["payload"], use_cache=use_cache,
+                    idempotency_key=f"{plan['plan_id']}-step-{index}",
+                    _reservation_id=reservation_id, _expected_price=float(step["price_usd"])))
+        except (PaymentUncertain, PendingJob):
+            # A payment may settle later. Keep the remaining authorization
+            # reserved until expiry instead of making it available twice.
+            raise
+        except Exception:
+            self._release_reservation(reservation_id, "workflow_failed")
+            raise
+        self._release_reservation(reservation_id, "workflow_complete")
+        return outputs
+
+    def _persist_intent(self, idempotency_key: str, path: str, body: Any) -> None:
+        request_hash = "sha256:" + hashlib.sha256(_canonical(body).encode("utf-8")).hexdigest()
+        with self._lock:
+            with self._ledger_lock():
+                rows = self._read_ledger_unlocked()
+                prior = next((row for row in reversed(rows)
+                              if row.get("kind") == "intent"
+                              and row.get("idempotency_key") == idempotency_key), None)
+                if prior and (prior.get("path") != path or prior.get("request_hash") != request_hash):
+                    raise VerificationFailed(
+                        "an Idempotency-Key cannot be reused for a different route or request body",
+                        path=path, idempotency_key=idempotency_key)
+                if prior is None:
+                    self._append_unlocked({"kind": "intent", "idempotency_key": idempotency_key,
+                                           "path": path, "request_hash": request_hash, "settled": False})
+
+    def _identity_result_path(self, idempotency_key: str) -> Path:
+        digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+        return self.idempotency_dir / f"{digest}.json"
+
+    def _identity_result_get(self, idempotency_key: str, path: str, body: Any) -> Optional[dict]:
+        """Return a locally verified delivery for this exact persistent identity."""
+        file = self._identity_result_path(idempotency_key)
+        if not file.is_file():
+            return None
+        try:
+            record = json.loads(file.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        request_hash = "sha256:" + hashlib.sha256(_canonical(body).encode("utf-8")).hexdigest()
+        if record.get("path") != path or record.get("request_hash") != request_hash \
+                or record.get("delivery_verified") is not True \
+                or not isinstance(record.get("payload"), dict):
+            return None
+        return {
+            **record["payload"], "idempotent_replay": True, "billed": False,
+            "note": "Returned the locally stored, receipt-verified result for this Idempotency-Key.",
+        }
+
+    def _identity_result_put(self, idempotency_key: str, path: str, body: Any, payload: dict) -> None:
+        """Durably store a result only after its delivery proof has verified."""
+        file = self._identity_result_path(idempotency_key)
+        tmp = file.with_name(f".{file.name}.{uuid.uuid4().hex}.tmp")
+        record = {
+            "idempotency_key": idempotency_key, "path": path,
+            "request_hash": "sha256:" + hashlib.sha256(_canonical(body).encode("utf-8")).hexdigest(),
+            "delivery_verified": True, "stored_at": time.time(), "payload": payload,
+        }
+        with tmp.open("w", encoding="utf-8") as handle:
+            handle.write(_canonical(record))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, file)
+
+    def _record_uncertain(self, idempotency_key: str, path: str, price_usd: float,
+                          reservation_id: Optional[str], outcome: str = "unknown") -> None:
+        self._record({
+            "kind": "purchase_outcome", "path": path, "price_usd": price_usd,
+            "rail": self.rail, "settled": False, "outcome": outcome,
+            "reservation_id": reservation_id, "idempotency_key": idempotency_key,
+        })
+
+    def _claim_identity(self, idempotency_key: str, path: str) -> str:
+        """Keep concurrent local retries from producing concurrent signatures."""
+        with self._lock:
+            with self._ledger_lock():
+                rows = self._read_ledger_unlocked()
+                terminal = next((row for row in reversed(rows)
+                                 if row.get("idempotency_key") == idempotency_key
+                                 and (row.get("settled") is True
+                                      or row.get("kind") == "delivery_verified"
+                                      or row.get("outcome") in ("unknown", "pending"))), None)
+                if terminal:
+                    raise PaymentUncertain(
+                        "this Idempotency-Key already has a settled or unresolved payment; "
+                        "the local router will not sign another authorization",
+                        path=path, idempotency_key=idempotency_key, billed=None)
+                released = {row.get("claim_id") for row in rows
+                            if row.get("kind") == "purchase_claim_release"}
+                now = time.time()
+                active = next((row for row in reversed(rows)
+                               if row.get("kind") == "purchase_claim"
+                               and row.get("idempotency_key") == idempotency_key
+                               and row.get("claim_id") not in released
+                               and float(row.get("expires_at") or 0) > now), None)
+                if active:
+                    raise PaymentUncertain(
+                        "this Idempotency-Key already has a local purchase in progress; do not sign another payment",
+                        path=path, idempotency_key=idempotency_key, billed=None,
+                        retry_after=max(1, int(float(active["expires_at"]) - now)))
+                claim_id = uuid.uuid4().hex
+                self._append_unlocked({
+                    "kind": "purchase_claim", "claim_id": claim_id,
+                    "idempotency_key": idempotency_key, "path": path,
+                    "expires_at": now + max(self.timeout, 300.0) + 60.0, "settled": False,
+                })
+                return claim_id
+
+    def _release_identity(self, claim_id: Optional[str], outcome: str) -> None:
+        if not claim_id:
+            return
+        self._record({"kind": "purchase_claim_release", "claim_id": claim_id,
+                      "outcome": outcome, "settled": False})
+
+    @staticmethod
+    def _idempotency_key(value: Optional[str]) -> str:
+        key = value or f"hv-{uuid.uuid4().hex}"
+        if not isinstance(key, str) or not key.strip() or len(key) > 200 \
+                or any(ord(char) < 33 or ord(char) > 126 for char in key):
+            raise VerificationFailed("Idempotency-Key must be 1-200 visible ASCII characters")
+        return key
+
+    @staticmethod
+    def _explicitly_unbilled(response: httpx.Response) -> bool:
+        try:
+            body = response.json()
+            return isinstance(body, dict) and body.get("billed") is False
+        except Exception:
+            return False
+
+    def _collect_response(self, response: httpx.Response, *, path: str,
+                          idempotency_key: str) -> httpx.Response:
+        started = time.monotonic()
+        current = response
+        while current.status_code == 202:
+            body = self._safe_json(current)
+            collect_url = body.get("collect_url") if isinstance(body, dict) else None
+            if (not isinstance(collect_url, str) or not collect_url.startswith("/work/jobs/")
+                    or "://" in collect_url or "?" in collect_url):
+                raise PaymentUncertain("the paid request returned 202 without a safe collect_url",
+                                       path=path, billed=None, idempotency_key=idempotency_key)
+            if time.monotonic() - started >= self.timeout:
+                raise PendingJob("the job is still processing; collect it without another payment",
+                                 path=path, collect_url=collect_url,
+                                 idempotency_key=idempotency_key, billed=False)
+            retry = current.headers.get("Retry-After") or body.get("retry_after_seconds") or 1
+            try:
+                delay = min(max(float(retry), 0.0), 10.0)
+            except (TypeError, ValueError):
+                delay = 1.0
+            if delay:
+                time.sleep(delay)
+            try:
+                current = self._http.get(self.base_url + collect_url, headers=self._headers())
+            except Exception as exc:
+                raise PaymentUncertain(
+                    "the collection request lost its response; do not authorize another payment",
+                    path=path, collect_url=collect_url, billed=None,
+                    idempotency_key=idempotency_key) from exc
+        return current
+
+    def _verify_receipt(self, payload: Any, *, path: str, price_usd: float,
+                        settlement: Optional[dict], require_paid: bool = True,
+                        require_settlement: bool = True) -> dict:
+        if not isinstance(payload, dict) or not isinstance(payload.get("receipt_url"), str):
+            raise ReceiptVerificationFailed("a paid delivery did not include a receipt_url", path=path)
+        receipt_url = payload["receipt_url"]
+        if not receipt_url.startswith("/work/receipts/") or "://" in receipt_url or "?" in receipt_url:
+            raise ReceiptVerificationFailed("the paid delivery named an unsafe receipt_url", path=path)
+        try:
+            response = self._http.get(self.base_url + receipt_url, headers=self._headers())
+        except Exception as exc:
+            raise ReceiptVerificationFailed(
+                f"the delivery receipt could not be fetched: {type(exc).__name__}", path=path,
+                receipt_url=receipt_url) from exc
+        receipt = self._safe_json(response)
+        if response.status_code != 200 or not isinstance(receipt, dict):
+            raise ReceiptVerificationFailed(f"the delivery receipt returned HTTP {response.status_code}",
+                                            path=path, receipt_url=receipt_url)
+        expected_hash = "sha256:" + hashlib.sha256(
+            _canonical(payload.get("result")).encode("utf-8")).hexdigest()
+        payment = receipt.get("payment") if isinstance(receipt.get("payment"), dict) else {}
+        request = receipt.get("request") if isinstance(receipt.get("request"), dict) else {}
+        delivery = receipt.get("delivery") if isinstance(receipt.get("delivery"), dict) else {}
+        problems = []
+        if delivery.get("delivered") is not True:
+            problems.append("receipt does not describe a delivered result")
+        if require_paid and (receipt.get("outcome") != "paid_delivered" or receipt.get("paid") is not True):
+            problems.append("receipt does not describe a paid delivery")
+        if require_paid and require_settlement and (
+                not isinstance(settlement, dict) or settlement.get("success") is not True
+                or not settlement.get("transaction") or not settlement.get("network")):
+            problems.append("delivery has no verifiable payment settlement")
+        if not require_paid and receipt.get("outcome") not in ("paid_delivered", "delivered_not_settled"):
+            problems.append("receipt does not describe a completed delivery")
+        if request.get("path") != path:
+            problems.append("receipt route differs from the purchased route")
+        try:
+            receipt_amount = int(payment.get("amount_atomic"))
+        except (TypeError, ValueError):
+            receipt_amount = -1
+        if require_paid and receipt_amount != int(round(price_usd * _ATOMIC_PER_USD)):
+            problems.append("receipt amount differs from the authorized price")
+        if delivery.get("result_hash") != expected_hash:
+            problems.append("receipt result hash differs from the delivered result")
+        tx = (settlement or {}).get("transaction")
+        if tx and payment.get("tx_hash") != tx:
+            problems.append("receipt transaction differs from PAYMENT-RESPONSE")
+        if problems:
+            raise ReceiptVerificationFailed("; ".join(problems), path=path, receipt_url=receipt_url)
+        return receipt
+
+    @staticmethod
+    def _verify_settlement_receipt(settlement: Optional[dict], path: str) -> None:
+        """Audit routes predate worker delivery receipts; verify their x402 receipt."""
+        if not isinstance(settlement, dict) or settlement.get("success") is not True \
+                or not settlement.get("transaction") or not settlement.get("network"):
+            raise ReceiptVerificationFailed(
+                "the paid audit delivery did not include a verifiable settlement receipt", path=path)
+
+    def call(self, path: str, body: Any, *, use_cache: bool = True,
+             idempotency_key: Optional[str] = None,
+             _reservation_id: Optional[str] = None,
+             _expected_price: Optional[float] = None) -> dict:
         """Buy one job: POST, clear the 402 with the local wallet if needed,
         return the delivered body. Cached analytical results are returned
         without a network call and marked `router.cache == "hit"`."""
         if not path.startswith("/"):
             path = "/" + path
+        idempotency_key = self._idempotency_key(idempotency_key)
+        self._persist_intent(idempotency_key, path, body)
+        local_replay = self._identity_result_get(idempotency_key, path, body)
+        if local_replay is not None:
+            return local_replay
         key = self.cache_key(path, body) if (use_cache and self.cacheable(path)) else None
         if key:
             hit = self._cache_get(key)
@@ -618,14 +1061,24 @@ class Router:
                 return payload
 
         url = self.base_url + path
-        headers = {"Content-Type": "application/json", **self._headers()}
-        first = self._http.post(url, json=body, headers=headers)
+        headers = {"Content-Type": "application/json", "Idempotency-Key": idempotency_key,
+                   **self._headers()}
+        try:
+            first = self._http.post(url, json=body, headers=headers)
+        except Exception as exc:
+            raise Upstream(f"the node could not be reached: {type(exc).__name__}", path=path,
+                           http_status=502, billed=False, idempotency_key=idempotency_key) from exc
         response, price, settlement = first, 0.0, None
+        reservation_id, claim_id = _reservation_id, None
+        owns_reservation = reservation_id is None
         if first.status_code == 402:
             price = self._price_of(first)
             if price is None:
                 raise PaymentRefused("the node answered 402 without a readable price", path=path)
-            self._check_caps(price, path)
+            if _expected_price is not None and abs(price - _expected_price) > 1e-9:
+                raise VerificationFailed(
+                    f"the route now costs ${price:.2f}, but the authorized plan fixed ${_expected_price:.2f}",
+                    path=path, price_usd=price)
             # VERIFY: the contract, this body, and the 402's own terms must
             # agree before a signature exists.
             raw = first.headers.get("PAYMENT-REQUIRED") or first.headers.get("payment-required")
@@ -633,31 +1086,113 @@ class Router:
             accepts = (v2 or {}).get("accepts") or (self._safe_json(first) or {}).get("accepts") or []
             resource_url = ((v2 or {}).get("resource") or {}).get("url")
             contract = self._verify_before_signing(path, body, accepts, resource_url, price)
+            claim_id = self._claim_identity(idempotency_key, path)
+            if owns_reservation:
+                try:
+                    reservation_id = self._reserve(price, path, idempotency_key)
+                except Exception:
+                    self._release_identity(claim_id, "reservation_failed")
+                    raise
             try:
                 paid_headers = self._sign(first, url)
             except RouterError:
+                if owns_reservation:
+                    self._release_reservation(reservation_id, "signing_failed")
+                self._release_identity(claim_id, "signing_failed")
                 raise
             except Exception as exc:  # the library refused to sign: cap, unsupported rail, bad key
+                if owns_reservation:
+                    self._release_reservation(reservation_id, "signing_failed")
+                self._release_identity(claim_id, "signing_failed")
                 raise PaymentRefused(f"could not sign the payment: {type(exc).__name__}: {str(exc)[:160]}", path=path, price_usd=price)
             paid_headers[_CONTRACT_HEADER] = contract["contract_hash"]
-            response = self._http.post(url, json=body, headers={**headers, **paid_headers})
+            try:
+                response = self._http.post(url, json=body, headers={**headers, **paid_headers})
+            except Exception as exc:
+                self._record_uncertain(idempotency_key, path, price, reservation_id)
+                raise PaymentUncertain(
+                    "the paid request lost its response; retry with the same Idempotency-Key before signing again",
+                    path=path, price_usd=price, idempotency_key=idempotency_key) from exc
             settlement = self._settlement_of(response)
             if response.status_code == 402:
+                if owns_reservation:
+                    self._release_reservation(reservation_id, "refused")
+                self._release_identity(claim_id, "refused")
                 self._record({"path": path, "price_usd": price, "rail": self.rail, "settled": False,
-                              "outcome": "refused", "detail": self._short_error(response)})
+                              "outcome": "refused", "detail": self._short_error(response),
+                              "idempotency_key": idempotency_key})
                 raise PaymentRefused(f"payment refused: {self._short_error(response)}", path=path, price_usd=price)
 
+        if response.status_code == 202:
+            try:
+                response = self._collect_response(response, path=path, idempotency_key=idempotency_key)
+            except PendingJob:
+                if reservation_id:
+                    self._record_uncertain(idempotency_key, path, price, reservation_id, "pending")
+                raise
+            except PaymentUncertain:
+                if reservation_id:
+                    self._record_uncertain(idempotency_key, path, price, reservation_id)
+                raise
+            settlement = self._settlement_of(response) or settlement
         if response.status_code != 200:
+            if reservation_id and self._explicitly_unbilled(response):
+                if owns_reservation:
+                    self._release_reservation(reservation_id, "unbilled_failure")
+                self._release_identity(claim_id, "unbilled_failure")
+            elif reservation_id:
+                self._record_uncertain(idempotency_key, path, price, reservation_id)
+                raise PaymentUncertain(
+                    f"HTTP {response.status_code} after payment authorization; billing is uncertain",
+                    path=path, http_status=response.status_code, price_usd=price,
+                    idempotency_key=idempotency_key)
             raise Upstream(f"HTTP {response.status_code}: {self._short_error(response)}",
-                           path=path, http_status=response.status_code, billed=False)
+                           path=path, http_status=response.status_code, billed=False,
+                           idempotency_key=idempotency_key)
 
         payload = self._safe_json(response)
+        authorized_price = price
+        idempotent_replay = bool(price and self._explicitly_unbilled(response))
+        if idempotent_replay:
+            if owns_reservation:
+                self._release_reservation(reservation_id, "idempotent_replay")
+            price = 0.0
         if price:
-            with self._lock:
-                self._spent_usd += price
-            self._record({"path": path, "price_usd": price, "rail": self.rail, "settled": True,
-                          "tx": (settlement or {}).get("transaction"), "payer": (settlement or {}).get("payer"),
-                          "receipt_url": payload.get("receipt_url") if isinstance(payload, dict) else None})
+            self._commit_reservation(reservation_id, {
+                "path": path, "rail": self.rail,
+                "tx": (settlement or {}).get("transaction"), "payer": (settlement or {}).get("payer"),
+                "receipt_url": payload.get("receipt_url") if isinstance(payload, dict) else None,
+                "idempotency_key": idempotency_key,
+            }, amount=price, final=owns_reservation)
+        delivery_verified = False
+        if authorized_price:
+            if path.startswith("/work/"):
+                self._verify_receipt(payload, path=path, price_usd=authorized_price,
+                                     settlement=settlement,
+                                     require_settlement=not idempotent_replay)
+            else:
+                self._verify_settlement_receipt(settlement, path)
+            delivery_verified = True
+        elif path.startswith("/work/") and isinstance(payload, dict) and payload.get("receipt_url"):
+            reported_price = float(payload.get("price_usd") or 0)
+            self._verify_receipt(
+                payload, path=path, price_usd=reported_price, settlement=None,
+                require_paid=bool(reported_price and not self.api_key), require_settlement=False)
+            delivery_verified = True
+        if delivery_verified and isinstance(payload, dict):
+            try:
+                self._identity_result_put(idempotency_key, path, body, payload)
+            except OSError as exc:
+                raise PaymentUncertain(
+                    "delivery verified, but its durable idempotency result could not be stored; "
+                    "do not authorize another payment",
+                    path=path, idempotency_key=idempotency_key, billed=bool(authorized_price)) from exc
+            self._record({
+                "kind": "delivery_verified", "path": path, "price_usd": authorized_price,
+                "idempotency_key": idempotency_key, "receipt_url": payload.get("receipt_url"),
+                "settled": False, "outcome": "delivered",
+            })
+            self._release_identity(claim_id, "delivered")
         if key and isinstance(payload, dict):
             self._cache_put(key, path, payload)
             payload = {**payload, "router": {"cache": "miss", "ttl_seconds": self.cache_ttl}}
@@ -665,7 +1200,8 @@ class Router:
 
     # ---- the same job over A2A ------------------------------------------------
 
-    def a2a(self, skill: str, arguments: Any = None, *, use_cache: bool = True) -> dict:
+    def a2a(self, skill: str, arguments: Any = None, *, use_cache: bool = True,
+            idempotency_key: Optional[str] = None) -> dict:
         """Buy one skill through the node's A2A endpoint (JSON-RPC SendMessage
         at /a2a, A2A 1.0) and return the delivered body -- the same envelope
         `call` returns for the route.
@@ -680,6 +1216,11 @@ class Router:
         """
         path = self.route_for(skill)
         body = arguments if arguments is not None else {}
+        idempotency_key = self._idempotency_key(idempotency_key)
+        self._persist_intent(idempotency_key, path, body)
+        local_replay = self._identity_result_get(idempotency_key, path, body)
+        if local_replay is not None:
+            return local_replay
         key = self.cache_key(path, body) if (use_cache and self.cacheable(path)) else None
         if key:
             hit = self._cache_get(key)
@@ -689,53 +1230,100 @@ class Router:
                     payload = {**payload, "router": {"cache": "hit", "age_seconds": hit["age_seconds"], "ttl_seconds": self.cache_ttl}}
                 return payload
 
-        task = self._a2a_send(path, skill, body)
-        price, settlement = 0.0, None
+        task = self._a2a_send(path, skill, body, idempotency_key=idempotency_key)
+        price, settlement, reservation_id, claim_id = 0.0, None, None, None
         metadata = self._a2a_metadata(task)
         if task["state"] == "TASK_STATE_INPUT_REQUIRED" and metadata.get("x402.payment.status") == "payment-required":
             required = metadata.get("x402.payment.required") or {}
             price = self._price_of_challenge(required)
             if price is None:
                 raise PaymentRefused("the A2A task asked for payment without a readable price", path=path)
-            self._check_caps(price, path)
             # VERIFY: the task's challenge must match the contract (the
             # resource named there is the node's A2A/MCP endpoint, so only
             # the rails are compared) and the body the input schema.
             self._verify_before_signing(path, body, required.get("accepts") or [], None, price)
+            claim_id = self._claim_identity(idempotency_key, path)
+            try:
+                reservation_id = self._reserve(price, path, idempotency_key)
+            except Exception:
+                self._release_identity(claim_id, "reservation_failed")
+                raise
             try:
                 signed = self._sign_challenge(required)
             except RouterError:
+                self._release_reservation(reservation_id, "signing_failed")
+                self._release_identity(claim_id, "signing_failed")
                 raise
             except Exception as exc:
+                self._release_reservation(reservation_id, "signing_failed")
+                self._release_identity(claim_id, "signing_failed")
                 raise PaymentRefused(f"could not sign the payment: {type(exc).__name__}: {str(exc)[:160]}", path=path, price_usd=price)
-            task = self._a2a_send(path, skill, body, task_id=task["id"], payment=signed)
+            try:
+                task = self._a2a_send(path, skill, body, task_id=task["id"], payment=signed,
+                                      idempotency_key=idempotency_key)
+            except Exception as exc:
+                self._record_uncertain(idempotency_key, path, price, reservation_id)
+                raise PaymentUncertain(
+                    "the paid A2A request lost its response; do not authorize another payment",
+                    path=path, price_usd=price, idempotency_key=idempotency_key) from exc
             metadata = self._a2a_metadata(task)
             if metadata.get("x402.payment.status") in ("payment-failed", "payment-rejected") \
                     or task["state"] == "TASK_STATE_INPUT_REQUIRED":
+                self._release_reservation(reservation_id, "refused")
+                self._release_identity(claim_id, "refused")
                 self._record({"path": path, "price_usd": price, "rail": self.rail, "settled": False,
-                              "outcome": "refused", "detail": task["text"][:200], "transport": "a2a"})
+                              "outcome": "refused", "detail": task["text"][:200], "transport": "a2a",
+                              "idempotency_key": idempotency_key})
                 raise PaymentRefused(f"payment refused: {task['text'][:200]}", path=path, price_usd=price)
             receipts = metadata.get("x402.payment.receipts") or []
             settlement = receipts[0] if receipts and isinstance(receipts[0], dict) else None
 
         if task["state"] != "TASK_STATE_COMPLETED":
+            if reservation_id:
+                self._record_uncertain(idempotency_key, path, price, reservation_id)
+                raise PaymentUncertain(
+                    f"A2A task {task['state']} after payment authorization; billing is uncertain",
+                    path=path, task_id=task["id"], idempotency_key=idempotency_key)
             raise Upstream(f"A2A task {task['state']}: {task['text'][:200]}", path=path,
                            http_status=502, billed=False, task_id=task["id"])
         payload = task["data"] if task["data"] is not None else {"status": "ok", "text": task["text"]}
+        delivery_verified = False
         if price:
-            with self._lock:
-                self._spent_usd += price
-            self._record({"path": path, "price_usd": price, "rail": self.rail, "settled": True,
-                          "tx": (settlement or {}).get("transaction"), "payer": (settlement or {}).get("payer"),
-                          "receipt_url": payload.get("receipt_url") if isinstance(payload, dict) else None,
-                          "transport": "a2a", "task_id": task["id"]})
+            self._commit_reservation(reservation_id, {
+                "path": path, "rail": self.rail,
+                "tx": (settlement or {}).get("transaction"), "payer": (settlement or {}).get("payer"),
+                "receipt_url": payload.get("receipt_url") if isinstance(payload, dict) else None,
+                "transport": "a2a", "task_id": task["id"], "idempotency_key": idempotency_key,
+            })
+            self._verify_receipt(payload, path=path, price_usd=price, settlement=settlement)
+            delivery_verified = True
+        elif isinstance(payload, dict) and payload.get("receipt_url"):
+            reported_price = float(payload.get("price_usd") or 0)
+            self._verify_receipt(
+                payload, path=path, price_usd=reported_price, settlement=None,
+                require_paid=bool(reported_price and not self.api_key), require_settlement=False)
+            delivery_verified = True
+        if delivery_verified and isinstance(payload, dict):
+            try:
+                self._identity_result_put(idempotency_key, path, body, payload)
+            except OSError as exc:
+                raise PaymentUncertain(
+                    "delivery verified, but its durable idempotency result could not be stored; "
+                    "do not authorize another payment",
+                    path=path, idempotency_key=idempotency_key, billed=bool(price)) from exc
+            self._record({
+                "kind": "delivery_verified", "path": path, "price_usd": price,
+                "idempotency_key": idempotency_key, "receipt_url": payload.get("receipt_url"),
+                "transport": "a2a", "settled": False, "outcome": "delivered",
+            })
+            self._release_identity(claim_id, "delivered")
         if key and isinstance(payload, dict):
             self._cache_put(key, path, payload)
             payload = {**payload, "router": {"cache": "miss", "ttl_seconds": self.cache_ttl}}
         return payload
 
     def _a2a_send(self, path: str, skill: str, arguments: Any, *, task_id: Optional[str] = None,
-                  payment: Optional[dict] = None) -> dict:
+                  payment: Optional[dict] = None, idempotency_key: Optional[str] = None) -> dict:
         """One SendMessage; the task it returns, flattened to id, state, text,
         metadata and the first artifact's data."""
         message: dict = {"messageId": f"m-{int(time.time() * 1000)}", "role": "ROLE_USER",
@@ -746,6 +1334,8 @@ class Router:
             message["metadata"] = {"x402.payment.status": "payment-submitted", "x402.payment.payload": payment}
         headers = {"Content-Type": "application/json", "A2A-Version": _A2A_VERSION,
                    "A2A-Extensions": _A2A_X402_EXTENSION, **self._headers()}
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
         response = self._http.post(self.base_url + "/a2a", headers=headers, json={
             "jsonrpc": "2.0", "id": message["messageId"], "method": "SendMessage",
             "params": {"message": message}})
@@ -918,8 +1508,12 @@ def serve(router: Router, host: str = "127.0.0.1", port: int = 8402) -> None:
                     if not isinstance(body, dict) or not isinstance(body.get("skill"), str):
                         return self._send(400, {"status": "error", "reason": "invalid_request",
                                                 "detail": 'body must be {"skill": "<name>", "arguments": {...}}'})
-                    return self._send(200, router.a2a(body["skill"], body.get("arguments") or {}, use_cache=use_cache))
-                return self._send(200, router.call(path, body, use_cache=use_cache))
+                    return self._send(200, router.a2a(
+                        body["skill"], body.get("arguments") or {}, use_cache=use_cache,
+                        idempotency_key=self.headers.get("Idempotency-Key")))
+                return self._send(200, router.call(
+                    path, body, use_cache=use_cache,
+                    idempotency_key=self.headers.get("Idempotency-Key")))
             except CapExceeded as exc:
                 return self._send(402, exc.as_json())
             except VerificationFailed as exc:
@@ -928,6 +1522,12 @@ def serve(router: Router, host: str = "127.0.0.1", port: int = 8402) -> None:
                 return self._send(503, exc.as_json())
             except PaymentRefused as exc:
                 return self._send(402, exc.as_json())
+            except PendingJob as exc:
+                return self._send(202, exc.as_json())
+            except PaymentUncertain as exc:
+                return self._send(409, exc.as_json())
+            except ReceiptVerificationFailed as exc:
+                return self._send(502, exc.as_json())
             except Upstream as exc:
                 return self._send(int(exc.extra.get("http_status") or 502), exc.as_json())
             except RouterError as exc:
