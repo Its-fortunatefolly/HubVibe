@@ -29,12 +29,22 @@ def test_workflow_is_valid_inactive_json_with_unique_nodes():
     workflow = _workflow()
     names = [node["name"] for node in workflow["nodes"]]
     ids = [node["id"] for node in workflow["nodes"]]
+    executable = [
+        node for node in workflow["nodes"]
+        if node["type"] != "n8n-nodes-base.stickyNote"
+    ]
+    notes = [
+        node for node in workflow["nodes"]
+        if node["type"] == "n8n-nodes-base.stickyNote"
+    ]
 
     assert workflow["name"] == "HubVibe recurring site audit"
     assert workflow["active"] is False
     assert workflow["settings"]["timezone"] == "UTC"
-    assert len(names) == len(set(names)) == 5
-    assert len(ids) == len(set(ids)) == 5
+    assert len(names) == len(set(names)) == 8
+    assert len(ids) == len(set(ids)) == 8
+    assert len(executable) == 5
+    assert len(notes) == 3
 
 
 def test_manual_and_daily_triggers_converge_on_one_purchase_path():
@@ -144,6 +154,41 @@ def test_success_requires_the_delivered_audit_shape():
     ]
 
 
+def test_template_notes_meet_current_n8n_submission_shape():
+    workflow = _workflow()
+    notes = {
+        node["name"]: node
+        for node in workflow["nodes"]
+        if node["type"] == "n8n-nodes-base.stickyNote"
+    }
+
+    overview = notes["Overview and setup"]
+    content = overview["parameters"]["content"]
+    word_count = len(re.findall(r"\b[\w$.-]+\b", content))
+    assert overview["parameters"]["color"] == 1  # n8n yellow
+    assert 100 <= word_count <= 300
+    assert "### How it works" in content
+    assert "### Setup" in content
+    assert "### Customization" in content
+    assert "X-API-Key" in content
+    assert "$0.15" in content
+    assert "missing or invalid credential cannot purchase" in content
+
+    sections = [
+        notes["Configure and trigger section"],
+        notes["Purchase and validation section"],
+    ]
+    for section in sections:
+        section_content = section["parameters"]["content"]
+        assert section["parameters"]["color"] == 7  # n8n neutral/white
+        assert section_content.startswith("## ")
+        assert len(re.findall(r"\b[\w$.-]+\b", section_content)) < 50
+
+    assert overview["position"][0] + overview["parameters"]["width"] <= sections[0]["position"][0]
+    assert sections[0]["position"][0] + sections[0]["parameters"]["width"] <= sections[1]["position"][0]
+    assert all(note["name"] not in workflow["connections"] for note in notes.values())
+
+
 def test_guide_documents_credential_setup_activation_cost_and_unknown_outcomes():
     guide = GUIDE_PATH.read_text(encoding="utf-8")
 
@@ -157,6 +202,8 @@ def test_guide_documents_credential_setup_activation_cost_and_unknown_outcomes()
         "new execution has a new purchase identity",
         "n8n-recurring-audit/1.0",
         "no analytics service",
+        "Daily production storefront check",
+        "Creator Dashboard",
     ):
         assert required in guide
 

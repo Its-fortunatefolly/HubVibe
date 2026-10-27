@@ -56,6 +56,22 @@ The final Code node rejects an HTTP response unless it contains the delivered
 audit shape (`status: "ok"` and a boolean `pass`). This prevents a malformed or
 partial response from appearing as a successful workflow execution.
 
+## Example: Daily production storefront check
+
+A small ecommerce team can set **Set site URL** to its public storefront and
+run the bundle every morning before staff begin work. One execution checks the
+rendered page for accessibility violations, missing SEO metadata, unsafe or
+missing security headers, and abnormal page weight or request count. If HubVibe
+does not deliver the documented result shape, the workflow fails at **Require
+delivered result** instead of reporting a successful check.
+
+The team first runs the manual trigger and reviews the findings. It then
+publishes the daily schedule. A Slack, email, or ticketing node can be attached
+after the validation node to route a failed audit to the site owner. The
+default workflow makes at most one $0.15 purchase per execution. Thirty
+successful daily runs cost $4.50 before any n8n operating costs; the prepaid
+balance and chosen schedule define the buyer's total spending limit.
+
 ## Cost examples
 
 These are price calculations, not revenue or profit forecasts:
@@ -96,3 +112,30 @@ pixel, customer identifier, or callback.
 
 The workflow uses only built-in n8n nodes. No community node or new service is
 required.
+
+## n8n template-library submission
+
+The JSON includes the on-canvas documentation currently required by n8n's
+Creator Hub: one yellow 100–300 word overview note and neutral section notes
+for a workflow with four or more executable nodes. Submission is an external
+publication action and is not performed by this repository.
+
+Before submitting:
+
+1. Register or sign in at <https://creators.n8n.io> and read the current
+   Creator Hub guidelines.
+2. Import this JSON into a fresh, current n8n instance.
+3. Create and select a Header Auth credential, set an authorized public URL,
+   and complete one end-to-end manual delivery test. This is a paid $0.15 call
+   and requires separate spending approval.
+4. Confirm the schedule is still unpublished and the workflow remains
+   inactive after the test.
+5. Export the tested workflow again. Remove the selected credential reference,
+   execution data, account names, personal data, and resource identifiers.
+6. Re-import that sanitized JSON into another fresh workflow and repeat the
+   setup instructions without executing another paid call.
+7. In the Creator Dashboard, submit the sanitized JSON for review. n8n reviews
+   it and either publishes it or returns changes by email.
+
+Do not submit the exported file if it contains a credential name or ID. The
+repository version deliberately contains no `credentials` object.
