@@ -290,6 +290,12 @@ Agents shouldn't have to read documentation to use this:
 
 ## Integrations
 
+- **[n8n recurring audit](integrations/n8n/README.md)** — import one inactive
+  workflow, select a prepaid Header Auth credential, test it, and publish a
+  daily or custom schedule. Each successful run buys the existing four-check
+  audit bundle for $0.15. Per-execution idempotency prevents the HTTP node's
+  bounded retry from buying the same delivery twice, and a versioned user-agent
+  makes adoption and repeat purchases measurable in existing records.
 - **[`integrations/hubvibe_router.py`](integrations/hubvibe_router.py)** — the
   **v1.3.0** buyer-side gateway: an agent runs it on its own machine, points HTTP calls at
   `http://127.0.0.1:8402/work/...`, and the router clears each 402 by signing

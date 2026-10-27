@@ -1,0 +1,178 @@
+{
+  "name": "HubVibe recurring site audit",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "4c4df5a4-7fd7-4f57-88a4-2faf065e7042",
+      "name": "Test workflow manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "ca67d13a-64f8-4cbc-9f1b-25eddf407313",
+      "name": "Run daily at 09:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -640,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc707e0c-b817-4e71-9808-c0b60e9a25dc",
+              "name": "url",
+              "value": "https://example.com",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7fae7b65-54bb-435a-96f3-4f282762383d",
+      "name": "Set site URL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -400,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hubvibe-io.com/audit/bundle",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "hubvibe-n8n-recurring-audit/1.0"
+            },
+            {
+              "name": "X-HubVibe-Integration",
+              "value": "n8n-recurring-audit/1.0"
+            },
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ 'n8n-audit:' + $workflow.id + ':' + $execution.id + ':' + $json.url }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ url: $json.url }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "641863ea-0dd3-4085-bf8e-9551e60fb6ed",
+      "name": "Buy HubVibe audit bundle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.status !== 'ok' || typeof result.pass !== 'boolean') {\n  throw new Error('HubVibe did not return a delivered audit result; review the HTTP node response before retrying.');\n}\nreturn [{ json: result }];"
+      },
+      "id": "9610b6c5-5b55-44cb-8f1a-13d84e5fc19d",
+      "name": "Require delivered result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        60
+      ]
+    }
+  ],
+  "connections": {
+    "Test workflow manually": {
+      "main": [
+        [
+          {
+            "node": "Set site URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run daily at 09:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Set site URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set site URL": {
+      "main": [
+        [
+          {
+            "node": "Buy HubVibe audit bundle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buy HubVibe audit bundle": {
+      "main": [
+        [
+          {
+            "node": "Require delivered result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "versionId": "3168d6bb-610d-4378-b5fc-789898078c3c",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
