@@ -116,6 +116,54 @@
         120,
         60
       ]
+    },
+    {
+      "parameters": {
+        "content": "### How it works\nThis workflow gives website operations teams a repeatable daily check of one public production or staging site. A manual trigger verifies the setup before activation, and the schedule defaults to 09:00 UTC. One request buys HubVibe's existing audit bundle, which checks accessibility, SEO, security headers, and page performance. The final node accepts only a delivered `status: ok` result with a boolean `pass`; incomplete responses fail visibly.\n\n### Setup\nCreate a Header Auth credential with header name `X-API-Key` and your HubVibe prepaid key. Select it in **Buy HubVibe audit bundle**, replace `https://example.com` in **Set site URL**, and fund only the prepaid credit you authorize. Each delivered bundle costs $0.15, and one execution can buy at most one bundle. Run the manual test, inspect the findings, and publish only when ready to enable the schedule. The imported workflow stays inactive, and a missing or invalid credential cannot purchase.\n\n### Customization\nChange the schedule to match your review cadence. Add Slack, email, or ticketing after the validation node if your team needs an alert or remediation task.",
+        "height": 440,
+        "width": 850,
+        "color": 1
+      },
+      "id": "8f3d4f06-7fa6-4ed2-baa0-e6a0e455b77d",
+      "name": "Overview and setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1580,
+        -540
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Configure and trigger\nSet one public site URL, test manually, then publish to enable the daily schedule. The imported workflow is inactive.",
+        "height": 400,
+        "width": 480,
+        "color": 7
+      },
+      "id": "b7c8c7e2-37c7-4ed4-9e59-3ae2c044f9d6",
+      "name": "Configure and trigger section",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Purchase and validate one audit\nOne execution calls the fixed $0.15 bundle once. A stable idempotency key protects its bounded retry; incomplete responses fail the workflow.",
+        "height": 400,
+        "width": 620,
+        "color": 7
+      },
+      "id": "a0af3b5f-6f8e-4850-acba-e7e41717b5e5",
+      "name": "Purchase and validation section",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -220,
+        -140
+      ]
     }
   ],
   "connections": {
