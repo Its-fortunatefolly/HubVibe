@@ -43,7 +43,7 @@ regression that caused it** — not in an audit six months later.
 - `fail-on-error: false` keeps our outage from ever blocking your deploy;
   your real regressions still gate it.
 - **$0.15 per PR** for all four checks as one bundle, $0.05 for a single
-  check. A repo merging 100 PRs a month spends $10. No subscription, no seat
+  check. A repo running 100 paid $0.15 bundle audits a month spends $15. No subscription, no seat
   licence, no minimum.
 
 Gate a promotion on it:
