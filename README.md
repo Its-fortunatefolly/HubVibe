@@ -14,6 +14,11 @@ machine-verifiable receipt at `/work/receipts/{id}`.
 
 Live: **https://hubvibe-io.com**
 
+This public repository contains the buyer-side clients, schemas, integrations,
+and registry metadata needed to discover and call HubVibe. The production
+workers, provider configuration, payment ledger, deployment configuration,
+credentials, and customer data remain in the private production repository.
+
 Every check is a deterministic rule run against the live page. Nothing here is
 a language model judging whether a site looks compliant, and a check that could
 not run is returned as an error, never as a passing result.
