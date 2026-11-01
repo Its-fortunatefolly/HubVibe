@@ -1,9 +1,7 @@
 # HubVibe
 
-[![smithery badge](https://smithery.ai/badge/hubvibe/hubvibe)](https://smithery.ai/servers/hubvibe/hubvibe)
-
-**One node, 70 machine-payable jobs, one price per call, one receipt per job.**
-HubVibe sells work to autonomous agents over HTTP 402: 65 workers under
+**One node, 75 machine-payable jobs, one price per call, one receipt per job.**
+HubVibe sells work to autonomous agents over HTTP 402: 70 workers under
 `/work/*` — LLM inference, live web search and page extraction, Base chain
 reads, spot and prediction-market data, BigQuery analysis and forecasting,
 deterministic regression and probability statistics,
@@ -159,15 +157,15 @@ Body is `{"url": "..."}`; `wcag` and `seo` also accept raw `{"html": "..."}`.
 The same payment gate sells a wider catalog beside the audits — each worker
 validated for free before any payment is read, never billed for a call that
 produced no result, with per-provider retries, exponential backoff, failover
-and a circuit breaker behind it. All 65 are in the catalog; every one the node can serve is live on the public node at hubvibe-io.com (`GET /work` lists
+and a circuit breaker behind it. All 70 are in the catalog; every one the node can serve is live on the public node at hubvibe-io.com (`GET /work` lists
 them, free). On any other deployment a worker whose provider is not
 configured is absent, with a specific reason, until it is.
 
 | Worker | Price | Capability |
 |---|---|---|
-| `chain.network` / `chain.address` / `chain.transaction` | $0.02–0.05 | Base mainnet reads: block/gas, address report, transaction + receipt |
+| `chain.network` / `chain.address` / `chain.transaction` | $0.05–0.10 | Base mainnet reads: block/gas, address report, transaction + receipt |
 | `chain.rpc` | $0.05 | Generic allowlisted JSON-RPC passthrough on Base |
-| `market.quote` / `market.rates` / `market.ticker` | $0.02 | Coinbase spot price, exchange rates, bid/ask/volume |
+| `market.quote` / `market.rates` / `market.ticker` | $0.10 | Coinbase spot price, exchange rates, bid/ask/volume |
 | `market.prediction` / `prediction.market` / `prediction.events` | $0.05 | Polymarket odds — top-volume, by slug, or by event |
 | `market.stock` / `market.fundamentals` | $0.05 | Live equity quote + daily history (Nasdaq, Yahoo fallback); SEC EDGAR XBRL fundamentals by period |
 | `finance.analytics` | $0.50 | Deterministic trading math: returns, volatility, Sharpe/Sortino, drawdown, VaR/CVaR, beta, SMA/EMA/RSI/Bollinger, Black-Scholes Greeks, Kelly |
@@ -196,7 +194,7 @@ configured is absent, with a specific reason, until it is.
 
 **A worker whose provider is not configured is absent** — no route, no
 price, no tool, no manifest entry — the same rule the payment rails follow.
-`GET /work` (free)
+See `deploy/vps/.env.example` for every provider key. `GET /work` (free)
 lists what is live on this deployment and why anything else is not.
 
 Prices are flat per call and published where the audits' are: the 402
@@ -285,60 +283,89 @@ Agents shouldn't have to read documentation to use this:
 | [`/.well-known/ard.json`](https://hubvibe-io.com/.well-known/ard.json) | Agentic Resource Discovery manifest: one entry per worker and audit, with representative queries |
 | [`/mcp.json`](https://hubvibe-io.com/mcp.json) | MCP tool definitions: every audit and every worker is a tool on [`/mcp`](https://hubvibe-io.com/mcp) |
 | [`/.well-known/agent-card.json`](https://hubvibe-io.com/.well-known/agent-card.json) | A2A Agent Card: the same tools as skills, JSON-RPC at `/a2a` (A2A 1.0 and 0.3), paid with the a2a-x402 extension |
+| [`/discover?q=<intent>`](https://hubvibe-io.com/discover?q=verify+an+email+address) | Free ranked search over the capabilities sold right now: each candidate with its canonical id, path, price, schemas and contract URL; nothing is run or charged. `POST /discover/semantic` (or `/hybrid`) takes `{"query": ...}` in a body; `POST /discover/vector` is dense only; [`/discover/health`](https://hubvibe-io.com/discover/health) says which methods are live; [`/discover/catalog-version`](https://hubvibe-io.com/discover/catalog-version) changes when the catalog does |
+| [`manifestos/`](manifestos/) | [Vector](manifestos/HUBVIBE_VECTOR_MANIFESTO.md) and [Semantic](manifestos/HUBVIBE_SEMANTIC_MANIFESTO.md) manifestos: every capability with its long-tail asks, organized for retrieval and by job, generated from the node by `scripts/build-manifestos.py`, each embedding the complete A2A card with its SHA-256 |
 | [`/llms.txt`](https://hubvibe-io.com/llms.txt) | Plain-text summary |
 | [`/docs`](https://hubvibe-io.com/docs) | Interactive reference |
 
+The ARD manifest above includes descriptive capability text and long-tail
+`representativeQueries` for each available worker. It is generated from the
+same catalog and contracts as the API, including separate entries for
+`market.signal` and `market.forecast` when available. These are machine-readable
+discovery signals; publication does not establish that an outside agent has
+indexed, embedded or recommended HubVibe.
+
+The same ranking runs on the node (`GET /discover`, `POST /discover/semantic`,
+`/discover/hybrid`, `/discover/vector`) and in the optional
+[buyer-local discovery helper](wcag-audit-engine/integrations/hubvibe_discovery.py),
+which works alongside the buyer router described below. One inventory, three
+methods: BM25 over each capability's text and its published long-tail phrases
+(`sparse_bm25`), local MiniLM vectors (`dense_minilm`; the image ships the
+pinned, checksummed model and loads it at start), and their reciprocal-rank
+fusion (`hybrid_bm25_minilm_rrf`, the default). Every answer names its method
+and `status`: `candidates`, `ambiguous` (the top candidates are too close, ask
+the buyer) or `no_match`. A candidate is never run or charged; the existing
+router still checks the contract, budget and payment when the buyer selects a
+tool. With `recommend=true` (or a `max_price_usd` budget) the answer adds
+`recommended`: the cheapest shown candidate that delivers what the words ask
+for, judged against each capability's declared deliverables (a composite's
+declared component when that suffices, the relevance leader otherwise), with
+its reason and the alternatives; the budget removes dearer candidates from that
+recommendation and never authorizes a purchase; an ambiguous answer recommends
+nothing unless the asked outcomes decide it. Without the flag the answer is the
+ranking alone. Measured results and limits:
+[docs/discovery-validation.md](docs/discovery-validation.md).
+
 ## Integrations
 
-- **[n8n recurring audit](integrations/n8n/README.md)** — import one inactive
-  workflow, select a prepaid Header Auth credential, test it, and publish a
-  daily or custom schedule. Each successful run buys the existing four-check
-  audit bundle for $0.15. Per-execution idempotency prevents the HTTP node's
-  bounded retry from buying the same delivery twice, and a versioned user-agent
-  makes adoption and repeat purchases measurable in existing records.
-- **[`integrations/hubvibe_router.py`](integrations/hubvibe_router.py)** — the
-  **v1.3.0** buyer-side gateway: an agent runs it on its own machine, points HTTP calls at
+In [`wcag-audit-engine/integrations/`](wcag-audit-engine/integrations/):
+
+- **`mcp_server.py`** — MCP server exposing all five audits as tools, built on
+  the official SDK. Standalone, with its own `mcp_requirements.txt`: the `mcp`
+  package needs a newer Starlette than the deployed service pins for FastAPI,
+  so it is deliberately kept out of the service's dependency tree.
+- **`langchain_tool.py`** — LangChain tool wrapper. Subscription key only; it
+  raises on a 402 rather than paying.
+- **`hubvibe_router.py`** — the buyer-side gateway, in the shape of BlockRun's
+  ClawRouter: an agent runs it on its own machine, points HTTP calls at
   `http://127.0.0.1:8402/work/...`, and the router clears each 402 by signing
   with the agent's own wallet (USDC on Base or on Solana, key never leaves the
   machine), retries, and returns the result. Analytical routes (`/work/data/*`,
   `/work/stats/*`) are cached locally for 24 hours so a loop pays once per
-  distinct query. Atomic per-call, per-process and per-day reservations prevent
-  concurrent agents from spending past a shared cap. Durable idempotency,
-  settlement and delivery-receipt verification, and explicit composite-plan
-  authorization prevent unsafe retries and duplicate component purchases.
-  Walletless agents can discover, quote and verify for free; a paid call without
-  a configured wallet or prepaid key fails closed. See the
-  **[installation and agent adoption guide](docs/buyer-router.md)**.
-  `python integrations/hubvibe_router.py quote|call|verify|serve|status|ledger`.
-  As a library (the wallet comes from `HUBVIBE_WALLET_KEY` /
-  `HUBVIBE_SOLANA_KEY` or the key files, never from code):
+  distinct query. Per-call, per-process and per-day caps refuse before any
+  signature exists. `python hubvibe_router.py quote|call|serve|status|ledger`.
+  As a library, an agent copies this (the wallet comes from
+  `HUBVIBE_WALLET_KEY` / `HUBVIBE_SOLANA_KEY` or the key files, never from code):
 
   ```python
-  from integrations.hubvibe_router import HubVibeRouter
+  from hubvibe_router import HubVibeRouter
   client = HubVibeRouter(endpoint="https://hubvibe-io.com", wallet_type="base")
-  response = client.execute_task(
-      tool="stats.probability",
-      payload={...},
-      idempotency_key="agent-42:probability:job-781",
-  )
+  response = client.execute_task(tool="stats.probability", payload={...})
   ```
-- **[`action.yml`](action.yml)** — the GitHub Action (`uses: Its-fortunatefolly/HubVibe@v1`).
+- **`hubvibe_tollbooth.py`** — the client for agents running unattended. Same
+  audits, but it settles the 402 itself from an EVM wallet via x402, so no
+  human has to go get a key. Enforces a per-call cap **and** a
+  process-lifetime budget, both before anything is signed — an autonomous
+  loop with an unbounded wallet is a drained wallet. Exposes LangChain/CrewAI
+  tools via `hubvibe_tools()`.
+- **`github_action.yml`** — a complete, copyable workflow file. It *calls* the
+  published action rather than curl-ing the API: a hand-rolled HTTP step has
+  to re-implement the retry policy, the 4xx no-retry rule and the JSON
+  encoding of the target URL, and then be maintained against the API by
+  whoever pasted it. One file, one URL to edit, `on: push` and
+  `on: pull_request`.
+
+At the repo root:
+
+- **`action.yml`** — the composite GitHub Action, and the single copy of it.
   It retries transient failures but never a 4xx (repeating a 402 on a metered
   endpoint risks paying twice for one answer), renders findings into the job
   summary via `scripts/render_audit_summary.py`, and can be adopted with
   `fail-on-error: false` so an outage in this service cannot block someone
   else's deploys.
-- **Claude Code plugin** — `/plugin marketplace add Its-fortunatefolly/HubVibe`,
-  then install `hubvibe` ([`plugins/hubvibe`](plugins/hubvibe)).
-- **Gemini CLI extension** — `gemini extensions install https://github.com/Its-fortunatefolly/HubVibe`
-  ([`gemini-extension.json`](gemini-extension.json)).
-- **MCP registry** — [`server.json`](server.json), listed as `io.github.Its-fortunatefolly/hubvibe`;
-  the server itself is `https://hubvibe-io.com/mcp`.
-- **[`integrations/hubvibe_tollbooth.py`](integrations/hubvibe_tollbooth.py)** — the client for agents
-  running unattended: it settles the 402 itself from an EVM wallet via x402, with a per-call cap
-  **and** a process-lifetime budget enforced before anything is signed. Exposes LangChain/CrewAI
-  tools via `hubvibe_tools()`.
-- **[`glama.json`](glama.json)** — listing metadata for the Glama MCP directory.
+- **`scripts/publish-action-repo.sh`** — generates the standalone repo the
+  Marketplace listing needs (see below).
+- **`glama.json`** — listing metadata for the Glama MCP directory.
 
 ## For people, not pipelines
 
@@ -347,6 +374,109 @@ subscriptions or human plans (retired 2026-09-06). A person can pay the same
 per-call rates through a $0.50 prepaid block where the MPP top-up rail is live.
 There is deliberately **no free scan**: an audit costs a real browser page
 load, so giving them away funds strangers' compute and invites abuse.
+
+## Publishing the GitHub Action
+
+Two separate things, with different rules:
+
+**Direct use works today.** An `action.yml` at a public repo's root is usable
+as-is, no Marketplace involved:
+
+```yaml
+- uses: Its-fortunatefolly/HubVibe@v1
+  with:
+    url: https://your-site.example.com
+    wallet-key: ${{ secrets.HUBVIBE_WALLET_KEY }}
+```
+
+**A Marketplace listing needs a different repo.** GitHub requires an action
+repository to contain a single root `action.yml` *and no workflow files at
+all*. This repo has `.github/workflows/`, so it can never be listed itself —
+moving `action.yml` around does not help. Generate the clean standalone repo
+instead:
+
+```bash
+bash scripts/publish-action-repo.sh /tmp/hubvibe-audit-action
+```
+
+It copies `action.yml` and the summary renderer verbatim (so the published
+action cannot drift from the one in this repo), writes a listing README, and
+prints the exact push/tag/publish steps.
+
+## Publishing to the MCP registry
+
+`server.json` in this repo root registers the live `/mcp` endpoint as a
+**remote** server, so no package needs publishing anywhere.
+
+`mcp-publisher` is a Go binary from the registry's GitHub releases — it is
+**not** on npm (the `mcp-publisher` package on npm is an unrelated
+browser-automation tool):
+
+```bash
+curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" \
+  | tar xz mcp-publisher
+./mcp-publisher login github     # opens a browser; proves you own the namespace
+./mcp-publisher publish
+```
+
+The `name` field is `io.github.its-fortunatefolly/hubvibe`, which the GitHub
+login authenticates against. `server.json` is validated against the official
+schema (note: `description` is capped at 100 characters).
+
+**Bump `version` before every publish.** The registry treats a version as
+immutable and rejects a re-publish of one it already serves, so a corrected
+`server.json` left at its old version fails at the last step — after the
+browser login, which is the most annoying place to find out. Check what is
+actually live first; the registry is public and needs no auth:
+
+```bash
+curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=hubvibe"
+```
+
+Correcting text without bumping the version is the trap: the file reads
+right in the repo, the registry keeps serving the old copy, and nothing
+reports a problem. On 2026-08-11 the registry took 1.1.0 whose header still
+read "pay per call with x402/MPP"; the repo dropped that rail assertion the
+same week, and the two stayed out of sync because a republish of 1.1.0 could
+never have landed.
+
+## Repository layout
+
+```
+wcag-audit-engine/        the audit service (this is the product)
+  app/                    FastAPI app, audit engines, payment rails
+  integrations/           MCP server, LangChain tool, GitHub Action
+scripts/verify-live.sh    verifies a deployed node from outside
+scripts/simulate-paid-call.py
+                          the whole x402 paid path, locally, for free
+scripts/first-paid-call.sh
+                          the same paid path against the live node, for $0.05
+scripts/payment-status.sh what the money is doing: wallet balances, live 402, verdict
+scripts/vps-install.sh    the whole service on any flat-rate box, one command
+deploy/vps/               compose + Caddy TLS + SQLite key store (no Google)
+tests/
+```
+
+## Running the tests
+
+```bash
+pip install -r requirements.txt
+pytest tests/ -q
+```
+
+`scripts/verify-live.sh` checks a *deployed* node end to end — service up, the
+whole discovery surface, every paid route answering 402 rather than 404, and
+that the 402 is actually machine-actionable. Green unit tests do not prove a
+deploy; this does.
+
+`scripts/simulate-paid-call.py` proves the paid path itself without spending
+anything: it boots the real service with the live x402 configuration against
+a stub facilitator that recovers the EIP-712 signer from every payment it is
+sent, then drives it with the real client through `first-paid-call.sh`. It
+checks that verify happens before the audit and settle after it, that the
+Bazaar record rides the payment and passes the x402 validator, and that the
+200 carries the settlement receipt. Needs a Chromium Playwright can launch
+(`python -m playwright install chromium`).
 
 ## Honest limits
 

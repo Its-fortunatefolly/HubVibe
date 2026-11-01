@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Its-fortunatefolly/hubvibe",
-  "title": "HubVibe: Pay-per-Call Agent Tools: Web Search, Email Verify, KYC Screening, Stocks, Crypto, News",
-  "description": "70+ pay-per-call tools for AI agents: web search, email verify, KYC, stocks, crypto, news, data",
-  "version": "1.31.3",
+  "title": "HubVibe: Pay-per-Call Agent Tools: Web Search, Email Verify, Contact Screening, Stocks, Crypto, News",
+  "description": "Pay-per-call agent tools: web search, email verification, contact screening, stocks, crypto and news",
+  "version": "1.32.0",
   "icons": [
     {
       "src": "https://hubvibe-io.com/icon.png",
