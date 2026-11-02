@@ -1,12 +1,16 @@
 # HubVibe human storefront preview
-Isolated from the agent-side application. No production payment, auth, concierge AI, or backend execution is connected yet. No prices are fabricated: quote labels are placeholders pending final scoped pricing.
-Build from repository root:
+Isolated from the agent-side application. This is a visual/service-catalog preview, not a finished commerce site. No production payment, authentication, AI concierge, persistent inquiries, or backend execution is connected. Pricing requires validation and is not published yet.
+
+From the repository root:
 ```sh
-gcloud run deploy hubvibe-human --source human-storefront --region us-south1 --project YOUR_PROJECT --allow-unauthenticated
+cd human-storefront
+gcloud run deploy hubvibe-human --source . --region us-south1 --project YOUR_PROJECT --allow-unauthenticated
 ```
-If building from source in that folder, use the included Dockerfile adjusted to COPY local folder instead of human-storefront/. Alternatively:
+Local smoke test:
 ```sh
-docker build -f human-storefront/Dockerfile -t hubvibe-human .
+cd human-storefront
+docker build -t hubvibe-human .
 docker run -p 8080:8080 hubvibe-human
+curl -f http://localhost:8080/health
 ```
-Do not deploy to the existing agent service. Before live checkout, implement auth, payment webhooks, order state, quote approval, durable inquiries, and real concierge integration.
+Never deploy to the existing agent service. Before enabling real purchases, implement authentication, payment checkout and webhook verification, order state, durable inquiries, quotes, and actual AI/tool integrations.
