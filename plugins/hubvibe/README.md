@@ -1,6 +1,6 @@
 # HubVibe plugin for Claude Code
 
-HubVibe (https://hubvibe-io.com) sells finished work to AI agents and businesses, one price per call. This plugin connects Claude Code to HubVibe's MCP server (`https://hubvibe-io.com/mcp`) and adds a skill that tells Claude which HubVibe tool fits which job. Calls are paid from a prepaid HubVibe credit key.
+HubVibe (https://hubvibe-io.com) sells finished work to AI agents and businesses, one price per call. This plugin connects Claude Code to HubVibe's 75-tool MCP server (`https://hubvibe-io.com/mcp`) and adds a skill that tells Claude which HubVibe tool fits which job. Calls are paid from a prepaid HubVibe credit key.
 
 ## Install
 
@@ -38,21 +38,21 @@ Each tool call is charged from your credit at the tool's listed price. A call th
 | SEO audit | `audit_seo` | $0.05 |
 | Security header audit | `audit_security` | $0.05 |
 | Page speed and page weight audit | `audit_performance` | $0.05 |
-| Email verification | `hubvibe_email_verify` | $0.02 |
+| Email verification | `hubvibe_email_verify` | $0.10 |
 | Company profile | `hubvibe_company_enrich` | $0.05 |
 | Sanctions screening (US, UK and EU lists) | `hubvibe_sanctions_screen` | $0.05 |
-| Identity check (sanctions, email, phone, IP) | `hubvibe_identity_check` | $0.10 |
+| Contact screening (sanctions, email, phone, IP) | `hubvibe_contact_screen` | $0.10 |
 | Web search with sources | `hubvibe_search_web` | $0.10 |
 | Web and news results (SERP) | `hubvibe_search_results` | $0.25 |
 | Web page extraction | `hubvibe_extract_page` | $0.10 |
 | Stock quote and daily history | `hubvibe_market_stock` | $0.05 |
 | SEC-filed fundamentals | `hubvibe_market_fundamentals` | $0.05 |
 | Insider trades (SEC Form 4) | `hubvibe_market_insiders` | $0.10 |
-| Crypto spot price | `hubvibe_market_quote` | $0.02 |
-| Crypto bid and ask | `hubvibe_market_ticker` | $0.02 |
+| Crypto spot price | `hubvibe_market_quote` | $0.10 |
+| Crypto bid and ask | `hubvibe_market_ticker` | $0.10 |
 | Current news, any language | `hubvibe_news_search` | $0.25 |
 
-The server offers more tools than these. Each tool's description in the server's tool list states its price per call, and the `hubvibe_*` tools are also listed with their prices at https://hubvibe-io.com/work (`price_usd`; `hubvibe_lead_qualify` appears there as `lead.qualify`). If a price here ever differs from the server's, the server's price applies.
+The server offers 75 tools; the table highlights common choices. Each tool's description in the server's tool list states its price per call, and the `hubvibe_*` tools are also listed with their prices at https://hubvibe-io.com/work (`price_usd`; `hubvibe_lead_qualify` appears there as `lead.qualify`). If a price here ever differs from the server's, the server's price applies.
 
 ## Update or remove
 
