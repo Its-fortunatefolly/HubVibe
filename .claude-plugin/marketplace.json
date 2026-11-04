@@ -1,6 +1,6 @@
 {
   "name": "hubvibe",
-  "description": "HubVibe's pay-per-call tools for Claude Code, paid from a prepaid HubVibe credit key.",
+  "description": "HubVibe's 75 pay-per-call services for Claude Code, paid from a prepaid HubVibe credit key.",
   "owner": {
     "name": "HubVibe",
     "email": "hubvibe@hubvibe-io.com",
@@ -10,7 +10,7 @@
     {
       "name": "hubvibe",
       "source": "./plugins/hubvibe",
-      "description": "Qualify a business website as a sales lead, audit websites, verify emails, look up companies, screen sanctions, search the web, read pages, and get stock, SEC, crypto and news data. Each call is charged from your prepaid HubVibe credit."
+      "description": "Use 75 HubVibe tools for website audits, lead and company research, verification, screening, web research, market data, content, and agent work. Each delivered call is charged from your prepaid HubVibe credit."
     }
   ]
 }
