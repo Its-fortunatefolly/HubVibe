@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Its-fortunatefolly/hubvibe",
   "title": "HubVibe: Pay-per-Call Agent Tools: Web Search, Email Verify, Contact Screening, Stocks, Crypto, News",
-  "description": "Pay-per-call agent tools: web search, email verification, contact screening, stocks, crypto and news",
-  "version": "1.32.0",
+  "description": "75 paid agent tools: website audits and research; BM25, MiniLM vector and hybrid discovery are free.",
+  "version": "1.35.0",
   "icons": [
     {
       "src": "https://hubvibe-io.com/icon.png",
@@ -32,7 +32,7 @@
       "headers": [
         {
           "name": "X-API-Key",
-          "description": "Optional prepaid key. Buy one by card at https://hubvibe-io.com/start ($25, $100 or $500 of credit; the key is shown when the payment clears). Without a key, each call is paid over HTTP 402 on the rails in https://hubvibe-io.com/.well-known/agent.json. Tool discovery is free; all 70+ tools and every price are in https://hubvibe-io.com/openapi.json.",
+          "description": "Optional prepaid key from https://hubvibe-io.com/start. MCP tool discovery is free. Semantic, vector and hybrid service search is free at https://hubvibe-io.com/discover; the linked repository includes retrieval manifestos and the contract-verifying buyer client. Without a key, paid calls return a machine-readable payment challenge. Live tools, prices and payment methods: https://hubvibe-io.com/.well-known/agent.json.",
           "isRequired": false,
           "isSecret": true
         }

@@ -300,38 +300,20 @@ same catalog and contracts as the API, including separate entries for
 discovery signals; publication does not establish that an outside agent has
 indexed, embedded or recommended HubVibe.
 
-The same ranking runs on the node (`GET /discover`, `POST /discover/semantic`,
-`/discover/hybrid`, `/discover/vector`) and in the optional
-[buyer-local discovery helper](wcag-audit-engine/integrations/hubvibe_discovery.py),
-which works alongside the buyer router described below. One inventory, three
-methods: BM25 over each capability's text and its published long-tail phrases
-(`sparse_bm25`), local MiniLM vectors (`dense_minilm`; the image ships the
-pinned, checksummed model and loads it at start), and their reciprocal-rank
-fusion (`hybrid_bm25_minilm_rrf`, the default). Every answer names its method
-and `status`: `candidates`, `ambiguous` (the top candidates are too close, ask
-the buyer) or `no_match`. A candidate is never run or charged; the existing
-router still checks the contract, budget and payment when the buyer selects a
-tool. With `recommend=true` (or a `max_price_usd` budget) the answer adds
-`recommended`: the cheapest shown candidate that delivers what the words ask
-for, judged against each capability's declared deliverables (a composite's
-declared component when that suffices, the relevance leader otherwise), with
-its reason and the alternatives; the budget removes dearer candidates from that
-recommendation and never authorizes a purchase; an ambiguous answer recommends
-nothing unless the asked outcomes decide it. Without the flag the answer is the
-ranking alone. Measured results and limits:
-[docs/discovery-validation.md](docs/discovery-validation.md).
+The node provides lexical BM25, dense MiniLM vector and hybrid reciprocal-rank
+fusion over one live catalog. Every answer names its method and reports
+`candidates`, `ambiguous` (the buyer must choose) or `no_match`. Discovery never
+runs or charges for a tool. After selection, the public
+[buyer client](integrations/hubvibe_router.py) verifies the live contract,
+budget and payment before execution. The current model and method readiness are
+always machine-readable at
+[`/discover/health`](https://hubvibe-io.com/discover/health).
 
 ## Integrations
 
-In [`wcag-audit-engine/integrations/`](wcag-audit-engine/integrations/):
+In [`integrations/`](integrations/):
 
-- **`mcp_server.py`** — MCP server exposing all five audits as tools, built on
-  the official SDK. Standalone, with its own `mcp_requirements.txt`: the `mcp`
-  package needs a newer Starlette than the deployed service pins for FastAPI,
-  so it is deliberately kept out of the service's dependency tree.
-- **`langchain_tool.py`** — LangChain tool wrapper. Subscription key only; it
-  raises on a 402 rather than paying.
-- **`hubvibe_router.py`** — the buyer-side gateway, in the shape of BlockRun's
+- **[`hubvibe_router.py`](integrations/hubvibe_router.py)** — the buyer-side gateway, in the shape of BlockRun's
   ClawRouter: an agent runs it on its own machine, points HTTP calls at
   `http://127.0.0.1:8402/work/...`, and the router clears each 402 by signing
   with the agent's own wallet (USDC on Base or on Solana, key never leaves the
@@ -347,19 +329,12 @@ In [`wcag-audit-engine/integrations/`](wcag-audit-engine/integrations/):
   client = HubVibeRouter(endpoint="https://hubvibe-io.com", wallet_type="base")
   response = client.execute_task(tool="stats.probability", payload={...})
   ```
-- **`hubvibe_tollbooth.py`** — the client for agents running unattended. Same
+- **[`hubvibe_tollbooth.py`](integrations/hubvibe_tollbooth.py)** — the client for agents running unattended. Same
   audits, but it settles the 402 itself from an EVM wallet via x402, so no
   human has to go get a key. Enforces a per-call cap **and** a
   process-lifetime budget, both before anything is signed — an autonomous
   loop with an unbounded wallet is a drained wallet. Exposes LangChain/CrewAI
   tools via `hubvibe_tools()`.
-- **`github_action.yml`** — a complete, copyable workflow file. It *calls* the
-  published action rather than curl-ing the API: a hand-rolled HTTP step has
-  to re-implement the retry policy, the 4xx no-retry rule and the JSON
-  encoding of the target URL, and then be maintained against the API by
-  whoever pasted it. One file, one URL to edit, `on: push` and
-  `on: pull_request`.
-
 At the repo root:
 
 - **`action.yml`** — the composite GitHub Action, and the single copy of it.
