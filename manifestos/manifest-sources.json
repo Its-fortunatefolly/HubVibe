@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-11-06T12:00:51Z",
+  "base": "https://hubvibe-io.com",
+  "node_version": "1.35.0",
+  "capabilities": 75,
+  "unavailable": [
+    "travel.flights",
+    "travel.hotels"
+  ],
+  "capabilities_without_phrases": [],
+  "card_sha256": "9cf884a3d60e3d5152cd26a78a3145c3798a63fd081b540caf4f7a614876cd44",
+  "sources": {
+    "/work": {
+      "sha256": "7f26f29904cbb906e79ffe2fdee2f0cf6d0452ce55a4fc0ae68ac9bcad178450",
+      "bytes": 399290
+    },
+    "/contracts": {
+      "sha256": "96c1a4f90f3fa7327a2f440651e890ebadf76179bb3f64adc241528b7e71f907",
+      "bytes": 20871
+    },
+    "/.well-known/ard.json": {
+      "sha256": "b9a80c0a49d974ef439db1a2ba5a5a2fa40666f936335da166ef276d6fee5920",
+      "bytes": 505507
+    },
+    "/.well-known/agent-card.json": {
+      "sha256": "9cf884a3d60e3d5152cd26a78a3145c3798a63fd081b540caf4f7a614876cd44",
+      "bytes": 69328
+    },
+    "/contracts/audit.wcag": {
+      "sha256": "b28ae00de4ed9d5fb8b1d16ff9321fe34c75ddce8e552bf1a87147ce04e22d02",
+      "bytes": 5704
+    },
+    "/contracts/audit.seo": {
+      "sha256": "e966d1cc59355f489d499d117c0243b96f48fa69135e42f051cc7ddf0460fed4",
+      "bytes": 5582
+    },
+    "/contracts/audit.security": {
+      "sha256": "534d17007649db9828d3943ae682073b012dc89435bb0b3cbba55a7c276988ca",
+      "bytes": 5514
+    },
+    "/contracts/audit.performance": {
+      "sha256": "e211889be24e234a48562503d7c797a80ed90ac6fa773f2de10d23ac2e98c7b0",
+      "bytes": 5680
+    },
+    "/contracts/audit.bundle": {
+      "sha256": "fbfcc966638bc53ae864a9fee82539ea56434157e86862a1220d687676a3327c",
+      "bytes": 8051
+    }
+  }
+}
