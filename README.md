@@ -14,6 +14,12 @@ machine-verifiable receipt at `/work/receipts/{id}`.
 
 Live: **https://hubvibe-io.com**
 
+Building an agent platform? HubVibe also delivers [custom agent discovery and
+purchasing infrastructure](https://hubvibe-io.com/services): lexical,
+semantic, vector and hybrid catalog routers, MCP/A2A integration, verifiable
+receipts, idempotency, spend limits and anti-loop controls. This is scoped
+professional work, separate from the pay-per-call tools below.
+
 This public repository contains the buyer-side clients, schemas, integrations,
 and registry metadata needed to discover and call HubVibe. The production
 workers, provider configuration, payment ledger, deployment configuration,
@@ -347,13 +353,16 @@ At the repo root:
   Marketplace listing needs (see below).
 - **`glama.json`** — listing metadata for the Glama MCP directory.
 
-## For people, not pipelines
+## For people and businesses
 
-The machine API is the product, and per call is the only price: there are no
-subscriptions or human plans (retired 2026-09-06). A person can pay the same
-per-call rates through a $0.50 prepaid block where the MPP top-up rail is live.
-There is deliberately **no free scan**: an audit costs a real browser page
-load, so giving them away funds strangers' compute and invites abuse.
+The machine API remains pay per call with no subscription. Separately,
+[professional services](https://hubvibe-io.com/services) provide written scope
+and a project quote before checkout for website intelligence, accessibility
+work, company research, custom AI systems, and agent discovery routers with
+receipts and purchasing controls. Human project payments are separate from API
+credits and wallet rails. There is deliberately **no free scan**: an audit
+costs a real browser page load, so giving them away funds strangers' compute
+and invites abuse.
 
 ## Publishing the GitHub Action
 
